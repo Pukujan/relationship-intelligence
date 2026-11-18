@@ -47,6 +47,29 @@ A teammate can sign into the shared app, connect only their own research account
 
 No implementation checkpoint yet.
 
+### 2026-11-18 04:55:28 UTC — dsh-lead
+
+<!-- continuity:checkpoint {"agent":"dsh-lead","blocked":[],"changed":["Project contract, team collection plan, issue #9, task and handoff, and browser-renderable design diagrams."],"completed":["Replaced CSV-first intake with a durable multi-user authenticated collection plan before application code landed."],"decisions":["Each teammate owns their source sessions; private mail/calendar observations require explicit publication."],"evidence":["Issue #9 supersedes #2/#3; the team plan defines individual Google/Octo identities, per-principal TinyFish sessions, private/shared workspaces, and resumable source tasks. Planning and continuity validation pass."],"next_action":"Implement the authenticated shell and per-principal source connection and plan schema, then verify a saved LinkedIn session for the first collector run.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0001","timestamp":"2026-11-18T04:55:28Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"84198c4cd5f1521cdb1c998c827610d5064d780f20778cb6330ccbd16512d92b","request_id":"ri-auth-plan-20261118","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0001"} -->
+
+Completed:
+- Replaced CSV-first intake with a durable multi-user authenticated collection plan before application code landed.
+
+Evidence:
+- Issue #9 supersedes #2/#3; the team plan defines individual Google/Octo identities, per-principal TinyFish sessions, private/shared workspaces, and resumable source tasks. Planning and continuity validation pass.
+
+Decisions:
+- Each teammate owns their source sessions; private mail/calendar observations require explicit publication.
+
+Changed:
+- Project contract, team collection plan, issue #9, task and handoff, and browser-renderable design diagrams.
+
+Blocked/uncertain:
+- none
+
+Next:
+- Implement the authenticated shell and per-principal source connection and plan schema, then verify a saved LinkedIn session for the first collector run.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → the collection/team plan before implementation.
