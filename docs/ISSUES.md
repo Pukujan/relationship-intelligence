@@ -11,5 +11,6 @@ Issues are filed in `Pukujan/relationship-intelligence` using the installed OIO 
 | RI-004 | [#5](https://github.com/Pukujan/relationship-intelligence/issues/5) | Slice 003: event participation and sponsor views | 5 |
 | RI-005 | [#6](https://github.com/Pukujan/relationship-intelligence/issues/6) | Slice 004: research queue, agent proposals, approval | 5 |
 | RI-006 | [#7](https://github.com/Pukujan/relationship-intelligence/issues/7) | Slice 005: graph projection, freshness, and path exploration | 5 |
+| RI-007 | [#9](https://github.com/Pukujan/relationship-intelligence/issues/9) | Supersedes #2/#3: Google teammates, isolated TinyFish sessions, durable collector plans | 3 |
 
-Implementation order is RI-001 → RI-002 → RI-003 → RI-004 → RI-005 → RI-006. Later issues are proposals until their slice packets are owner-accepted.
+Implementation begins with RI-007 / issue #9. The CSV-first RI-001/RI-002 scope is superseded; later identity, event, research, and graph slices are re-sequenced by the authenticated collection plan in `docs/COLLECTION-AND-TEAM-PLAN.md`.
