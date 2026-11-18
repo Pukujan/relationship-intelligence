@@ -1,0 +1,21 @@
+{
+  "schema_version": "content-generation.visual-style.v1",
+  "reference_asset": "docs/assets/architecture-overview.svg",
+  "generation_workflow": "built-in image_gen",
+  "narrative_roles": ["hero", "problem", "supporting"],
+  "palette": {
+    "background": "#12141a",
+    "surface": "#f5f5f5",
+    "person": "#ff7b54",
+    "organization": "#4ea8de"
+  },
+  "roles": {
+    "hero": {
+      "purpose": "Show sourced people and organization records connected through an evidence layer."
+    },
+    "supporting": {
+      "purpose": "Explain import, evidence, identity review, and current-profile projection without decorative graph clutter."
+    }
+  },
+  "reject_when": ["unreadable evidence labels", "fabricated profile photographs", "decorative complexity without product meaning", "implied relationships without support"]
+}

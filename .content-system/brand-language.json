@@ -1,0 +1,7 @@
+{
+  "schema_version": "content-generation.brand-language.v1",
+  "name": "Relationship Intelligence",
+  "personality": ["clear", "evidence-led", "practical", "calm"],
+  "promise": "Know who is relevant, how records connect, and what evidence supports the answer.",
+  "avoid": ["surveillance romanticism", "unexplained acronyms", "hype", "unsupported relationship claims", "methodology-heavy product copy"]
+}

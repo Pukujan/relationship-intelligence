@@ -1,0 +1,15 @@
+{
+  "schema_version": "content-generation.asset-manifest.v1",
+  "system_version": "0.5.13",
+  "assets": [
+    {
+      "path": "docs/assets/architecture-overview.svg",
+      "role": "architecture-reference",
+      "orientation": "svg",
+      "dimensions": "960x540",
+      "text_policy": "Plain architecture labels only; no product metrics or fabricated people.",
+      "review": "draft",
+      "source": "Code-authored architecture reference for the planning baseline; not a product execution screenshot."
+    }
+  ]
+}

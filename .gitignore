@@ -2,3 +2,10 @@
 .env.*
 *.log
 __pycache__/
+.venv/
+node_modules/
+dist/
+.playwright/
+playwright-report/
+test-results/
+.DS_Store

@@ -1,0 +1,29 @@
+{
+  "schema_version": "content-generation.project-brief.v2",
+  "project": "Relationship Intelligence",
+  "audience": ["the owner", "collaborators explicitly granted workspace access", "agents using scoped workspace capabilities"],
+  "problem": "People, events, companies, projects, and prior interactions are spread across exports and public sources, making it difficult to find relevant people while preserving evidence and identity accuracy.",
+  "solution": "A private CRM and research workspace on Octo that imports source records, preserves evidence and history, supports identity review, and projects current profiles and relationships.",
+  "evidence": [
+    {
+      "claim": "The proposed product uses Octo's epistemic ledger as canonical fact storage and a thin ABA-generated application as the user interface.",
+      "source": "Project program issue #1 and the owner-approved installation/implementation direction.",
+      "status": "planned",
+      "supports": "Defines ownership and the first vertical slices; does not claim an implemented product.",
+      "limits": "Planning evidence only; implementation and user-flow evidence must be added through accepted PRs.",
+      "recorded_at": "2026-11-18T03:45:00Z",
+      "source_revision": {
+        "kind": "owner_decision",
+        "reference": "Pukujan/relationship-intelligence#1",
+        "observed_at": "2026-11-18",
+        "uri": "https://github.com/Pukujan/relationship-intelligence/issues/1"
+      },
+      "cite_in_readme": false
+    }
+  ],
+  "boundaries": [
+    "No second canonical person database or public social network.",
+    "No identity merge based only on name and employer.",
+    "No unsourced agent writes, autonomous outreach, or source-platform detection evasion."
+  ]
+}
