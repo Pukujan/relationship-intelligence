@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
+  <title id="title">Relationship Intelligence architecture</title>
+  <desc id="desc">Source records enter Octo evidence and claims, then current profiles and a relationship graph serve the CRM.</desc>
+  <rect width="960" height="540" rx="18" fill="#12141a"/>
+  <g font-family="system-ui, sans-serif" text-anchor="middle">
+    <text x="480" y="54" fill="#e8eaed" font-size="25" font-weight="600">Source-backed relationship records</text>
+    <text x="480" y="82" fill="#9aa0a6" font-size="15">Architecture reference — planning state</text>
+    <g font-size="17">
+      <rect x="60" y="140" width="200" height="70" rx="12" fill="#242a35" stroke="#4a4f5c"/>
+      <text x="160" y="170" fill="#e8eaed">Exports and APIs</text><text x="160" y="193" fill="#9aa0a6" font-size="13">source records</text>
+      <rect x="380" y="140" width="200" height="70" rx="12" fill="#242a35" stroke="#4ea8de"/>
+      <text x="480" y="170" fill="#e8eaed">Octo ledger</text><text x="480" y="193" fill="#9aa0a6" font-size="13">claims + evidence</text>
+      <rect x="700" y="140" width="200" height="70" rx="12" fill="#242a35" stroke="#ff7b54"/>
+      <text x="800" y="170" fill="#e8eaed">Current profiles</text><text x="800" y="193" fill="#9aa0a6" font-size="13">review + history</text>
+      <rect x="380" y="340" width="200" height="70" rx="12" fill="#242a35" stroke="#56c596"/>
+      <text x="480" y="370" fill="#e8eaed">Relationship graph</text><text x="480" y="393" fill="#9aa0a6" font-size="13">rebuildable projection</text>
+    </g>
+    <g stroke="#4a4f5c" stroke-width="2" fill="none">
+      <path d="M260 175 H380"/><path d="M580 175 H700"/><path d="M480 210 V340"/>
+    </g>
+    <text x="480" y="475" fill="#9aa0a6" font-size="14">Identity candidates remain separate until evidence supports resolution.</text>
+  </g>
+</svg>

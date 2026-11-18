@@ -1,0 +1,10 @@
+{
+  "schema_version": "content-generation.review-rubric.v1",
+  "dimensions": [
+    {"id": "clarity", "question": "Can a newcomer identify the user job, current state, and next action?"},
+    {"id": "evidence", "question": "Are observed facts, planned behavior, and agent inference clearly distinguished?"},
+    {"id": "identity", "question": "Does the work preserve same-name separation and source/evidence lineage?"},
+    {"id": "scope", "question": "Does the change solve its owning issue without adding another platform or unrequested machinery?"}
+  ],
+  "decision_rule": "human review plus deterministic repository and Octo integration gates"
+}

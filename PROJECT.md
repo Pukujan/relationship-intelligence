@@ -1,5 +1,7 @@
 # Relationship Intelligence — Project Contract
 
+<!-- continuity:project {"id":"relationship-intelligence","protocol_version":"0.1.0-draft","schema":"project-continuity.project.v1","title":"Relationship Intelligence"} -->
+
 ## Product
 
 A self-hosted research and relationship CRM for answering:
