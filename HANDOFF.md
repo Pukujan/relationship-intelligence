@@ -6,7 +6,7 @@ The product program, architecture, validation contract, OIO ontology, and seven 
 
 ## Next atomic action
 
-Owner reviews and accepts the Slice 000 and Slice 001 issue packets, including the initial fixture formats and Octo authentication path. Then ABA implements Slice 000 from `docs/STACK.md` and the accepted issue.
+Owner reviews and accepts [issue #2](https://github.com/Pukujan/relationship-intelligence/issues/2) (Slice 000) and [issue #3](https://github.com/Pukujan/relationship-intelligence/issues/3) (Slice 001), including the initial fixture formats and Octo authentication path. Then ABA implements Slice 000 from `docs/STACK.md` and the accepted issue.
 
 ## Do not do yet
 
