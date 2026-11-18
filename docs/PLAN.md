@@ -1,6 +1,6 @@
 # Full Build Plan
 
-**Status:** proposed for owner acceptance. Implementation starts with Slice 001 only after its packet is accepted.
+**Status:** accepted direction updated 2026-11-18. The primary intake path is authenticated exploration through each teammate's TinyFish sessions, not CSV import. See [COLLECTION-AND-TEAM-PLAN.md](COLLECTION-AND-TEAM-PLAN.md) for the binding ownership and slice model.
 
 ## 1. Outcome
 

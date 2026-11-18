@@ -26,14 +26,17 @@ This repository is an Octo adopter. It does not modify Octo, create a competing 
 
 ## Product rules
 
-1. Every externally sourced fact carries evidence or remains explicitly unverified.
-2. Name + employer never authorizes an identity merge.
-3. Corrections supersede claims; they do not erase history.
-4. Agent output is a proposal until the accepted evidence/write rules allow it to land.
-5. A displayed current profile is a projection of live claims, not a second biography database.
-6. A stale graph is reported as stale rather than presented as current.
-7. Source collection uses official exports/APIs where available; incremental authenticated collection is a separate slice.
-8. No sensitive-attribute inference, fabricated relationships, automated outreach, or evasion of platform controls.
+1. Teammates authenticate with their own Google accounts and receive individual Octo principals and workspace memberships.
+2. Each teammate connects their own TinyFish account and source sessions; no source session is shared or inherited.
+3. Private mail, calendar, and personal interaction records remain in per-person workspaces until explicitly published to the team workspace.
+4. Collection plans, run checkpoints, and source ownership are durable operational records.
+5. Every externally sourced fact carries evidence or remains explicitly unverified.
+6. Name + employer never authorizes an identity merge.
+7. Corrections supersede claims; they do not erase history.
+8. Agent output is a proposal until the accepted evidence/write rules allow it to land.
+9. A displayed current profile is a projection of live claims, not a second biography database.
+10. A stale graph is reported as stale rather than presented as current.
+11. No sensitive-attribute inference, fabricated relationships, automated outreach, or evasion of platform controls.
 
 ## Non-goals for the initial product
 
@@ -81,11 +84,11 @@ A slice is not done because it compiles, passes lint, or has a screenshot. It is
 ## Initial sequence
 
 1. Repository, Octo connection, contracts, and gates.
-2. CSV import → identity review → sourced person profile.
-3. Corrections, current-profile projection, and merge/split.
-4. Event participation and sponsor views.
-5. Research queue and agent proposal review.
-6. Relationship graph and path exploration.
-7. Incremental collection, scheduling, and historical analytics.
+2. Google-authenticated teammates with isolated source ownership and shared/private workspaces.
+3. Durable TinyFish connections and source-specific collection plans.
+4. LinkedIn profile exploration with scrolling, section expansion, checkpoints, and sourced person profiles.
+5. Luma/X exploration, identity review, and event/organization records.
+6. Private Gmail/calendar interaction ingestion.
+7. Research proposals, relationship views, scheduling, and analytics.
 
 See `docs/PLAN.md` for the full plan and `HANDOFF.md` for the current next action.
