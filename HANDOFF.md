@@ -14,7 +14,7 @@ The owner has replaced CSV-first intake with authenticated exploration: teammate
 
 ## Next atomic action
 
-Implement the smallest authenticated shell and durable per-principal source-connection/collection-plan schema on `task/RI-0001-app-shell`. Then verify the saved LinkedIn session before the first real exploration run.
+Application shell exists on `task/RI-0001-auth-app`: Google sign-in via Octo, workspace membership view, sources screen, 11 contract tests, and the app CI job. Next: merge the shell PR, then implement the TinyFish profile registration and durable collection-plan schema.
 
 ## TinyFish setup correction
 
