@@ -50,10 +50,36 @@ jobs:
       manifest: stack-manifest.json
       claude: warn
 
+  app:
+    name: Application types, tests, and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install application dependencies
+        run: pnpm install --dir app --frozen-lockfile
+      - name: Type-check
+        run: |
+          pnpm --dir app exec tsc --noEmit -p tsconfig.app.json
+          pnpm --dir app exec tsc --noEmit -p tsconfig.server.json
+      - name: Lint
+        run: pnpm --dir app exec biome check src server shared tests
+      - name: Contract tests
+        run: pnpm --dir app exec vitest run
+      - name: Build
+        run: pnpm --dir app exec vite build
+
   gates:
     name: gates
     if: always()
-    needs: [planning, train]
+    needs: [planning, train, app]
     runs-on: ubuntu-latest
     steps:
       - name: Require upstream jobs green
@@ -61,4 +87,5 @@ jobs:
           set -euo pipefail
           test "${{ needs.planning.result }}" = "success"
           test "${{ needs.train.result }}" = "success"
+          test "${{ needs.app.result }}" = "success"
           echo "All required upstream jobs passed."
