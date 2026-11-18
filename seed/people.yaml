@@ -1,0 +1,157 @@
+# people.yaml — the hand-curated input to the social graph.
+#
+# Everything here is a CLAIM with a source. The loader (seed/load.py) turns this
+# file into Octo's epistemic ledger: entities, claims, evidence, beliefs.
+#
+# Resolution rule: an entry is only as good as its `source`. If you cannot fill in
+# a source, the claim goes in `unverified:` instead and is excluded from queries
+# until a human promotes it.
+#
+# Identity rule: `person` is the human. Handles on different platforms are
+# separate entries in `handles`, because "same person" is itself a claim that can
+# be wrong. The loader links them only once `confirmed_identity: true` is set.
+
+# ---------------------------------------------------------------------------
+# People
+# ---------------------------------------------------------------------------
+people:
+  - person: jane-doe
+    display_name: "Jane Doe"
+    confirmed_identity: true   # you have eyeballed that these handles are one human
+    handles:
+      - platform: linkedin
+        username: jane-doe-ml
+        source: "https://www.linkedin.com/in/jane-doe-ml"
+        retrieved: 2026-11-10
+      - platform: github
+        username: janedoe
+        source: "https://github.com/janedoe"
+        retrieved: 2026-11-10
+
+    # Employment history. `to: null` means current.
+    roles:
+      - org: acme-labs
+        title: "Staff ML Engineer"
+        from: 2022-03
+        to: null
+        source: "https://www.linkedin.com/in/jane-doe-ml"
+        retrieved: 2026-11-10
+      - org: bigcorp
+        title: "ML Engineer"
+        from: 2019-06
+        to: 2022-02
+        source: "https://www.linkedin.com/in/jane-doe-ml"
+        retrieved: 2026-11-10
+
+    # Things she has publicly built or published. Strongest signal for
+    # "can build the thing I need" and for shared context in a pitch.
+    projects:
+      - name: "ragbench"
+        url: "https://github.com/janedoe/ragbench"
+        description: "Open-source RAG evaluation harness"
+        source: "https://github.com/janedoe/ragbench"
+        retrieved: 2026-11-10
+
+    # Stated positions — what she says she stands for, IN HER OWN WORDS.
+    # `quote` is mandatory. This field is the one most likely to be wrong if you
+    # paraphrase, so the loader rejects a position without a verbatim quote.
+    positions:
+      - topic: "evaluation-first AI development"
+        stance: "believes"
+        quote: "If you can't measure it, you're not building a product, you're writing a demo."
+        source: "https://janedoe.dev/blog/measure-or-demo"
+        retrieved: 2026-11-10
+        confidence: 0.9
+      - topic: "open-source-first tooling"
+        stance: "believes"
+        quote: "Every internal tool we built eventually got replaced by something we open-sourced first."
+        source: "https://example.com/podcast/jane-ep-12"
+        retrieved: 2026-11-10
+        confidence: 0.75
+
+    # Public talks, papers, podcasts. Good for "find a topic hook" and for
+    # discovering overlap with your own work.
+    talks:
+      - title: "RAG is a retrieval problem, not a model problem"
+        venue: "PyData NYC 2025"
+        year: 2025
+        url: "https://example.com/pydata-jane"
+        source: "https://example.com/pydata-jane"
+        retrieved: 2026-11-10
+
+    # WHO you know who knows her. This is the edge that makes warm intros work.
+    # Only record a connection you would actually be comfortable saying out loud.
+    connected_to:
+      - person: sam-rivera
+        strength: strong       # strong | weak | met-once
+        basis: "Worked together at BigCorp 2019-2022"
+        source: "personal"     # your own knowledge — no URL required
+        retrieved: 2026-11-10
+
+  - person: sam-rivera
+    display_name: "Sam Rivera"
+    confirmed_identity: true
+    handles:
+      - platform: github
+        username: srivera
+        source: "https://github.com/srivera"
+        retrieved: 2026-11-01
+    roles:
+      - org: acme-labs
+        title: "Engineering Manager, Retrieval"
+        from: 2021-01
+        to: null
+        source: "https://www.linkedin.com/in/sam-rivera"
+        retrieved: 2026-11-01
+    positions:
+      - topic: "developer experience in ML tooling"
+        stance: "believes"
+        quote: "The hardest part of ML infra is not the ML, it's that nobody wants to on-board to it."
+        source: "https://example.com/talks/sam-dx"
+        retrieved: 2026-11-01
+        confidence: 0.8
+
+# ---------------------------------------------------------------------------
+# Organizations
+# ---------------------------------------------------------------------------
+orgs:
+  - org: acme-labs
+    display_name: "Acme Labs"
+    website: "https://acme.example.com"
+    kind: startup       # startup | bigco | lab | nonprofit | community | school
+    sector: "AI infrastructure"
+    size_band: "50-200"
+    source: "https://acme.example.com/about"
+    retrieved: 2026-11-10
+
+  - org: bigcorp
+    display_name: "BigCorp"
+    website: "https://bigcorp.example.com"
+    kind: bigco
+    sector: "enterprise software"
+    size_band: "10000+"
+    source: "https://bigcorp.example.com/about"
+    retrieved: 2026-11-10
+
+# ---------------------------------------------------------------------------
+# Events — hackathons, conferences, meetups. Shared presence is a real edge.
+# ---------------------------------------------------------------------------
+events:
+  - event: pydata-nyc-2025
+    display_name: "PyData NYC 2025"
+    kind: conference
+    year: 2025
+    url: "https://example.com/pydata-nyc-2025"
+    source: "https://example.com/pydata-nyc-2025"
+    retrieved: 2026-11-10
+    attendees: []
+
+# ---------------------------------------------------------------------------
+# Claims you could not source yet. Kept, but quarantined.
+# The loader writes these with stance 'uncertain' and no evidence, and every
+# query in queries/*.cypher filters them out unless you pass includeUnverified.
+# ---------------------------------------------------------------------------
+unverified:
+  - person: jane-doe
+    note: "I heard she's leaving Acme, but no public source yet."
+    observed_at: 2026-11-12

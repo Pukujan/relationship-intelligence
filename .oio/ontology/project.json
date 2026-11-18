@@ -1,0 +1,80 @@
+{
+  "schema_version": "oio.project-issue-log-ontology.v1",
+  "project_id": "Pukujan/relationship-intelligence",
+  "namespace": "pukujan-relationship-intelligence",
+  "extends": {
+    "ontology_id": "oio:issue-log",
+    "version": "1.1.0"
+  },
+  "version": "1.0.0",
+  "concepts": [],
+  "priorities": [
+    {
+      "path": "1",
+      "concept_id": "pukujan-relationship-intelligence:priority-1",
+      "label": "Canonical data integrity or workspace-boundary failure",
+      "definition": "Loss, corruption, cross-workspace exposure, irreversible identity contamination, or an unrecoverable canonical-state failure. Highest priority."
+    },
+    {
+      "path": "2",
+      "concept_id": "pukujan-relationship-intelligence:priority-2",
+      "label": "Accepted user-slice blocker",
+      "definition": "A defect or missing contract that prevents an accepted import, profile, identity-review, event, research, or graph user job from working end to end."
+    },
+    {
+      "path": "3",
+      "concept_id": "pukujan-relationship-intelligence:priority-3",
+      "label": "Current product foundation and next vertical slice",
+      "definition": "The active bootstrap or next accepted vertical slice that establishes canonical ownership and useful end-to-end behavior."
+    },
+    {
+      "path": "4",
+      "concept_id": "pukujan-relationship-intelligence:priority-4",
+      "label": "Evidence, identity, or freshness correctness",
+      "definition": "Bounded correctness issues in provenance, identity resolution, supersession, current-profile projection, or graph freshness with a usable review/recovery path."
+    },
+    {
+      "path": "5",
+      "concept_id": "pukujan-relationship-intelligence:priority-5",
+      "label": "Planned product capability",
+      "definition": "An accepted or proposed capability advancing the relationship-intelligence product, ordered after the working foundation."
+    },
+    {
+      "path": "6",
+      "concept_id": "pukujan-relationship-intelligence:priority-6",
+      "label": "Integration, collection, and scaling",
+      "definition": "Source connectors, scheduling, queueing, performance, provider compatibility, and operational scaling after the core path works."
+    },
+    {
+      "path": "7",
+      "concept_id": "pukujan-relationship-intelligence:priority-7",
+      "label": "Observability, maintenance, and documentation",
+      "definition": "Operational visibility, test maintenance, dead-code removal, documentation, and housekeeping."
+    },
+    {
+      "path": "8",
+      "concept_id": "pukujan-relationship-intelligence:priority-8",
+      "label": "Bounded research or low-evidence observation",
+      "definition": "A useful observation or possible edge case that is not demonstrated to block a product outcome; retained without inflating priority."
+    },
+    {
+      "path": "9",
+      "concept_id": "pukujan-relationship-intelligence:priority-9",
+      "label": "Deferred by owner",
+      "definition": "A real capability or issue deliberately postponed; retained with evidence for later review."
+    },
+    {
+      "path": "10",
+      "concept_id": "pukujan-relationship-intelligence:priority-10",
+      "label": "Out of scope or routed elsewhere",
+      "definition": "Belongs to Octo, ABA, OIO, or another owner, or is outside this product's accepted scope."
+    }
+  ],
+  "account_authority": [
+    {
+      "github_user_id": "137629468",
+      "login": "Pukujan",
+      "authority": "owner"
+    }
+  ]
+}
