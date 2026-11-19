@@ -56,6 +56,8 @@ const CopilotRequestSchema = z.object({
   principalId: z.string().max(64).optional(),
   model: z.string().max(80).optional(),
   reasoning: z.enum(["off", "low", "medium", "high"]).optional(),
+  sessionId: z.string().max(60).optional(),
+  history: z.array(z.string().max(1200)).max(6).optional(),
 });
 
 // The schema accepts generously and the handler clips to display limits: a
@@ -87,6 +89,8 @@ const DesignRequestSchema = z.object({
   principalId: z.string().max(64).optional(),
   model: z.string().max(80).optional(),
   reasoning: z.enum(["off", "low", "medium", "high"]).optional(),
+  sessionId: z.string().max(60).optional(),
+  history: z.array(z.string().max(1200)).max(6).optional(),
 });
 
 const ModelDesignSchema = z.object({
@@ -269,7 +273,7 @@ async function handleCopilot(body: unknown) {
     const routed = await askWithFailover(
       resolveRoute(request.model, "ask"),
       COPILOT_SYSTEM,
-      `USER REQUEST:\n${request.prompt}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}${webPromptBlock(web)}`,
+      `USER REQUEST:\n${request.prompt}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}${webPromptBlock(web)}${historyBlock(request.history)}`,
       (request.reasoning ?? "off") as Reasoning,
       REQUEST_TIMEOUT_MS,
     );
@@ -461,7 +465,29 @@ const ChatStreamSchema = z.object({
   digest: z.unknown(),
   model: z.string().max(80).optional(),
   reasoning: z.enum(["off", "low", "medium", "high"]).optional(),
+  sessionId: z.string().max(60).optional(),
+  history: z.array(z.string().max(1200)).max(6).optional(),
 });
+
+/**
+ * Single-writer turn queue (#25): turns on one session serialize, so concurrent
+ * submits can interleave reads but never writes. Framework-agnostic — the same
+ * queue is required whether the turn pipeline is XState or LangGraph.
+ */
+const turnQueues = new Map<string, Promise<unknown>>();
+const enqueueTurn = <T,>(key: string, run: () => Promise<T>): Promise<T> => {
+  const prev = turnQueues.get(key) ?? Promise.resolve();
+  const next = prev.then(run, run);
+  turnQueues.set(key, next.catch(() => undefined));
+  return next;
+};
+
+const historyBlock = (history?: string[]) =>
+  history && history.length
+    ? `\n\nCONVERSATION SO FAR in this thread (continue from it, do not restart):\n${history
+        .map((h, i) => `${i + 1}. ${h}`)
+        .join("\n")}`
+    : "";
 
 function groundPart(part: z.infer<typeof PartSchema>, digest: Digest): boolean {
   if (part.kind === "graph") {
@@ -487,6 +513,15 @@ async function handleChatStream(
 ) {
   const request = ChatStreamSchema.parse(body);
   const digest = readDigest(request.digest);
+  return enqueueTurn(request.sessionId ?? "anonymous", () => runTurn(req, res, request, digest));
+}
+
+async function runTurn(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  request: z.infer<typeof ChatStreamSchema>,
+  digest: Digest,
+) {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -515,7 +550,7 @@ async function handleChatStream(
     const routed = await askWithFailover(
       resolveRoute(request.model, "ask"),
       PARTS_SYSTEM,
-      `USER REQUEST:\n${request.prompt}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}${webPromptBlock(web)}`,
+      `USER REQUEST:\n${request.prompt}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}${webPromptBlock(web)}${historyBlock(request.history)}`,
       (request.reasoning ?? "off") as Reasoning,
       REQUEST_TIMEOUT_MS,
       controller.signal,

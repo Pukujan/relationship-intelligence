@@ -181,7 +181,17 @@ const SessionWorkspace = () => {
     abortRef.current = controller;
     let meta: { provider?: string; model?: string; reasoning?: string } = {};
     await streamTurn(
-      { prompt, digest: turnDigest, model, reasoning },
+      {
+        prompt,
+        digest: turnDigest,
+        model,
+        reasoning,
+        sessionId: conversation.id,
+        history: messages
+          .slice(-6)
+          .map((m) => m.parts.filter((p) => p.kind === "text").map((p) => (p as { text: string }).text).join(" ").slice(0, 1200))
+          .filter((h) => h.trim().length > 0),
+      },
       {
         onPhase: (label) => sendTurn({ type: "PHASE", label }),
         onPart: (part) => sendTurn({ type: "PART", part }),

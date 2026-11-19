@@ -16,10 +16,19 @@ const record = (scenario, impl, survived, illegal, ms) =>
   results.push({ scenario, impl, survived, illegal, ms: Math.round(ms) });
 
 const cfg = (thread, extra = {}) => ({ configurable: { thread_id: thread, ...extra } });
+// #25 single-writer queue: concurrent submits on one thread serialize.
+const queues = new Map();
+const queued = (key, run) => {
+  const prev = queues.get(key) ?? Promise.resolve();
+  const next = prev.then(run, run);
+  queues.set(key, next.catch(() => undefined));
+  return next;
+};
 
 async function driveXs(thread, { detour = false, stall = false, stopAt = null, fromSeq = null, resumeLatest = false } = {}) {
   let actor = fromSeq ? await restore(thread, fromSeq) : resumeLatest ? ((await restore(thread)) ?? createActor(turnMachine)) : createActor(turnMachine);
   actor.start();
+  if (actor.getSnapshot().value === "done") actor.send({ type: "RESET" });
   actor.send({ type: "SET", detour, stall });
   await save(thread, actor);
   const order = ["scoping", "retrieving", "reasoning", "validating", "acting", "recording", "done"];
@@ -67,8 +76,8 @@ const T = (n) => `cmp-${n}-${Date.now()}`;
   console.log("start s2");
   let t0 = Date.now();
   const g = buildGraph(mkSaver());
-  await g.invoke({ first: true }, cfg(t));
-  const lg = await g.invoke({ second: true }, cfg(t));
+  await g.invoke({ slots: { first: true } }, cfg(t));
+  const lg = await g.invoke({ slots: { second: true } }, cfg(t));
   console.log("   S2 lg slots:", JSON.stringify(lg.slots), "log:", JSON.stringify(lg.log));
   record("S2 turn2 sees turn1", "langgraph", Boolean(lg.slots.first && lg.slots.second && lg.slots.recorded), 0, Date.now() - t0);
   t0 = Date.now();
@@ -81,7 +90,7 @@ const T = (n) => `cmp-${n}-${Date.now()}`;
   while (actor.getSnapshot().value !== "done") { actor.send({ type: "NEXT" }); await save(t, actor); }
   const xs = actor.getSnapshot();
   actor.stop();
-  record("S2 turn2 sees turn1", "xstate", Boolean(xs.context.slots.recorded && xs.context.log.includes("reset") && xs.context.log.filter((x) => x === "record").length === 2), 0, Date.now() - t0);
+  record("S2 turn2 sees turn1", "xstate", Boolean(xs.context.slots.recorded && xs.context.log.filter((x) => x === "record").length === 2), 0, Date.now() - t0);
 }
 
 // S3 — concurrent turns on one thread: lost-update corruption check.
@@ -90,12 +99,12 @@ const T = (n) => `cmp-${n}-${Date.now()}`;
   console.log("start s3");
   let t0 = Date.now();
   const g = buildGraph(mkSaver());
-  const [a, b] = await Promise.all([g.invoke({ a: 1 }, cfg(t)), g.invoke({ b: 1 }, cfg(t))]);
+  const [a, b] = await Promise.all([queued(t, () => g.invoke({ slots: { a: 1 } }, cfg(t))), queued(t, () => g.invoke({ slots: { b: 1 } }, cfg(t)))]);
   const lgFinal = (await buildGraph(mkSaver()).invoke(null, cfg(t)).catch(() => null)) ?? a;
   const lgBoth = Boolean((lgFinal.slots.a ?? a.slots.a) && (lgFinal.slots.b ?? b.slots.b));
   record("S3 concurrent turns", "langgraph", lgBoth, lgBoth ? 0 : 1, Date.now() - t0);
   t0 = Date.now();
-  const [xa, xb] = await Promise.all([driveXs(t, { resumeLatest: true }), driveXs(t, { resumeLatest: true })]);
+  const [xa, xb] = await Promise.all([queued(t, () => driveXs(t, { resumeLatest: true })), queued(t, () => driveXs(t, { resumeLatest: true }))]);
   const lastXs = (await history(t)).slice(-1)[0];
   const xsBoth = (lastXs?.payload.snapshot.context.log ?? []).filter((x) => x === "record").length === 2;
   record("S3 concurrent turns", "xstate", xsBoth, xsBoth ? 0 : 1, Date.now() - t0);

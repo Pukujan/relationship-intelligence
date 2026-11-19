@@ -13,7 +13,7 @@ export interface TurnHandlers {
 }
 
 export const streamTurn = async (
-  body: { prompt: string; digest: unknown; model?: string; reasoning?: string },
+  body: { prompt: string; digest: unknown; model?: string; reasoning?: string; sessionId?: string; history?: string[] },
   handlers: TurnHandlers,
   signal: AbortSignal,
 ): Promise<void> => {
