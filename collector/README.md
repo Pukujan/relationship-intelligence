@@ -14,9 +14,11 @@ execution. If it passes, slice 2 builds the real contract on top.
 pnpm install --store-dir "$HOME/Library/pnpm/store"
 PLAYWRIGHT_BROWSERS_PATH=/tmp/ri-daemon-proof/browsers pnpm exec playwright install chromium
 
-pnpm signin   # opens a browser window; a human signs into LinkedIn manually
-pnpm fetch    # one read-only visit to the signed-in user's own profile
-pnpm check    # fresh process: did the session survive the restart?
+pnpm run signin   # stealth (patchright) window; a human signs into LinkedIn manually
+pnpm run fetch    # one read-only visit to the signed-in user's own profile
+pnpm run check    # fresh process: did the session survive the restart?
+
+Note: `pnpm fetch` alone is a built-in pnpm command, not this script — always `pnpm run fetch`.
 ```
 
 Each command is a separate process against the same profile directory, so
