@@ -150,7 +150,8 @@ export async function handleRequest(
       console.error(
         "session accept: Octo refused the token:",
         error instanceof OctoError ? error.status : "non-octo-error",
-        "| prefix:", token.slice(0, 10),
+        "| prefix:",
+        token.slice(0, 10),
       );
       session.destroy();
       sendJson(res, 401, { error: "SESSION_REJECTED" });
