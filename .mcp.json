@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "octo": {
+      "type": "http",
+      "url": "https://octodb.design-bakery.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${OCTO_API_KEY}"
+      }
+    }
+  }
+}

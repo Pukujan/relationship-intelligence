@@ -14,7 +14,7 @@ Local collection execution is proven ([issue #15](https://github.com/Pukujan/rel
 
 ## Next atomic action
 
-Build the intelligence layer on the console: a real orchestrator plus a research/design mode that proposes a mission name, objective, and plan held for approval, the deadline/iteration loop, and the signal layer. Then wire the swappable data layer to Octo (workspace `social-engineering`) and integrate the console into `app/` behind Octo sign-in. Migration note: the console prototype and preview screenshots are committed in this repo; the ABA install, run env, and Octo key live on the VPS (`octo-vps`), reachable over Tailscale.
+Build the intelligence layer on the console: a real orchestrator plus a research/design mode that proposes a mission name, objective, and plan held for approval, the deadline/iteration loop, and the signal layer. Then wire the swappable data layer to Octo (workspace `social-engineering`) and integrate the console into `app/` behind Octo sign-in. Migration note: the console prototype and preview screenshots are committed in this repo; the ABA install and run env live on the VPS (`octo-vps`), which is a machine reached over Tailscale/SSH for administration. Octo itself is not reached that way: the platform API is `https://octodb.design-bakery.com` (`OCTO_API_URL` in `.env`), authenticated with the workspace key in `.env` (`OCTO_API_KEY`). Traces, eval scores, RAG, graph, and SQL are all capabilities of that same API — see "Reaching Octo" in `AGENTS.md`.
 
 ## TinyFish setup correction
 
