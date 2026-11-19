@@ -74,7 +74,7 @@ jobs:
       - name: Contract tests
         run: pnpm --dir app exec vitest run
       - name: Build
-        run: pnpm --dir app exec vite build
+        run: pnpm --dir app run build
 
   gates:
     name: gates
