@@ -10,6 +10,24 @@ A self-hosted research and relationship CRM for answering:
 
 It combines person/company/project/event records, dated source-backed claims, identity review, interaction history, research jobs, and relationship exploration.
 
+## Product surface — the console
+
+The product is operated through a **console**: one command center where a person directs a
+team of specialized AI agents (sales, marketing, research, and more) that work the
+relationship graph. The full goal, operating model, and UX map live in
+[docs/CONSOLE.md](docs/CONSOLE.md). Its governing principles extend, not replace, the rules
+below:
+
+- **Human always in control.** Agents propose (names, objectives, plans, drafts, research);
+  the human decides. Nothing sends, calls, publishes, or commits without consent.
+- **No silent stalls.** Missions and objectives carry deadlines; blocked or overdue work is
+  surfaced as a signal with a proposed way forward, never left to drift.
+- **State is legible.** Progress, decay, and "needs you" are represented as data signals,
+  aggregated so the person always knows what needs them.
+- **Organized work, graph-backed people.** Work is grouped as Project → Objective → Mission
+  → Plan; people/companies/events stay a single evidence-backed graph that work references,
+  never duplicates.
+
 ## Authority and ownership
 
 - **Product owner:** `Pukujan`.
