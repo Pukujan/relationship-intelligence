@@ -2,6 +2,8 @@
 
 **Status:** accepted direction from the owner, 2026-11-18. Replaces the CSV-first intake plan.
 
+**Execution proposal:** [COLLECTION-EXECUTION.md](COLLECTION-EXECUTION.md) proposes running collectors on each teammate's own machine instead of cloud browser profiles, with device identity added to `source_connection`. Awaiting owner acceptance in [issue #15](https://github.com/Pukujan/relationship-intelligence/issues/15); the ownership and workspace rules below are unchanged either way.
+
 ## Outcome
 
 Teammates sign into the same application with their own Google accounts. Each teammate connects their own TinyFish account and authorizes their own LinkedIn, X, Gmail, and Luma sessions. A durable research plan turns those sources into evidence-backed people, organization, event, project, and interaction records in Octo.
