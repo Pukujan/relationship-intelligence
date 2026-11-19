@@ -2,6 +2,38 @@
 
 Read `PROJECT.md`, `HANDOFF.md`, and the owning slice issue before implementation. Octo is canonical; do not create a parallel database or modify Octo from this adopter. ABA generates application code under the contracts in `docs/STACK.md`. New app/adapter code is TypeScript; preserve working Python importers behind validated contracts. Every slice needs PDD/SDD/eval, owner acceptance, real user-flow verification, and the declared invariants in `docs/VALIDATION.md`. Never merge identities on name + employer or write unsourced agent output as canonical fact.
 
+## Reaching Octo
+
+Octo is a hosted API, not a machine you log into. Everything this project needs
+from the platform — SQL, RAG/hybrid search, graph, epistemic ledger, files,
+**traces and eval scores (Phoenix)** — is a capability of one HTTPS endpoint:
+
+- Base URL: `OCTO_API_URL` in `.env` → `https://octodb.design-bakery.com`.
+- Auth: `Authorization: Bearer <OCTO_API_KEY>` — the workspace key in `.env`;
+  the workspace id is `OCTO_WORKSPACE_ID`. No other credential exists for agents.
+- Traces and evals (Phoenix runs inside Octo; each workspace gets its own
+  Phoenix project, derived server-side — there is no separate collector
+  address, Phoenix login, or Phoenix secret):
+  - send traces: `POST /api/workspaces/<id>/otel/v1/traces` (OTLP/HTTP, `application/x-protobuf`, optional gzip)
+  - eval scores: `POST /api/workspaces/<id>/otel/v1/span_annotations`
+  - audit/read back: `GET /api/workspaces/<id>/otel/read/<resource>` (`spans`, `traces`, `sessions`, `span_annotations`, …)
+  - viewer link (humans, via the Octo UI): `GET /api/workspaces/<id>/otel/link`
+- Capability discovery: `GET /api/capabilities` with the key lists every
+  surface the platform exposes. Prefer it over guessing paths or probing ports.
+- Full guide: `docs/consuming-octo.md` in the Octo repo —
+  `~/development/octo-db` when checked out, otherwise
+  <https://github.com/pukujan-lab-2/octo-database/blob/main/docs/consuming-octo.md>.
+- MCP: `https://octodb.design-bakery.com/mcp` (registered in `.mcp.json`; tools
+  include `guide`, `read_traces`, `record_eval_scores`). Harnesses that expand
+  env vars in `.mcp.json` headers need `OCTO_API_KEY` exported from `.env`;
+  the endpoint also advertises an OAuth flow.
+
+Never SSH or port-scan to find Octo services. `octo-vps` is the machine that
+hosts the platform, reached over Tailscale for administration only. Octo's
+service ports (Phoenix 6006, OTLP, Postgres) are loopback-bound by design, so a
+closed port says nothing about feature availability. Tailscale is for
+machines, not for Octo access.
+
 <!-- oio:issue-log-guidance:start -->
 Before filing an observational or operational issue log, read `.oio/ontology/ISSUE_LOG_ONTOLOGY.md`, `.oio/ontology/project.json`, and `.oio/ontology/AGENT_GUIDE.md`. Confirm the exact destination and filing action are authorized. On OIO, ACS, CGM, and PCM, do not submit an issue or write files without explicit human direction for that destination and action. A proposal can remain a local draft until directed. Never treat adoption as permission to write to an adopter or sibling repository.
 <!-- oio:issue-log-guidance:end -->
