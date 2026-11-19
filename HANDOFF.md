@@ -8,13 +8,13 @@ The issue-log shape and lifecycle are defined by the installed OIO ontology. For
 
 ## State
 
-Full ACS is merged through PR #8. The required `gates` check protects `main`. No application implementation has landed.
+The console is now the defined product surface. The goal, trust-layer operating model, and UX map are recorded in [CONSOLE.md](docs/CONSOLE.md) and [PROJECT.md](PROJECT.md), filed as [issue #18](https://github.com/Pukujan/relationship-intelligence/issues/18). An ABA-generated console prototype lives in `console/` (React + Vite + shadcn): the restructure pass passed its build gate and produced the grouped nav, the Project→Objective→Mission→Plan hierarchy, sign-in/guest, and connectors/MCP/plugins. It runs on seed data behind one swappable data layer; the copilot is still a designed simulation, not a live model.
 
-The owner has replaced CSV-first intake with authenticated exploration: teammates sign in using Google, use their own TinyFish and source sessions, and save durable collection plans in Octo. The accepted direction is in [COLLECTION-AND-TEAM-PLAN.md](docs/COLLECTION-AND-TEAM-PLAN.md) and [issue #9](https://github.com/Pukujan/relationship-intelligence/issues/9), which supersedes issues #2 and #3.
+Local collection execution is proven ([issue #15](https://github.com/Pukujan/relationship-intelligence/issues/15), [COLLECTION-EXECUTION.md](docs/COLLECTION-EXECUTION.md)): a real browser profile attached over CDP keeps a LinkedIn session across a restart, while a test build cannot. The app build script was fixed so CI actually runs it ([issue #14](https://github.com/Pukujan/relationship-intelligence/issues/14)). The earlier authenticated shell (Google sign-in via Octo, workspace list, sources screen) is merged in `app/`.
 
 ## Next atomic action
 
-Application shell exists on `task/RI-0001-auth-app`: Google sign-in via Octo, workspace membership view, sources screen, 11 contract tests, and the app CI job. Next: merge the shell PR, then implement the TinyFish profile registration and durable collection-plan schema.
+Build the intelligence layer on the console: a real orchestrator plus a research/design mode that proposes a mission name, objective, and plan held for approval, the deadline/iteration loop, and the signal layer. Then wire the swappable data layer to Octo (workspace `social-engineering`) and integrate the console into `app/` behind Octo sign-in. Migration note: the console prototype and preview screenshots are committed in this repo; the ABA install, run env, and Octo key live on the VPS (`octo-vps`), reachable over Tailscale.
 
 ## TinyFish setup correction
 

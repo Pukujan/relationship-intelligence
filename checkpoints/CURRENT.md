@@ -1,10 +1,11 @@
 # Current Continuity State
 
-<!-- continuity:current {"active_task":"RI-0001","active_task_file":"tasks/TASK-RI-0001-workspace-bootstrap.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
+<!-- continuity:current {"active_task":"RI-0002","active_task_file":"tasks/TASK-RI-0002-console-product.md","protocol_version":"0.1.0-draft","schema":"project-continuity.current.v1"} -->
 
-- Active issue: [Pukujan/relationship-intelligence#9](https://github.com/Pukujan/relationship-intelligence/issues/9)
-- Active branch: `task/RI-0001-app-shell`
+- Active issue: [Pukujan/relationship-intelligence#18](https://github.com/Pukujan/relationship-intelligence/issues/18)
+- Active branch: `task/RI-0002-console-prototype`
 - Primary writer: `dsh-lead`
 - Parent program: [issue #1](https://github.com/Pukujan/relationship-intelligence/issues/1)
-- Status: full ACS merged; accepted collector-first multi-user plan recorded before application implementation.
-- Next action: implement the authenticated shell with per-principal source ownership and durable collection plans.
+- Status: console product defined (goal, trust-layer operating model, UX map) in docs/CONSOLE.md; ABA console prototype restructured and preserved in console/ (builds locally); local collection execution proven (#15). Copilot is still a seeded simulation.
+- Next action: build the intelligence layer (real orchestrator + research/design mode held for approval + deadline/iteration loop + signal layer), then wire the data layer to Octo and integrate the console into app/ behind Octo sign-in.
+- Migration note: console prototype + screenshots are committed here; the ABA install, run env, and Octo key live on the VPS (`octo-vps`) over Tailscale. New MacBook (`pujans-macbook-air`) needs Remote Login enabled before DSH model setup.
