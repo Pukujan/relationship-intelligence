@@ -14,5 +14,6 @@ Issues are filed in `Pukujan/relationship-intelligence` using the installed OIO 
 | RI-007 | [#9](https://github.com/Pukujan/relationship-intelligence/issues/9) | Supersedes #2/#3: Google teammates, isolated TinyFish sessions, durable collector plans | 3 |
 | RI-008 | [#15](https://github.com/Pukujan/relationship-intelligence/issues/15) | Proposal: local collector daemon per teammate, device identity, Tauri packaging later | 3 |
 | RI-009 | [#18](https://github.com/Pukujan/relationship-intelligence/issues/18) | Console product definition: goal, trust-layer operating model, and UX map | 3 |
+| RI-0010 | [#23](https://github.com/Pukujan/relationship-intelligence/issues/23) | Slice 006: session copilot — tabbed research threads, visual parts, streaming | 3 |
 
 Implementation begins with RI-007 / issue #9. The CSV-first RI-001/RI-002 scope is superseded; later identity, event, research, and graph slices are re-sequenced by the authenticated collection plan in `docs/COLLECTION-AND-TEAM-PLAN.md`. RI-008 proposes where collection executes and must be decided before the source-connection schema in #12 is implemented; see `docs/COLLECTION-EXECUTION.md`. RI-009 defines the console product surface (goal, operating model, UX map) in `docs/CONSOLE.md` and is the canonical target for the console UI and intelligence slices.

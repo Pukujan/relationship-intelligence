@@ -35,7 +35,8 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 const RequireSession = ({ children }: { children: ReactNode }) => {
-  const { session } = useData();
+  const { session, bootstrapping } = useData();
+  if (bootstrapping) return null;
   if (!session) return <Navigate to="/signin" replace />;
   return <>{children}</>;
 };
@@ -45,7 +46,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner theme="dark" position="bottom-right" />
-      <BrowserRouter>
+      <BrowserRouter basename={import.meta.env.BASE_URL}>
         <DataProvider>
           <OrchestratorProvider>
             <Routes>

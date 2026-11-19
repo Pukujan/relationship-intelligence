@@ -146,11 +146,21 @@ screens.
 
 ## 7. Built vs. next
 
-Built as a seeded UX prototype (ABA): the six core surfaces, then the restructure to the
-grouped nav, work hierarchy, sign-in/guest, and integrations. The copilot is currently a
-designed simulation on seed data.
+Built: the six core surfaces and the restructure to grouped nav, work hierarchy,
+sign-in/guest, and integrations (ABA, seeded). On top of that, the intelligence
+layer: a server-side copilot orchestrator over the model gateway (answers
+validated and grounded to real world ids, with a labelled offline fallback), a
+research/design mode that proposes mission + objective + plan held for approval,
+the deadline/iteration loop (stalled missions produce re-plan proposals), and the
+aggregated signal layer on Today. Owner mode reads canonical people/companies/
+claims from Octo's ledger via the graph projection and operational records from
+the workspace SQL surface, always with the signed-in principal's token; guest
+mode stays on the labelled seed. Copilot calls export OTLP spans and CODE eval
+scores to the workspace's Octo-hosted Phoenix project.
 
-Next, in order: (1) the intelligence layer — real orchestrator + research/design mode +
-deadline/iteration loop + signal layer; (2) wire the data layer to Octo and multi-tenancy;
-(3) real voice/phone via Riley; (4) integrate the console into the repo app behind Octo
-sign-in. Each lands as its own accepted slice with real user-flow verification.
+Next, in order: (1) real voice/phone via Riley; (2) production static serving of
+the console under the app origin and the private→shared promotion flow; (3) the
+identity review and graph-exploration slices from the program; (4) ingesting
+source material so hybrid RAG has content to return (the search path is wired
+and labelled; the workspace index is currently thin). Each lands as its own
+accepted slice with real user-flow verification.

@@ -7,7 +7,14 @@ export type TaskPriority = "low" | "normal" | "high";
 
 export type RunOutcome = "success" | "partial" | "escalated" | "failed";
 
-export type ApprovalKind = "send" | "call" | "publish" | "invite" | "commit";
+export type ApprovalKind =
+  | "send"
+  | "call"
+  | "publish"
+  | "invite"
+  | "commit"
+  | "mission"
+  | "replan";
 export type ApprovalStatus = "pending" | "approved" | "declined";
 export type Decision = "approved" | "declined";
 export type Risk = "low" | "medium" | "high";
@@ -102,6 +109,67 @@ export interface Approval {
   decidedAt?: string;
   decisionNote?: string;
   editedAction?: string;
+  /**
+   * When present, approving this row creates or adjusts work: `mission`
+   * materializes objective + mission + plan; `replan` applies the adjustment
+   * to the referenced mission. The proposal is data, so an Octo-backed
+   * source can persist it verbatim.
+   */
+  design?: MissionDesign;
+}
+
+/* ------------------------------------------------------------------ */
+/* Proposals (intelligence layer)                                      */
+/* ------------------------------------------------------------------ */
+
+export type MissionAutonomy = "draft" | "approve" | "full";
+
+export interface DesignStep {
+  label: string;
+  detail: string;
+  agentId?: string;
+}
+
+/**
+ * A proposal the human can approve to create or adjust work. `mission`
+ * designs create objective + mission + plan on approval; `replan` designs
+ * adjust an existing mission. It rides on an Approval so the inbox, the
+ * decision log, and (later) Octo see one shape.
+ */
+export interface MissionDesign {
+  kind: "mission" | "replan";
+  missionName: string;
+  missionSummary: string;
+  /** Existing project to attach to; when absent, a new project is created. */
+  projectId?: string;
+  projectName?: string;
+  objectiveName: string;
+  objectiveTarget: string;
+  objectiveId?: string;
+  horizon: MissionHorizon;
+  due: string;
+  agentIds: string[];
+  autonomy: MissionAutonomy;
+  planSteps: DesignStep[];
+  rationale: string;
+  unverified: string[];
+  /** For replan designs: the mission being adjusted and how. */
+  missionId?: string;
+  adjustment?: "extend" | "replan" | "escalate";
+}
+
+export interface NewProposal {
+  agentId: string;
+  kind: ApprovalKind;
+  title: string;
+  proposedAction: string;
+  reason: string;
+  evidence: EvidenceRef[];
+  risk: Risk;
+  design: MissionDesign;
+  personId?: string;
+  companyId?: string;
+  eventId?: string;
 }
 
 export interface ActivityEntry {
@@ -399,6 +467,8 @@ export interface Session {
   organizationId: string;
   workspaceId: string;
   signedInAt: string;
+  /** Octo principal id, present in owner mode; used for telemetry attribution. */
+  principalId?: string;
 }
 
 export interface World {

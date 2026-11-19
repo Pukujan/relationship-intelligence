@@ -74,7 +74,7 @@ const SignIn = () => {
           description:
             next.mode === "guest"
               ? "Seeded data only — decisions reset when you reload."
-              : "Fieldstone · Go-to-market workspace loaded.",
+              : "Your Octo workspaces loaded.",
         },
       );
       navigate("/today", { replace: true });

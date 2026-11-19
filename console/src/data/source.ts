@@ -8,7 +8,10 @@ import type {
   Connector,
   ConnectorStatus,
   DecisionInput,
+  MissionDesign,
+  NewProposal,
   Plugin,
+  Project,
   Session,
   SessionMode,
   World,
@@ -18,6 +21,12 @@ export interface ApprovalDecisionResult {
   approval: Approval;
   activity: ActivityEntry;
   agent: Agent;
+  /**
+   * Present when the decision changed more than the approval row — an
+   * approved proposal materializes objectives, missions, and plans. The
+   * store adopts this snapshot whole so created work reaches every screen.
+   */
+  world?: World;
 }
 
 export interface NewActivity {
@@ -66,9 +75,10 @@ export interface NewActivity {
  */
 export interface MissionControlSource {
   readonly kind: "local-seed" | "octo";
-  loadWorld(): Promise<World>;
+  loadWorld(workspaceId?: string): Promise<World>;
   signIn(mode: SessionMode): Promise<Session>;
   decideApproval(input: DecisionInput): Promise<ApprovalDecisionResult>;
+  addProposal(input: NewProposal): Promise<Approval>;
   setAgentStatus(agentId: string, status: AgentStatus): Promise<Agent>;
   setConnectorStatus(
     connectorId: string,
@@ -80,9 +90,149 @@ export interface MissionControlSource {
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+/**
+ * Materialize an approved proposal against the world.
+ *
+ * `mission` designs create the container if needed, then objective, mission,
+ * and plan — all starting as `queued`/`todo`, because approval starts the
+ * work, it does not finish it. `replan` designs adjust the mission they
+ * reference: a new deadline, a replacement plan, or an acknowledged
+ * escalation. The design is data, so the same shape can later be written to
+ * Octo's workspace SQL instead of an in-memory world.
+ */
+export const applyApprovedDesign = (
+  world: World,
+  design: MissionDesign,
+  nextId: (prefix: string) => string,
+): { summary: string; activity: string } => {
+  const now = new Date().toISOString();
+
+  if (design.kind === "mission") {
+    let projectId = design.projectId;
+    if (!projectId) {
+      const project: Project = {
+        id: nextId("prj-live"),
+        workspaceId: world.workspaces[0]?.id ?? "w1",
+        name: design.projectName ?? design.missionName,
+        kind: "initiative",
+        status: "active",
+        owner: "Alex Rivera",
+        summary: design.missionSummary,
+        personIds: [],
+        companyIds: [],
+        eventIds: [],
+        startedAt: now,
+        targetDate: design.due,
+      };
+      world.projects = [project, ...world.projects];
+      projectId = project.id;
+    }
+    const objective = {
+      id: nextId("obj-live"),
+      projectId,
+      name: design.objectiveName,
+      targetLabel: design.objectiveTarget,
+      progress: 0,
+      status: "on_track" as const,
+      dueDate: design.due,
+    };
+    world.objectives = [...world.objectives, objective];
+    const mission = {
+      id: nextId("ms-live"),
+      objectiveId: objective.id,
+      projectId,
+      name: design.missionName,
+      summary: design.missionSummary,
+      horizon: design.horizon,
+      status: "queued" as const,
+      agentIds: design.agentIds,
+      personIds: [],
+      due: design.due,
+    };
+    world.missions = [...world.missions, mission];
+    const plan = {
+      id: nextId("plan-live"),
+      missionId: mission.id,
+      agentId: design.agentIds[0] ?? "research",
+      title: `Plan — ${design.missionName}`,
+      summary: design.rationale,
+      steps: design.planSteps.map((step, index) => ({
+        id: `step-${index + 1}`,
+        label: step.label,
+        detail: step.detail,
+        status: "todo" as const,
+        agentId: step.agentId,
+      })),
+      updatedAt: now,
+    };
+    world.plans = [...world.plans, plan];
+    return {
+      summary: `${mission.name} is queued under ${objective.name} with a ${design.planSteps.length}-step plan.`,
+      activity: `Mission created: ${mission.name}`,
+    };
+  }
+
+  const mission = world.missions.find((item) => item.id === design.missionId);
+  if (!mission) {
+    return {
+      summary: "The mission this replan targeted no longer exists; nothing changed.",
+      activity: `Re-plan dropped: ${design.missionName}`,
+    };
+  }
+  if (design.adjustment === "extend") {
+    mission.due = design.due;
+    return {
+      summary: `${mission.name} now runs to ${design.due.slice(0, 10)}; remaining steps keep their owners.`,
+      activity: `Deadline extended: ${mission.name}`,
+    };
+  }
+  if (design.adjustment === "replan") {
+    const plan = world.plans.find((item) => item.missionId === mission.id);
+    const steps = design.planSteps.map((step, index) => ({
+      id: `step-${index + 1}`,
+      label: step.label,
+      detail: step.detail,
+      status: "todo" as const,
+      agentId: step.agentId,
+    }));
+    if (plan) {
+      plan.steps = steps;
+      plan.summary = design.rationale;
+      plan.updatedAt = now;
+    } else {
+      world.plans = [
+        {
+          id: nextId("plan-live"),
+          missionId: mission.id,
+          agentId: design.agentIds[0] ?? "research",
+          title: `Plan — ${mission.name}`,
+          summary: design.rationale,
+          steps,
+          updatedAt: now,
+        },
+        ...world.plans,
+      ];
+    }
+    if (mission.status === "queued" || mission.status === "blocked") {
+      mission.status = "running";
+    }
+    return {
+      summary: `${mission.name} has a new ${steps.length}-step plan and is running against ${mission.due.slice(0, 10)}.`,
+      activity: `Re-planned: ${mission.name}`,
+    };
+  }
+  // escalate: the approval itself was the decision; the block stays visible.
+  return {
+    summary: `Escalation for ${mission.name} accepted — the decision options are logged and the mission stays blocked until input arrives.`,
+    activity: `Escalation approved: ${mission.name}`,
+  };
+};
+
 export const createLocalSeedSource = (): MissionControlSource => {
-  let world: World = clone(seedWorld);
+  const world: World = clone(seedWorld);
   let liveId = 0;
+  let entityId = 0;
+  const nextId = (prefix: string) => `${prefix}-${++entityId}`;
 
   const findAgent = (agentId: string) => {
     const agent = world.agents.find((item) => item.id === agentId);
@@ -151,6 +301,12 @@ export const createLocalSeedSource = (): MissionControlSource => {
       approval.decisionNote = note;
       if (editedAction) approval.editedAction = editedAction;
 
+      // An approved proposal becomes work; a declined one stays a record.
+      const outcome =
+        approval.design && decision === "approved"
+          ? applyApprovedDesign(world, approval.design, nextId)
+          : null;
+
       const agent = findAgent(approval.agentId);
       const remaining = world.approvals.filter(
         (item) => item.agentId === agent.id && item.status === "pending",
@@ -175,6 +331,7 @@ export const createLocalSeedSource = (): MissionControlSource => {
             : `You declined: ${approval.title}`,
         detail:
           note?.trim() ||
+          outcome?.summary ||
           (decision === "approved"
             ? `${agent.name} will execute this now and log the result.`
             : `${agent.name} will stop this thread and try a different angle.`),
@@ -190,7 +347,29 @@ export const createLocalSeedSource = (): MissionControlSource => {
         approval: clone(approval),
         activity: clone(entry),
         agent: clone(agent),
+        world: outcome ? clone(world) : undefined,
       };
+    },
+
+    async addProposal(input) {
+      const approval: Approval = {
+        id: nextId("ap-live"),
+        agentId: input.agentId,
+        kind: input.kind,
+        title: input.title,
+        proposedAction: input.proposedAction,
+        reason: input.reason,
+        evidence: clone(input.evidence),
+        risk: input.risk,
+        personId: input.personId,
+        companyId: input.companyId,
+        eventId: input.eventId,
+        createdAt: new Date().toISOString(),
+        status: "pending",
+        design: clone(input.design),
+      };
+      world.approvals = [approval, ...world.approvals];
+      return clone(approval);
     },
 
     async setAgentStatus(agentId, status) {
