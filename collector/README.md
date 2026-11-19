@@ -40,6 +40,11 @@ Everything sensitive stays outside the repository, under
 session does not linger on the machine after the experiment. The real
 daemon will choose a durable, permission-restricted location.
 
+Owner chose to KEEP the signed-in profile (2026-11-19). A durable private copy
+lives at `~/.cache/ri-daemon-proof` (0700). Reuse it with:
+`RI_PROOF_ROOT=$HOME/.cache/ri-daemon-proof pnpm run check` (or signin/fetch).
+Delete that directory to revoke the persisted session.
+
 ## Boundaries
 
 - A human signs in manually. This code never sees a password or one-time
