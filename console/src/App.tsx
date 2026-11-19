@@ -31,6 +31,9 @@ import Connectors from "./pages/integrations/Connectors";
 import McpServers from "./pages/integrations/McpServers";
 import Plugins from "./pages/integrations/Plugins";
 import NotFound from "./pages/NotFound";
+import SessionWorkspace from "./components/sessions/SessionWorkspace";
+import Profile from "./pages/Profile";
+import Schedules from "./pages/Schedules";
 
 const queryClient = new QueryClient();
 
@@ -65,6 +68,9 @@ const App = () => (
                 <Route path="/approvals" element={<Approvals />} />
                 <Route path="/activity" element={<Activity />} />
                 <Route path="/voice" element={<Voice />} />
+                <Route path="/copilot" element={<SessionWorkspace />} />
+                <Route path="/profile" element={<Profile />} />
+                <Route path="/schedules" element={<Schedules />} />
                 <Route path="/people" element={<People />} />
                 <Route path="/people/:personId" element={<PersonProfile />} />
                 <Route path="/events" element={<Events />} />

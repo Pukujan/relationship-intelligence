@@ -30,8 +30,11 @@ import {
   Target,
   Users,
   type LucideIcon,
+  UserRound,
+  CalendarClock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SessionChip } from "./SessionChip";
 import { useData } from "@/data/store";
 import { pendingApprovals } from "@/data/derive";
 import { useOrchestrator } from "@/components/copilot/OrchestratorProvider";
@@ -43,7 +46,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { CopilotBar } from "@/components/copilot/CopilotBar";
 import { PersonAvatar } from "@/components/common";
 import { ContainerSwitcher } from "./ContainerSwitcher";
 
@@ -153,6 +155,13 @@ const navGroups: { label: string; items: NavItem[] }[] = [
       { to: "/integrations/connectors", label: "Connectors", icon: Plug },
       { to: "/integrations/mcp", label: "MCP servers", icon: Server },
       { to: "/integrations/plugins", label: "Plugins", icon: Puzzle },
+    ],
+  },
+  {
+    label: "You",
+    items: [
+      { to: "/profile", label: "Profile & team", icon: UserRound },
+      { to: "/schedules", label: "Scheduled research", icon: CalendarClock },
     ],
   },
 ];
@@ -424,6 +433,18 @@ const TopBar = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // RI-0010: quick-ask opens the session workspace instead of a modal dialog.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        navigate("/copilot");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navigate]);
+
   const title = useMemo(() => {
     if (location.pathname.startsWith("/projects/")) return "Project";
     if (location.pathname.startsWith("/missions/")) return "Mission";
@@ -453,6 +474,7 @@ const TopBar = () => {
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
+          <SessionChip />
           <button
             type="button"
             onClick={() => openCopilot()}
@@ -537,6 +559,5 @@ export const AppShell = () => (
         </div>
       </main>
     </div>
-    <CopilotBar />
   </div>
 );

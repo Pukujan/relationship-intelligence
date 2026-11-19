@@ -54,7 +54,7 @@ const proof = [
 ];
 
 const SignIn = () => {
-  const { session, signIn } = useData();
+  const { session, signIn, sessionReason, resumeSession } = useData();
   const navigate = useNavigate();
   const [pending, setPending] = useState<"google" | "guest" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +151,21 @@ const SignIn = () => {
                   demo
                 </span>
               </Button>
+              {sessionReason === "octo_token_expired" || sessionReason === "idle_expired" ? (
+                <div className="mb-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+                  {sessionReason === "idle_expired"
+                    ? "You were idle past the 30-minute window, so the local session ended."
+                    : "Your Octo session reached its 20-minute platform limit."}{" "}
+                  Resume with one click — Google remembers you, so it is a single consent tap.
+                  <button
+                    type="button"
+                    onClick={resumeSession}
+                    className="focus-ring ml-2 rounded-md border border-warn/40 px-2 py-0.5 text-[11px] font-medium hover:bg-warn/10"
+                  >
+                    Resume session
+                  </button>
+                </div>
+              ) : null}
               {error ? (
                 <p role="alert" className="text-[11.5px] text-destructive">
                   {error}

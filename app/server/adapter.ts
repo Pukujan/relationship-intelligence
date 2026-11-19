@@ -10,6 +10,13 @@
  * No route accepts an Octo token or API key from the browser. That is the point
  * of the adapter: the browser gets a cookie, and Octo keeps authority over who
  * the principal is and which workspaces they may enter.
+ *
+ * Session longevity: authenticated /app-api/* requests slide a 30-minute idle
+ * window (session.ts). Octo's absolute 20-minute token TTL still applies on
+ * top — sliding refresh is requested in Octo issue #93. When Octo refuses a
+ * token we keep the cookie and report a reason so the console can offer a
+ * one-click resume; the cookie alone grants nothing, every request still
+ * re-validates at Octo.
  */
 
 import { randomBytes } from "node:crypto";
@@ -18,7 +25,22 @@ import { createServer } from "node:http";
 import { SessionResponseSchema } from "../shared/contracts.js";
 import { type Env, readEnv } from "./env.js";
 import { fetchPrincipal, fetchWorkspaces, OctoError } from "./octo.js";
-import { newOauthState, readSession, safeReturnTo } from "./session.js";
+import { handleProfileRoutes } from "./profile.js";
+import { handleScheduleRoutes } from "./schedules.js";
+import {
+  isIdleExpired,
+  newOauthState,
+  readSession,
+  safeReturnTo,
+  tokenExpiresAtMs,
+} from "./session.js";
+import {
+  appendMessage,
+  createConversation,
+  getMessages,
+  listConversations,
+  patchConversation,
+} from "./sessions.js";
 import {
   addProposal,
   decideApproval,
@@ -158,6 +180,7 @@ export async function handleRequest(
       return;
     }
     session.octoToken = token;
+    session.lastSeenAt = Date.now();
     await session.save();
     sendJson(res, 200, {
       authenticated: true,
@@ -172,28 +195,56 @@ export async function handleRequest(
       sendJson(res, 200, { authenticated: false });
       return;
     }
+    // Advisory expiry for the console countdown; Octo stays the authority on
+    // whether the token is actually valid (signature, revocation, clock).
+    const expiresAt = tokenExpiresAtMs(session.octoToken);
+    if (expiresAt === null) {
+      // Bad prefix or malformed envelope: this cookie can never become valid,
+      // so it is the one case where we destroy it outright.
+      session.destroy();
+      sendJson(res, 200, { authenticated: false });
+      return;
+    }
+    if (isIdleExpired(session)) {
+      // Sliding idle window ended. Destroy, but tell the console why so the
+      // sign-in screen can offer Resume instead of a cold first sign-in.
+      session.destroy();
+      sendJson(res, 200, {
+        authenticated: false,
+        reason: "idle_expired",
+        resume: true,
+      });
+      return;
+    }
     try {
       const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 };
       const principal = await fetchPrincipal(config, session.octoToken);
       const workspaces = await fetchWorkspaces(config, session.octoToken);
-      sendJson(
-        res,
-        200,
-        SessionResponseSchema.parse({
-          authenticated: true,
-          principal,
-          workspaces,
-        }),
-      );
+      session.lastSeenAt = Date.now();
+      await session.save();
+      const state = SessionResponseSchema.parse({
+        authenticated: true,
+        principal,
+        workspaces,
+      });
+      // expiresAt rides alongside the validated contract; the shared schema
+      // does not carry it yet (integrator owns contracts.ts).
+      sendJson(res, 200, { ...state, expiresAt });
     } catch (error) {
       if (
         error instanceof OctoError &&
         (error.status === 401 || error.status === 403)
       ) {
-        // Octo refused the token (expired or revoked): clear my cookie too, so
-        // the browser is not stuck presenting a dead session.
-        session.destroy();
-        sendJson(res, 200, { authenticated: false });
+        // Octo refused the token (absolute TTL passed, or revoked). Keep the
+        // cookie: it grants nothing on its own, and keeping it lets the
+        // console resume in place (returnTo, workspace selection) instead of
+        // bouncing the user through a cold Google sign-in.
+        sendJson(res, 200, {
+          authenticated: false,
+          reason: "octo_token_expired",
+          resume: true,
+          expiresAt,
+        });
         return;
       }
       sendJson(res, 502, { error: "OCTO_UNAVAILABLE" });
@@ -207,20 +258,31 @@ export async function handleRequest(
       sendJson(res, 401, { error: "UNAUTHENTICATED" });
       return;
     }
+    if (isIdleExpired(session)) {
+      session.destroy();
+      sendJson(res, 401, { error: "UNAUTHENTICATED", reason: "idle_expired" });
+      return;
+    }
     // Source connections live in the Octo workspace database, keyed by the
     // current principal. Until Slice 001 creates that table, an authenticated
     // user with no connections gets an empty list rather than an error.
     try {
       const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 };
       await fetchPrincipal(config, session.octoToken); // still valid?
+      session.lastSeenAt = Date.now();
+      await session.save();
       sendJson(res, 200, { connections: [] });
     } catch (error) {
       if (
         error instanceof OctoError &&
         (error.status === 401 || error.status === 403)
       ) {
-        session.destroy();
-        sendJson(res, 401, { error: "UNAUTHENTICATED" });
+        // Keep the cookie so GET /app-api/session can report the reason and
+        // the console can offer Resume; the token itself is already dead.
+        sendJson(res, 401, {
+          error: "UNAUTHENTICATED",
+          reason: "octo_token_expired",
+        });
         return;
       }
       sendJson(res, 502, { error: "OCTO_UNAVAILABLE" });
@@ -249,10 +311,27 @@ export async function handleRequest(
     "/app-api/connector-status",
     "/app-api/plugin-installed",
   ];
-  if (worldRoutes.includes(path)) {
+  const extraRoutes =
+    path === "/app-api/profile" ||
+    path === "/app-api/team" ||
+    path === "/app-api/files" ||
+    path.startsWith("/app-api/files/") ||
+    path === "/app-api/notes" ||
+    path === "/app-api/retros" ||
+    path.startsWith("/app-api/schedules");
+  if (
+    worldRoutes.includes(path) ||
+    path.startsWith("/app-api/sessions") ||
+    extraRoutes
+  ) {
     const session = await readSession(req, res, env);
     if (!session.octoToken) {
       sendJson(res, 401, { error: "UNAUTHENTICATED" });
+      return;
+    }
+    if (isIdleExpired(session)) {
+      session.destroy();
+      sendJson(res, 401, { error: "UNAUTHENTICATED", reason: "idle_expired" });
       return;
     }
     const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 20_000 };
@@ -262,13 +341,20 @@ export async function handleRequest(
       const me = await fetchPrincipal(config, session.octoToken);
       principal = { id: me.id, displayName: me.displayName ?? me.email };
       workspaces = await fetchWorkspaces(config, session.octoToken);
+      // Authenticated request: slide the idle window. Octo's absolute token
+      // TTL still applies — this never extends the token itself (Octo #93).
+      session.lastSeenAt = Date.now();
+      await session.save();
     } catch (error) {
       if (
         error instanceof OctoError &&
         (error.status === 401 || error.status === 403)
       ) {
-        session.destroy();
-        sendJson(res, 401, { error: "UNAUTHENTICATED" });
+        // Keep the cookie for the resume flow; see GET /app-api/session.
+        sendJson(res, 401, {
+          error: "UNAUTHENTICATED",
+          reason: "octo_token_expired",
+        });
         return;
       }
       sendJson(res, 502, { error: "OCTO_UNAVAILABLE" });
@@ -286,6 +372,116 @@ export async function handleRequest(
       return;
     }
     try {
+      if (extraRoutes) {
+        const ctx = {
+          config,
+          token: session.octoToken,
+          workspaceId: requested,
+          principalId: principal.id,
+          principal,
+          workspaces,
+        };
+        const handled = path.startsWith("/app-api/schedules")
+          ? await handleScheduleRoutes(req, res, url, ctx)
+          : await handleProfileRoutes(req, res, url, ctx);
+        if (handled) return;
+      }
+      if (path === "/app-api/sessions" && req.method === "GET") {
+        sendJson(
+          res,
+          200,
+          await listConversations(
+            config,
+            session.octoToken,
+            requested,
+            principal.id,
+          ),
+        );
+        return;
+      }
+      if (path === "/app-api/sessions" && req.method === "POST") {
+        sendJson(
+          res,
+          200,
+          await createConversation(
+            config,
+            session.octoToken,
+            requested,
+            principal.id,
+            {
+              title: String(body.title ?? "New research"),
+              scopeKind: String(body.scopeKind ?? "workspace"),
+              scopeId: typeof body.scopeId === "string" ? body.scopeId : null,
+            },
+          ),
+        );
+        return;
+      }
+      const sessionMatch = path.match(
+        /^\/app-api\/sessions\/([^/]+)(\/messages)?$/,
+      );
+      if (sessionMatch) {
+        const conversationId = sessionMatch[1] ?? "";
+        const isMessages = Boolean(sessionMatch[2]);
+        if (isMessages && req.method === "GET") {
+          sendJson(
+            res,
+            200,
+            await getMessages(
+              config,
+              session.octoToken,
+              requested,
+              principal.id,
+              conversationId,
+            ),
+          );
+          return;
+        }
+        if (isMessages && req.method === "POST") {
+          sendJson(
+            res,
+            200,
+            await appendMessage(
+              config,
+              session.octoToken,
+              requested,
+              principal.id,
+              conversationId,
+              body.message,
+            ),
+          );
+          return;
+        }
+        if (!isMessages && req.method === "PATCH") {
+          sendJson(
+            res,
+            200,
+            await patchConversation(
+              config,
+              session.octoToken,
+              requested,
+              principal.id,
+              conversationId,
+              {
+                title: typeof body.title === "string" ? body.title : undefined,
+                archived:
+                  typeof body.archived === "boolean"
+                    ? body.archived
+                    : undefined,
+                scopeKind:
+                  typeof body.scopeKind === "string"
+                    ? body.scopeKind
+                    : undefined,
+                scopeId:
+                  body.scopeId === null || typeof body.scopeId === "string"
+                    ? body.scopeId
+                    : undefined,
+              },
+            ),
+          );
+          return;
+        }
+      }
       if (path === "/app-api/world" && req.method === "GET") {
         sendJson(
           res,
@@ -414,8 +610,11 @@ export async function handleRequest(
         error instanceof OctoError &&
         (error.status === 401 || error.status === 403)
       ) {
-        session.destroy();
-        sendJson(res, 401, { error: "UNAUTHENTICATED" });
+        // Keep the cookie for the resume flow; see GET /app-api/session.
+        sendJson(res, 401, {
+          error: "UNAUTHENTICATED",
+          reason: "octo_token_expired",
+        });
         return;
       }
       console.error(

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   addDays,
   addMonths,
@@ -35,6 +35,7 @@ import {
   SectionHeader,
 } from "@/components/common";
 import { MissionChain, Pill, ScopeBanner } from "@/components/work";
+import { UnifiedTimeline, collectTimelineItems } from "@/components/crm/UnifiedTimeline";
 import { Button } from "@/components/ui/button";
 
 type CalendarItem =
@@ -81,6 +82,7 @@ const CalendarPage = () => {
     setActiveProject,
   } = useData();
   const { openCopilot } = useOrchestrator();
+  const navigate = useNavigate();
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [view, setView] = useState<"month" | "week">("month");
   const [selected, setSelected] = useState<Date>(new Date());
@@ -169,6 +171,18 @@ const CalendarPage = () => {
             onClick={() => openCopilot("Prep me for the next event")}
           >
             <Sparkles className="h-3.5 w-3.5 text-primary" />
+      <UnifiedTimeline
+        className="mb-4"
+        items={collectTimelineItems(world, {
+          projectId: activeProjectId,
+          kinds: ["mission", "objective", "event", "approval"],
+          from: startOfMonth(cursor),
+          to: endOfMonth(cursor),
+        })}
+        variant="strip"
+        emptyText="Nothing dated in this month for the current scope."
+        onSelect={(item) => { if (item.href) navigate(item.href); }}
+      />
             Prep the next one
           </Button>
         }

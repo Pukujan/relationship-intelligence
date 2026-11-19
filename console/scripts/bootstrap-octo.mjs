@@ -98,6 +98,58 @@ const DDL = [
     (table) =>
       `CREATE INDEX IF NOT EXISTS ${table}_scope ON ri_console.${table} (workspace_id, visibility)`,
   ),
+  // RI-0010: persistent copilot conversations. Private by default; messages
+  // carry validated parts, never raw model output.
+  `CREATE TABLE IF NOT EXISTS ri_console.conversation (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    visibility TEXT NOT NULL DEFAULT 'private',
+    scope_kind TEXT NOT NULL DEFAULT 'workspace',
+    scope_id TEXT,
+    title TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    archived_at TIMESTAMPTZ
+  )`,
+  `CREATE TABLE IF NOT EXISTS ri_console.message (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES ri_console.conversation(id),
+    role TEXT NOT NULL,
+    parts JSONB NOT NULL,
+    provider TEXT,
+    model TEXT,
+    reasoning TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS conversation_scope ON ri_console.conversation (workspace_id, principal_id)`,
+  `CREATE INDEX IF NOT EXISTS message_conversation ON ri_console.message (conversation_id, created_at)`,
+  // RI-0010 task C: the signed-in person's own profile. One row per principal
+  // per workspace (the ledger has contact people, but no self entity). The doc
+  // is principal-private: it is only ever read back through that principal's
+  // token, never listed to the team.
+  `CREATE TABLE IF NOT EXISTS ri_console.profile (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    doc JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (workspace_id, principal_id)
+  )`,
+  // Links from a file metadata row to canonical graph entities (person,
+  // company, project, event, mission). Links reference entities — they never
+  // copy them. principal_id records who attached the link.
+  `CREATE TABLE IF NOT EXISTS ri_console.file_link (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    file_id TEXT NOT NULL,
+    entity_kind TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS file_link_file ON ri_console.file_link (workspace_id, file_id)`,
+  `CREATE INDEX IF NOT EXISTS file_link_entity ON ri_console.file_link (entity_kind, entity_id)`,
 ];
 
 /** Configuration only. No people, no work, no approvals: those are canonical or gated. */
@@ -111,7 +163,9 @@ for (const collection of CONFIG_COLLECTIONS) {
 }
 
 console.log(`workspace ${WS}`);
-console.log(`tables: ${Object.values(TABLES).length} in schema ri_console`);
+console.log(
+  `tables: ${DDL.filter((statement) => statement.startsWith("CREATE TABLE")).length} in schema ri_console`,
+);
 console.log(`config rows: ${rows.length} (${CONFIG_COLLECTIONS.join(", ")})`);
 if (!APPLY) {
   console.log("dry run — pass --apply to write");
