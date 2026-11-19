@@ -103,7 +103,7 @@ export async function handleRequest(
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
       "Content-Security-Policy":
-        "default-src 'none'; script-src 'unsafe-inline'; base-uri 'none'",
+        "default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'",
     });
     res.end(`<!doctype html><html><body><p>Finishing sign-in…</p><script>
       (function () {
@@ -137,6 +137,7 @@ export async function handleRequest(
       return;
     }
     if (typeof token !== "string" || !token.startsWith("octo_sess_")) {
+      console.error("session accept: bad token prefix");
       session.destroy();
       sendJson(res, 400, { error: "INVALID_TOKEN" });
       return;
@@ -144,7 +145,13 @@ export async function handleRequest(
     try {
       const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 };
       await fetchPrincipal(config, token);
-    } catch {
+    } catch (error) {
+      // Diagnostic class only: status and prefix, never the token itself.
+      console.error(
+        "session accept: Octo refused the token:",
+        error instanceof OctoError ? error.status : "non-octo-error",
+        "| prefix:", token.slice(0, 10),
+      );
       session.destroy();
       sendJson(res, 401, { error: "SESSION_REJECTED" });
       return;
@@ -410,6 +417,11 @@ export async function handleRequest(
         sendJson(res, 401, { error: "UNAUTHENTICATED" });
         return;
       }
+      console.error(
+        "world route failed:",
+        path,
+        error instanceof Error ? error.message : "unknown",
+      );
       sendJson(res, 502, {
         error: "WORLD_WRITE_FAILED",
         detail: error instanceof Error ? error.message : "unknown",

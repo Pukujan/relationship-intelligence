@@ -345,8 +345,24 @@ async function readOps(
   workspaceId: string,
   principalId: string,
 ): Promise<Record<string, Json[]>> {
+  // A workspace without the console schema (e.g. a fresh personal workspace)
+  // reads as empty work, not an error. Canonical graph reads still apply.
+  const present = new Set(
+    (
+      await octoSql(
+        config,
+        token,
+        workspaceId,
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'ri_console'",
+      )
+    ).map((row) => String(row.table_name)),
+  );
   const out: Record<string, Json[]> = {};
   for (const [collection, table] of Object.entries(TABLES)) {
+    if (!present.has(table)) {
+      out[collection] = [];
+      continue;
+    }
     const rows = await octoSql(
       config,
       token,

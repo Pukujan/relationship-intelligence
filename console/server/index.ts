@@ -56,8 +56,8 @@ const ModelAnswerSchema = z.object({
     .array(
       z.object({
         label: z.string().min(1).max(400),
-        agentId: z.string().optional(),
-        detail: z.string().max(600).optional(),
+        agentId: z.string().nullish(),
+        detail: z.string().max(600).nullish(),
       }),
     )
     .min(1)
@@ -78,8 +78,8 @@ const DesignRequestSchema = z.object({
 const ModelDesignSchema = z.object({
   missionName: z.string().min(1).max(240),
   missionSummary: z.string().min(1).max(2_000),
-  projectId: z.string().max(40).optional(),
-  projectName: z.string().max(240).optional(),
+  projectId: z.string().max(40).nullish(),
+  projectName: z.string().max(240).nullish(),
   objectiveName: z.string().min(1).max(400),
   objectiveTarget: z.string().min(1).max(400),
   horizon: z.enum(["today", "this_week"]).default("this_week"),
@@ -90,8 +90,8 @@ const ModelDesignSchema = z.object({
     .array(
       z.object({
         label: z.string().min(1).max(400),
-        detail: z.string().max(800).default(""),
-        agentId: z.string().max(40).optional(),
+        detail: z.string().max(800).nullish().default(""),
+        agentId: z.string().max(40).nullish(),
       }),
     )
     .min(2)
@@ -238,32 +238,42 @@ async function askModel(system: string, user: string): Promise<unknown> {
   if (!BASE_URL || !API_KEY) {
     throw new Error("unconfigured");
   }
-  const response = await fetch(`${BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    throw new Error(`model upstream ${response.status}`);
+  // The gateway rate-limits (429) under burst; retry with backoff before
+  // falling back to the offline router, so a transient limit is not a answer
+  // quality event.
+  const backoffs = [2_000, 6_000];
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(`${BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (response.ok) {
+      const payload = (await response.json()) as {
+        choices?: { message?: { content?: string } }[];
+      };
+      const content = payload.choices?.[0]?.message?.content;
+      if (!content) throw new Error("empty model response");
+      return JSON.parse(content);
+    }
+    const retryable = response.status === 429 || response.status >= 500;
+    if (!retryable || attempt >= backoffs.length) {
+      throw new Error(`model upstream ${response.status}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, backoffs[attempt]));
   }
-  const payload = (await response.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
-  const content = payload.choices?.[0]?.message?.content;
-  if (!content) throw new Error("empty model response");
-  return JSON.parse(content);
 }
 
 /* ------------------------------------------------------------------ */
@@ -380,7 +390,7 @@ async function handleDesign(body: unknown) {
       : undefined;
   const planSteps = design.planSteps.slice(0, 6).map((step) => ({
     label: clip(step.label, 120),
-    detail: clip(step.detail, 200),
+    detail: clip(step.detail ?? "", 200),
     ...(step.agentId && knownId(digest, "agent", step.agentId)
       ? { agentId: step.agentId }
       : {}),
