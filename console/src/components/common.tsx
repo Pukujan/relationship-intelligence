@@ -206,6 +206,8 @@ const kindLabels: Record<ApprovalKind, string> = {
   publish: "Publish",
   invite: "Invite",
   commit: "Commit",
+  mission: "Mission",
+  replan: "Re-plan",
 };
 
 export const KindBadge = ({ kind, className }: { kind: ApprovalKind; className?: string }) => (

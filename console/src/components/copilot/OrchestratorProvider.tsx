@@ -8,9 +8,25 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { agentById, pendingApprovals } from "@/data/derive";
+import { toast } from "sonner";
+import { agentById, pendingApprovals, projectById } from "@/data/derive";
 import { useData } from "@/data/store";
-import type { Approval, Decision } from "@/data/types";
+import type {
+  Approval,
+  Decision,
+  MissionDesign,
+  World,
+} from "@/data/types";
+import {
+  askCopilot,
+  askDesign,
+  type AnswerSource,
+} from "@/lib/copilotClient";
+import {
+  replanAlreadyPending,
+  replanProposalFor,
+  stalledMissions,
+} from "@/lib/intelligence";
 import {
   copilotSuggestions,
   planRequest,
@@ -22,7 +38,12 @@ export interface Exchange {
   answer: CopilotAnswer;
   stepIndex: number;
   complete: boolean;
+  source: AnswerSource;
+  /** Present when the exchange ran in design mode. */
+  design?: MissionDesign;
 }
+
+export type CopilotMode = "ask" | "design";
 
 export interface TranscriptLine {
   id: string;
@@ -64,8 +85,10 @@ interface OrchestratorValue {
   closeCopilot: () => void;
   seedPrompt: string;
   exchange: Exchange | null;
-  submitPrompt: (prompt: string) => void;
+  submitPrompt: (prompt: string) => void | Promise<void>;
   resetExchange: () => void;
+  mode: CopilotMode;
+  setMode: (mode: CopilotMode) => void;
   suggestions: string[];
   answerFor: (prompt: string) => CopilotAnswer | null;
   call: CallSession;
@@ -100,10 +123,11 @@ const line = (role: TranscriptLine["role"], text: string): TranscriptLine => ({
 });
 
 export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
-  const { world, decide, logActivity } = useData();
+  const { world, status, session, decide, addProposal, logActivity } = useData();
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [seedPrompt, setSeedPrompt] = useState("");
   const [exchange, setExchange] = useState<Exchange | null>(null);
+  const [mode, setMode] = useState<CopilotMode>("ask");
   const [call, setCall] = useState<CallSession>(emptyCall);
   const [checkIns, setCheckIns] = useState<CheckIn[]>([
     {
@@ -141,13 +165,62 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
 
   const closeCopilot = useCallback(() => setCopilotOpen(false), []);
 
+  const designAnswer = (design: MissionDesign, current: World): CopilotAnswer => {
+    const project = design.projectId
+      ? projectById(current, design.projectId)
+      : undefined;
+    return {
+      intentId: "design-mission",
+      intentLabel: `Design · ${design.missionName}`,
+      summary: design.rationale,
+      agents: design.agentIds,
+      steps: design.planSteps.map((step) => ({
+        label: step.label,
+        agentId: step.agentId,
+        detail: step.detail || undefined,
+      })),
+      links: project
+        ? [
+            {
+              label: project.name,
+              href: `/projects/${project.id}`,
+              kind: "project" as const,
+              meta: project.status.replace("_", " "),
+            },
+          ]
+        : [],
+      approvalIds: [],
+    };
+  };
+
   const submitPrompt = useCallback(
-    (prompt: string) => {
+    async (prompt: string) => {
       if (!world) return;
-      const answer = planRequest(prompt, world);
-      setExchange({ prompt, answer, stepIndex: 0, complete: false });
+      if (mode === "design") {
+        try {
+          const { design, source } = await askDesign(prompt, world, session?.principalId);
+          setExchange({
+            prompt,
+            answer: designAnswer(design, world),
+            stepIndex: 0,
+            complete: false,
+            source,
+            design,
+          });
+        } catch {
+          // Design has no offline stand-in: say so instead of faking a plan.
+          toast.error("The copilot server could not design this mission", {
+            description:
+              "Design mode needs the live model. Check the copilot server is running, or ask the copilot instead.",
+          });
+        }
+        return;
+      }
+      const live = await askCopilot(prompt, world, session?.principalId);
+      const { source, ...answer } = live;
+      setExchange({ prompt, answer, stepIndex: 0, complete: false, source });
     },
-    [world],
+    [mode, world, session?.principalId],
   );
 
   const resetExchange = useCallback(() => setExchange(null), []);
@@ -174,6 +247,22 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
     );
     return () => clearTimeout(timer);
   }, [exchange]);
+
+  // The iteration loop: when the world loads, every stalled mission that has
+  // no pending proposal yet gets exactly one — a proposed way forward held
+  // for approval, never a silent stall. Deterministic, so it runs offline.
+  const proposedStallsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (status !== "ready" || !world) return;
+    for (const stall of stalledMissions(world)) {
+      if (replanAlreadyPending(world, stall.mission.id)) continue;
+      if (proposedStallsRef.current.has(stall.mission.id)) continue;
+      proposedStallsRef.current.add(stall.mission.id);
+      void addProposal(replanProposalFor(world, stall)).catch(() => {
+        proposedStallsRef.current.delete(stall.mission.id);
+      });
+    }
+  }, [addProposal, status, world]);
 
   // Global command shortcut.
   useEffect(() => {
@@ -426,6 +515,8 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
       exchange,
       submitPrompt,
       resetExchange,
+      mode,
+      setMode,
       suggestions: copilotSuggestions,
       answerFor,
       call,
@@ -446,6 +537,8 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
       exchange,
       submitPrompt,
       resetExchange,
+      mode,
+      setMode,
       answerFor,
       call,
       callApprovals,

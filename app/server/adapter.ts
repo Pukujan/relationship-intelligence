@@ -19,6 +19,13 @@ import { SessionResponseSchema } from "../shared/contracts.js";
 import { type Env, readEnv } from "./env.js";
 import { fetchPrincipal, fetchWorkspaces, OctoError } from "./octo.js";
 import { newOauthState, readSession, safeReturnTo } from "./session.js";
+import {
+  addProposal,
+  decideApproval,
+  logActivity,
+  patchDoc,
+  readWorld,
+} from "./world.js";
 
 const MAX_BODY_BYTES = 8 * 1024;
 
@@ -111,7 +118,9 @@ export async function handleRequest(
           body: JSON.stringify({ token: token })
         }).then(function (r) {
           if (!r.ok) { window.location.replace('/?auth_error=SESSION_REJECTED'); return; }
-          window.location.replace('/');
+          return r.json();
+        }).then(function (d) {
+          if (d) { window.location.replace(d.returnTo || '/'); }
         }).catch(function () { window.location.replace('/?auth_error=SESSION_REJECTED'); });
       })();
     </script></body></html>`);
@@ -142,7 +151,10 @@ export async function handleRequest(
     }
     session.octoToken = token;
     await session.save();
-    sendJson(res, 200, { authenticated: true });
+    sendJson(res, 200, {
+      authenticated: true,
+      returnTo: session.returnTo ?? "/",
+    });
     return;
   }
 
@@ -214,6 +226,196 @@ export async function handleRequest(
     session.destroy();
     sendJson(res, 200, { authenticated: false });
     return;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Console world routes — principal token only, never the workspace key */
+  /* ------------------------------------------------------------------ */
+
+  const worldRoutes = [
+    "/app-api/world",
+    "/app-api/decision",
+    "/app-api/proposal",
+    "/app-api/activity",
+    "/app-api/agent-status",
+    "/app-api/connector-status",
+    "/app-api/plugin-installed",
+  ];
+  if (worldRoutes.includes(path)) {
+    const session = await readSession(req, res, env);
+    if (!session.octoToken) {
+      sendJson(res, 401, { error: "UNAUTHENTICATED" });
+      return;
+    }
+    const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 20_000 };
+    let principal: { id: string; displayName: string };
+    let workspaces: { id: string; name: string }[];
+    try {
+      const me = await fetchPrincipal(config, session.octoToken);
+      principal = { id: me.id, displayName: me.displayName ?? me.email };
+      workspaces = await fetchWorkspaces(config, session.octoToken);
+    } catch (error) {
+      if (
+        error instanceof OctoError &&
+        (error.status === 401 || error.status === 403)
+      ) {
+        session.destroy();
+        sendJson(res, 401, { error: "UNAUTHENTICATED" });
+        return;
+      }
+      sendJson(res, 502, { error: "OCTO_UNAVAILABLE" });
+      return;
+    }
+    const body =
+      req.method === "POST"
+        ? (JSON.parse(await readBody(req)) as Record<string, unknown>)
+        : {};
+    const requested = (url.searchParams.get("workspaceId") ??
+      body.workspaceId ??
+      workspaces[0]?.id) as string;
+    if (!workspaces.some((workspace) => workspace.id === requested)) {
+      sendJson(res, 403, { error: "WORKSPACE_NOT_A_MEMBER" });
+      return;
+    }
+    try {
+      if (path === "/app-api/world" && req.method === "GET") {
+        sendJson(
+          res,
+          200,
+          await readWorld(
+            config,
+            session.octoToken,
+            requested,
+            principal,
+            workspaces,
+          ),
+        );
+        return;
+      }
+      if (path === "/app-api/decision" && req.method === "POST") {
+        sendJson(
+          res,
+          200,
+          await decideApproval(
+            config,
+            session.octoToken,
+            requested,
+            principal,
+            workspaces,
+            {
+              approvalId: String(body.approvalId),
+              decision: body.decision === "approved" ? "approved" : "declined",
+              note: typeof body.note === "string" ? body.note : undefined,
+              editedAction:
+                typeof body.editedAction === "string"
+                  ? body.editedAction
+                  : undefined,
+            },
+          ),
+        );
+        return;
+      }
+      if (path === "/app-api/proposal" && req.method === "POST") {
+        sendJson(
+          res,
+          200,
+          await addProposal(
+            config,
+            session.octoToken,
+            requested,
+            principal.id,
+            body.proposal as Record<string, unknown>,
+          ),
+        );
+        return;
+      }
+      if (path === "/app-api/activity" && req.method === "POST") {
+        sendJson(
+          res,
+          200,
+          await logActivity(
+            config,
+            session.octoToken,
+            requested,
+            principal.id,
+            body.entry as Record<string, unknown>,
+          ),
+        );
+        return;
+      }
+      if (path === "/app-api/agent-status" && req.method === "POST") {
+        sendJson(
+          res,
+          200,
+          await patchDoc(
+            config,
+            session.octoToken,
+            requested,
+            principal.id,
+            "agents",
+            String(body.agentId),
+            {
+              status: body.status,
+              ...(body.status === "paused" ? { currentTask: null } : {}),
+            },
+          ),
+        );
+        return;
+      }
+      if (path === "/app-api/connector-status" && req.method === "POST") {
+        sendJson(
+          res,
+          200,
+          await patchDoc(
+            config,
+            session.octoToken,
+            requested,
+            principal.id,
+            "connectors",
+            String(body.connectorId),
+            {
+              status: body.status,
+              ...(body.status === "connected"
+                ? { lastSync: new Date().toISOString() }
+                : {}),
+            },
+          ),
+        );
+        return;
+      }
+      if (path === "/app-api/plugin-installed" && req.method === "POST") {
+        sendJson(
+          res,
+          200,
+          await patchDoc(
+            config,
+            session.octoToken,
+            requested,
+            principal.id,
+            "plugins",
+            String(body.pluginId),
+            {
+              installed: Boolean(body.installed),
+            },
+          ),
+        );
+        return;
+      }
+    } catch (error) {
+      if (
+        error instanceof OctoError &&
+        (error.status === 401 || error.status === 403)
+      ) {
+        session.destroy();
+        sendJson(res, 401, { error: "UNAUTHENTICATED" });
+        return;
+      }
+      sendJson(res, 502, {
+        error: "WORLD_WRITE_FAILED",
+        detail: error instanceof Error ? error.message : "unknown",
+      });
+      return;
+    }
   }
 
   sendJson(res, 404, { error: "NOT_FOUND" });

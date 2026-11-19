@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
+  AlertTriangle,
   ArrowRight,
   Check,
   CheckCircle2,
@@ -9,13 +10,15 @@ import {
   Mic,
   Phone,
   Sparkles,
+  Target,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
 import { agentById } from "@/data/derive";
-import { useOrchestrator } from "./OrchestratorProvider";
+import { useOrchestrator, type CopilotMode } from "./OrchestratorProvider";
+import { designAsProposal } from "@/lib/intelligence";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { KindBadge, RiskBadge } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -37,6 +40,39 @@ const StepIcon = ({ state }: { state: "done" | "active" | "pending" }) => {
   return <Circle className="h-3 w-3 text-border" />;
 };
 
+const designSuggestions = [
+  "Re-engage the Halcyon sponsors before the renewal window closes",
+  "Turn last week's summit contacts into a warm pipeline",
+  "Build a plan to reopen the cold Northwind thread",
+];
+
+const ModeToggle = ({
+  mode,
+  setMode,
+}: {
+  mode: CopilotMode;
+  setMode: (mode: CopilotMode) => void;
+}) => (
+  <div className="flex shrink-0 items-center rounded-md border border-border/70 bg-surface-1 p-0.5">
+    {(["ask", "design"] as const).map((option) => (
+      <button
+        key={option}
+        type="button"
+        onClick={() => setMode(option)}
+        aria-pressed={mode === option}
+        className={cn(
+          "focus-ring rounded px-2 py-1 text-[10.5px] font-medium uppercase tracking-[0.08em] transition-colors",
+          mode === option
+            ? "bg-primary/15 text-primary"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        {option === "ask" ? "Ask" : "Design"}
+      </button>
+    ))}
+  </div>
+);
+
 export const CopilotBar = () => {
   const {
     copilotOpen,
@@ -45,19 +81,24 @@ export const CopilotBar = () => {
     exchange,
     submitPrompt,
     resetExchange,
+    mode,
+    setMode,
     suggestions,
     startCall,
     call,
   } = useOrchestrator();
-  const { world, decide } = useData();
+  const { world, decide, addProposal } = useData();
   const navigate = useNavigate();
   const [value, setValue] = useState("");
   const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [heldApprovalId, setHeldApprovalId] = useState<string | null>(null);
+  const [holding, setHolding] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!copilotOpen) return;
     setValue(seedPrompt);
+    setHeldApprovalId(null);
     const timer = setTimeout(() => inputRef.current?.focus(), 60);
     return () => clearTimeout(timer);
   }, [copilotOpen, seedPrompt]);
@@ -66,8 +107,30 @@ export const CopilotBar = () => {
     event.preventDefault();
     const prompt = value.trim();
     if (!prompt) return;
-    submitPrompt(prompt);
+    void submitPrompt(prompt);
     setValue("");
+  };
+
+  const handleHold = async () => {
+    if (!world || !exchange?.design) return;
+    setHolding(true);
+    try {
+      const approval = await addProposal(
+        designAsProposal(world, exchange.design),
+      );
+      setHeldApprovalId(approval.id);
+      toast.success("Held for approval", {
+        description:
+          "The proposal is in your inbox. Nothing becomes work until you approve it.",
+      });
+    } catch (error) {
+      toast.error("The proposal could not be held", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setHolding(false);
+    }
   };
 
   const handleDecide = async (approvalId: string, decision: Decision) => {
@@ -130,11 +193,16 @@ export const CopilotBar = () => {
               ref={inputRef}
               value={value}
               onChange={(event) => setValue(event.target.value)}
-              placeholder="Ask the copilot — “who should I follow up with this week?”"
+              placeholder={
+                mode === "design"
+                  ? "Describe a goal — “re-engage the Halcyon sponsors before renewal”"
+                  : "Ask the copilot — “who should I follow up with this week?”"
+              }
               className="h-9 min-w-0 flex-1 bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground/80"
               aria-label="Ask the copilot"
             />
             <div className="flex shrink-0 items-center gap-1">
+              <ModeToggle mode={mode} setMode={setMode} />
               <button
                 type="button"
                 onClick={() => goToVoice(false)}
@@ -169,25 +237,34 @@ export const CopilotBar = () => {
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
           {!exchange ? (
             <div className="space-y-3">
-              <p className="eyebrow px-1">Try a request</p>
+              <p className="eyebrow px-1">
+                {mode === "design" ? "Describe a goal to design" : "Try a request"}
+              </p>
               <div className="grid gap-1">
-                {suggestions.map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    type="button"
-                    onClick={() => submitPrompt(suggestion)}
-                    className="focus-ring group flex items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
-                  >
-                    <Sparkles className="h-3.5 w-3.5 text-primary/70" />
-                    <span className="flex-1">{suggestion}</span>
-                    <ArrowRight className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-60" />
-                  </button>
-                ))}
+                {(mode === "design" ? designSuggestions : suggestions).map(
+                  (suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => submitPrompt(suggestion)}
+                      className="focus-ring group flex items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
+                    >
+                      {mode === "design" ? (
+                        <Target className="h-3.5 w-3.5 text-primary/70" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5 text-primary/70" />
+                      )}
+                      <span className="flex-1">{suggestion}</span>
+                      <ArrowRight className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-60" />
+                    </button>
+                  ),
+                )}
               </div>
               <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-surface-1/60 px-2.5 py-2">
                 <span className="text-[11px] text-muted-foreground">
-                  Typing, speaking, and phone calls all route through one
-                  orchestrator.
+                  {mode === "design"
+                    ? "Design mode researches the goal, drafts a mission, objective, and plan — then holds it for your approval."
+                    : "Typing, speaking, and phone calls all route through one orchestrator."}
                 </span>
               </div>
             </div>
@@ -215,6 +292,23 @@ export const CopilotBar = () => {
                   <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10.5px] font-medium text-primary">
                     <Sparkles className="h-3 w-3" />
                     {answer?.intentLabel}
+                  </span>
+                  <span
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em]",
+                      exchange.source === "live-model"
+                        ? "border-run/30 bg-run/10 text-run"
+                        : "border-border bg-surface-2 text-muted-foreground",
+                    )}
+                    title={
+                      exchange.source === "live-model"
+                        ? "Answered by the model over the copilot server"
+                        : "Copilot server unreachable — answered by the local router"
+                    }
+                  >
+                    {exchange.source === "live-model"
+                      ? "live model"
+                      : "offline simulation"}
                   </span>
                   <span className="text-[11px] text-muted-foreground">Routing to</span>
                   <div className="flex items-center gap-1.5">
@@ -279,6 +373,106 @@ export const CopilotBar = () => {
                   <p className="text-[13px] leading-relaxed text-foreground/90">
                     {answer?.summary}
                   </p>
+
+                  {exchange.design ? (
+                    <div className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="eyebrow">Proposed mission — held for you</p>
+                        <span className="text-[10.5px] text-muted-foreground">
+                          due {exchange.design.due.slice(0, 10)} · autonomy{" "}
+                          {exchange.design.autonomy}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-[13.5px] font-medium text-foreground">
+                        {exchange.design.missionName}
+                      </p>
+                      <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+                        {exchange.design.missionSummary}
+                      </p>
+                      <div className="mt-2 flex items-start gap-2 rounded-lg border border-border/60 bg-surface-1 px-2.5 py-2">
+                        <Target className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                        <div>
+                          <p className="text-[12px] font-medium">
+                            {exchange.design.objectiveName}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            target: {exchange.design.objectiveTarget}
+                            {exchange.design.projectName
+                              ? ` · new project “${exchange.design.projectName}”`
+                              : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <ol className="mt-2 space-y-1">
+                        {exchange.design.planSteps.map((step, index) => (
+                          <li
+                            key={`${step.label}-${index}`}
+                            className="flex items-start gap-2 text-[12px]"
+                          >
+                            <span className="mt-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-border/70 bg-surface-2 text-[9px] text-muted-foreground">
+                              {index + 1}
+                            </span>
+                            <span>
+                              <span className="text-foreground/90">
+                                {step.label}
+                              </span>
+                              {step.detail ? (
+                                <span className="ml-1.5 text-[11px] text-muted-foreground">
+                                  {step.detail}
+                                </span>
+                              ) : null}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                      {exchange.design.unverified.length ? (
+                        <ul className="mt-2 space-y-1 rounded-lg border border-border/60 bg-surface-1/70 px-2.5 py-2">
+                          {exchange.design.unverified.map((item) => (
+                            <li
+                              key={item}
+                              className="flex items-start gap-1.5 text-[11px] text-muted-foreground"
+                            >
+                              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400" />
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      <div className="mt-3 flex items-center gap-2">
+                        {heldApprovalId ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-run/30 bg-run/10 px-2.5 py-1 text-[11px] font-medium text-run">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            In your approval inbox
+                          </span>
+                        ) : (
+                          <Button
+                            size="sm"
+                            className="h-8 rounded-md px-3 text-[11.5px]"
+                            disabled={holding}
+                            onClick={() => void handleHold()}
+                          >
+                            {holding ? (
+                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            ) : null}
+                            Hold for approval
+                          </Button>
+                        )}
+                        {heldApprovalId ? (
+                          <Link
+                            to={`/approvals?focus=${heldApprovalId}`}
+                            onClick={closeCopilot}
+                            className="text-[11.5px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          >
+                            Open in inbox
+                          </Link>
+                        ) : (
+                          <span className="text-[10.5px] text-muted-foreground">
+                            Nothing becomes work until you approve it.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
 
                   {answer?.draft ? (
                     <div className="rounded-xl border border-border/70 bg-background/60 p-3">

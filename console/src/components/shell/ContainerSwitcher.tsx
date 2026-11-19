@@ -60,6 +60,7 @@ export const ContainerSwitcher = () => {
     activeProjectId,
     activeProject,
     setActiveProject,
+    setActiveWorkspace,
   } = useData();
 
   const organization = world?.organization;
@@ -118,7 +119,7 @@ export const ContainerSwitcher = () => {
             <DropdownMenuItem
               key={item.id}
               className="gap-2 text-[12.5px]"
-              disabled={item.id !== workspace.id}
+              onSelect={() => setActiveWorkspace(item.id)}
             >
               <Check
                 className={cn(
@@ -136,7 +137,9 @@ export const ContainerSwitcher = () => {
           ))}
           <DropdownMenuSeparator />
           <p className="px-2 py-1.5 text-[10.5px] leading-relaxed text-muted-foreground">
-            One workspace in this build. Projects live inside it.
+            {session?.mode === "owner"
+              ? "Workspaces you belong to in Octo. Switching rescopes every view."
+              : "One workspace in this demo. Projects live inside it."}
           </p>
         </DropdownMenuContent>
       </SwitcherRow>

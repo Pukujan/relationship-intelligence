@@ -15,6 +15,15 @@ export default defineConfig({
     proxy: {
       "/app-api": "http://127.0.0.1:8787",
       "/octo-auth": "http://127.0.0.1:8787",
+      // The console SPA runs on its own Vite server in dev, same origin here
+      // so the adapter cookie authenticates it. Its base path is /console/.
+      "/console": {
+        target: "http://127.0.0.1:5273",
+        changeOrigin: true,
+        ws: true,
+      },
+      // Copilot brain server, shared by app and console surfaces.
+      "/api": "http://127.0.0.1:8799",
     },
   },
   build: {

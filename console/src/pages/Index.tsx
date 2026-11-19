@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { attentionSignals, totalSignals } from "@/lib/intelligence";
 import { useData } from "@/data/store";
 import {
   agentById,
@@ -102,6 +103,7 @@ const Index = () => {
     .filter((mission) => !todayMissions.some((item) => item.id === mission.id))
     .slice(0, 4);
   const cold = goingCold(world).slice(0, 4);
+  const signals = attentionSignals(world);
   const recent = world.activity
     .slice()
     .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
@@ -225,6 +227,72 @@ const Index = () => {
           </Link>
         ))}
       </div>
+
+      <section className="panel mb-4 p-4">
+        <SectionHeader
+          title="Needs attention"
+          count={totalSignals(signals)}
+          action={
+            <Link
+              to="/approvals"
+              className="focus-ring inline-flex items-center gap-1 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Inbox
+              <ArrowRight className="h-3 w-3" />
+            </Link>
+          }
+        />
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          One aggregated read of what needs you — decisions, overdue, stalled,
+          going cold.
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {signals.map((group) => (
+            <div
+              key={group.key}
+              className="rounded-xl border border-border/70 bg-surface-1/60 p-3"
+            >
+              <div className="flex items-center justify-between">
+                <p className="eyebrow">{group.label}</p>
+                <span className="num text-[12px] font-semibold text-muted-foreground">
+                  {group.items.length}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[10.5px] text-muted-foreground/80">
+                {group.hint}
+              </p>
+              <div className="mt-2 space-y-1.5">
+                {group.items.length === 0 ? (
+                  <p className="text-[11.5px] text-muted-foreground/70">
+                    Nothing here.
+                  </p>
+                ) : (
+                  group.items.slice(0, 3).map((item) => (
+                    <Link
+                      key={`${group.key}-${item.id}`}
+                      to={item.href}
+                      className="focus-ring group block rounded-lg border border-border/60 bg-background/40 px-2 py-1.5 transition-colors hover:bg-surface-2"
+                    >
+                      <p className="truncate text-[12px] font-medium">
+                        {item.label}
+                      </p>
+                      <p
+                        className={cn(
+                          "truncate text-[10.5px] text-muted-foreground",
+                          item.tone === "warn" && "text-warn",
+                          item.tone === "primary" && "text-primary",
+                        )}
+                      >
+                        {item.detail}
+                      </p>
+                    </Link>
+                  ))
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.92fr)]">
         <section className="panel flex flex-col p-4">
