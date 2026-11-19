@@ -83,6 +83,11 @@ export const CopilotBar = () => {
     resetExchange,
     mode,
     setMode,
+    modelChoice,
+    setModelChoice,
+    reasoning,
+    setReasoning,
+    modelOptions,
     suggestions,
     startCall,
     call,
@@ -203,6 +208,32 @@ export const CopilotBar = () => {
             />
             <div className="flex shrink-0 items-center gap-1">
               <ModeToggle mode={mode} setMode={setMode} />
+              <select
+                value={modelChoice}
+                onChange={(event) => setModelChoice(event.target.value)}
+                aria-label="Model route"
+                className="focus-ring h-8 max-w-[130px] rounded-md border border-border/70 bg-surface-1 px-1.5 text-[10.5px] text-muted-foreground outline-none"
+              >
+                <option value="auto">auto · policy</option>
+                {modelOptions.flatMap((provider) =>
+                  provider.models.slice(0, 8).map((model) => (
+                    <option key={`${provider.provider}/${model}`} value={`${provider.provider}/${model}`}>
+                      {provider.provider} · {model}
+                    </option>
+                  )),
+                )}
+              </select>
+              <select
+                value={reasoning}
+                onChange={(event) => setReasoning(event.target.value)}
+                aria-label="Reasoning effort"
+                className="focus-ring h-8 rounded-md border border-border/70 bg-surface-1 px-1.5 text-[10.5px] text-muted-foreground outline-none"
+              >
+                <option value="off">think off</option>
+                <option value="low">low</option>
+                <option value="medium">med</option>
+                <option value="high">high</option>
+              </select>
               <button
                 type="button"
                 onClick={() => goToVoice(false)}
@@ -310,6 +341,15 @@ export const CopilotBar = () => {
                       ? "live model"
                       : "offline simulation"}
                   </span>
+                  {exchange.source === "live-model" && exchange.model ? (
+                    <span
+                      className="rounded-full border border-border/70 bg-surface-2 px-2 py-0.5 text-[10px] text-muted-foreground"
+                      title="Provider and model that actually answered, after routing/failover"
+                    >
+                      {exchange.provider} · {exchange.model}
+                      {reasoning !== "off" ? ` · think ${reasoning}` : ""}
+                    </span>
+                  ) : null}
                   <span className="text-[11px] text-muted-foreground">Routing to</span>
                   <div className="flex items-center gap-1.5">
                     {answer?.agents.map((agentId) => {

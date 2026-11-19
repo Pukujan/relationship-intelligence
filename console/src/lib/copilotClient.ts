@@ -16,11 +16,20 @@ export type AnswerSource = "live-model" | "offline-simulation";
 
 export interface LiveCopilotAnswer extends CopilotAnswer {
   source: AnswerSource;
+  provider?: string;
+  model?: string;
+}
+
+export interface CopilotOptions {
+  model?: string;
+  reasoning?: string;
 }
 
 export interface LiveDesign {
   design: MissionDesign;
   source: AnswerSource;
+  provider?: string;
+  model?: string;
 }
 
 interface ServerAnswer {
@@ -31,6 +40,8 @@ interface ServerAnswer {
   steps: { label: string; agentId?: string; detail?: string }[];
   links: { label: string; href: string; kind: string }[];
   approvalIds: string[];
+  provider?: string;
+  model?: string;
 }
 
 const SERVER_TIMEOUT_MS = 90_000;
@@ -52,12 +63,15 @@ export const askCopilot = async (
   prompt: string,
   world: World,
   principalId?: string,
+  options?: CopilotOptions,
 ): Promise<LiveCopilotAnswer> => {
   try {
     const answer = await post<ServerAnswer>("/api/copilot", {
       prompt,
       digest: buildWorldDigest(world),
       principalId,
+      model: options?.model,
+      reasoning: options?.reasoning,
     });
     return {
       intentId: answer.intentId,
@@ -68,6 +82,8 @@ export const askCopilot = async (
       links: answer.links as LiveCopilotAnswer["links"],
       approvalIds: answer.approvalIds,
       source: "live-model",
+      provider: answer.provider,
+      model: answer.model,
     };
   } catch {
     return {
@@ -81,11 +97,19 @@ export const askDesign = async (
   goal: string,
   world: World,
   principalId?: string,
+  options?: CopilotOptions,
 ): Promise<LiveDesign> => {
-  const design = await post<MissionDesign>("/api/design", {
+  const design = await post<MissionDesign & { provider?: string; model?: string }>("/api/design", {
     goal,
     digest: buildWorldDigest(world),
     principalId,
+    model: options?.model,
+    reasoning: options?.reasoning,
   });
-  return { design: { ...design, kind: "mission" }, source: "live-model" };
+  return {
+    design: { ...design, kind: "mission" },
+    source: "live-model",
+    provider: design.provider,
+    model: design.model,
+  };
 };

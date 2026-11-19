@@ -39,6 +39,8 @@ export interface Exchange {
   stepIndex: number;
   complete: boolean;
   source: AnswerSource;
+  provider?: string;
+  model?: string;
   /** Present when the exchange ran in design mode. */
   design?: MissionDesign;
 }
@@ -89,6 +91,11 @@ interface OrchestratorValue {
   resetExchange: () => void;
   mode: CopilotMode;
   setMode: (mode: CopilotMode) => void;
+  modelChoice: string;
+  setModelChoice: (choice: string) => void;
+  reasoning: string;
+  setReasoning: (effort: string) => void;
+  modelOptions: { provider: string; displayName: string; models: string[] }[];
   suggestions: string[];
   answerFor: (prompt: string) => CopilotAnswer | null;
   call: CallSession;
@@ -128,6 +135,11 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
   const [seedPrompt, setSeedPrompt] = useState("");
   const [exchange, setExchange] = useState<Exchange | null>(null);
   const [mode, setMode] = useState<CopilotMode>("ask");
+  const [modelChoice, setModelChoice] = useState("auto");
+  const [reasoning, setReasoning] = useState("off");
+  const [modelOptions, setModelOptions] = useState<
+    { provider: string; displayName: string; models: string[] }[]
+  >([]);
   const [call, setCall] = useState<CallSession>(emptyCall);
   const [checkIns, setCheckIns] = useState<CheckIn[]>([
     {
@@ -162,6 +174,17 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
     setSeedPrompt(prompt);
     setCopilotOpen(true);
   }, []);
+
+  // Model chooser options come from the server's provider pool.
+  useEffect(() => {
+    if (!copilotOpen) return;
+    fetch("/api/models")
+      .then((response) => (response.ok ? response.json() : { providers: [] }))
+      .then((body: { providers?: { provider: string; displayName: string; models: string[] }[] }) =>
+        setModelOptions(body.providers ?? []),
+      )
+      .catch(() => setModelOptions([]));
+  }, [copilotOpen]);
 
   const closeCopilot = useCallback(() => setCopilotOpen(false), []);
 
@@ -198,13 +221,15 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
       if (!world) return;
       if (mode === "design") {
         try {
-          const { design, source } = await askDesign(prompt, world, session?.principalId);
+          const { design, source, provider, model } = await askDesign(prompt, world, session?.principalId, { model: modelChoice, reasoning });
           setExchange({
             prompt,
             answer: designAnswer(design, world),
             stepIndex: 0,
             complete: false,
             source,
+            provider,
+            model,
             design,
           });
         } catch {
@@ -216,11 +241,11 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
         }
         return;
       }
-      const live = await askCopilot(prompt, world, session?.principalId);
-      const { source, ...answer } = live;
-      setExchange({ prompt, answer, stepIndex: 0, complete: false, source });
+      const live = await askCopilot(prompt, world, session?.principalId, { model: modelChoice, reasoning });
+      const { source, provider, model, ...answer } = live;
+      setExchange({ prompt, answer, stepIndex: 0, complete: false, source, provider, model });
     },
-    [mode, world, session?.principalId],
+    [mode, world, session?.principalId, modelChoice, reasoning],
   );
 
   const resetExchange = useCallback(() => setExchange(null), []);
@@ -517,6 +542,11 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
       resetExchange,
       mode,
       setMode,
+      modelChoice,
+      setModelChoice,
+      reasoning,
+      setReasoning,
+      modelOptions,
       suggestions: copilotSuggestions,
       answerFor,
       call,
@@ -539,6 +569,11 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
       resetExchange,
       mode,
       setMode,
+      modelChoice,
+      setModelChoice,
+      reasoning,
+      setReasoning,
+      modelOptions,
       answerFor,
       call,
       callApprovals,

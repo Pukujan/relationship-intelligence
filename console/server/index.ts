@@ -15,6 +15,14 @@ import { createServer } from "node:http";
 import { z } from "zod";
 import { endSpan, recordEvals, startSpan } from "./telemetry.ts";
 import { queryRag, ragPromptBlock } from "./rag.ts";
+import {
+  askWithFailover,
+  cooldowns,
+  listModels,
+  providers,
+  resolveRoute,
+  type Reasoning,
+} from "./providers.ts";
 
 const PORT = Number(process.env.COPILOT_PORT ?? 8799);
 const BASE_URL = (process.env.TOKEN_PLAN_BASE_URL ?? "").replace(/\/$/, "");
@@ -44,6 +52,8 @@ const CopilotRequestSchema = z.object({
   prompt: z.string().min(1).max(2_000),
   digest: z.unknown(),
   principalId: z.string().max(64).optional(),
+  model: z.string().max(80).optional(),
+  reasoning: z.enum(["off", "low", "medium", "high"]).optional(),
 });
 
 // The schema accepts generously and the handler clips to display limits: a
@@ -73,6 +83,8 @@ const DesignRequestSchema = z.object({
   goal: z.string().min(3).max(2_000),
   digest: z.unknown(),
   principalId: z.string().max(64).optional(),
+  model: z.string().max(80).optional(),
+  reasoning: z.enum(["off", "low", "medium", "high"]).optional(),
 });
 
 const ModelDesignSchema = z.object({
@@ -234,48 +246,6 @@ Return ONLY a JSON object shaped like:
   "unverified": ["anything the digest cannot support — facts the human should check"]
 }`;
 
-async function askModel(system: string, user: string): Promise<unknown> {
-  if (!BASE_URL || !API_KEY) {
-    throw new Error("unconfigured");
-  }
-  // The gateway rate-limits (429) under burst; retry with backoff before
-  // falling back to the offline router, so a transient limit is not a answer
-  // quality event.
-  const backoffs = [2_000, 6_000];
-  for (let attempt = 0; ; attempt++) {
-    const response = await fetch(`${BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (response.ok) {
-      const payload = (await response.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-      const content = payload.choices?.[0]?.message?.content;
-      if (!content) throw new Error("empty model response");
-      return JSON.parse(content);
-    }
-    const retryable = response.status === 429 || response.status >= 500;
-    if (!retryable || attempt >= backoffs.length) {
-      throw new Error(`model upstream ${response.status}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, backoffs[attempt]));
-  }
-}
-
 /* ------------------------------------------------------------------ */
 /* Handlers                                                            */
 /* ------------------------------------------------------------------ */
@@ -293,11 +263,14 @@ async function handleCopilot(body: unknown) {
   });
   try {
     const matches = await queryRag(request.prompt);
-    const raw = await askModel(
+    const routed = await askWithFailover(
+      resolveRoute(request.model, "ask"),
       COPILOT_SYSTEM,
       `USER REQUEST:\n${request.prompt}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}`,
+      (request.reasoning ?? "off") as Reasoning,
+      REQUEST_TIMEOUT_MS,
     );
-    const answer = ModelAnswerSchema.parse(raw);
+    const answer = ModelAnswerSchema.parse(JSON.parse(routed.content));
 
   // Anything referencing an id that is not in the digest is dropped: the model
   // can describe the world, it cannot create entities in it. Overlong lists
@@ -329,6 +302,10 @@ async function handleCopilot(body: unknown) {
       answer.links.length - links.length + (answer.agents.length - agents.length);
     const spanId = endSpan(span, true, {
       latency_ms: latency,
+      provider: routed.provider,
+      model: routed.model,
+      reasoning: request.reasoning ?? "off",
+      failovers: routed.failovers,
       links_requested: answer.links.length,
       links_resolved: links.length,
       agents_resolved: agents.length,
@@ -349,6 +326,8 @@ async function handleCopilot(body: unknown) {
       links,
       approvalIds,
       source: "live-model",
+      provider: routed.provider,
+      model: routed.model,
     };
   } catch (error) {
     endSpan(span, false, {
@@ -372,11 +351,14 @@ async function handleDesign(body: unknown) {
   });
   try {
   const matches = await queryRag(request.goal);
-  const raw = await askModel(
+  const routed = await askWithFailover(
+    resolveRoute(request.model, "design"),
     DESIGN_SYSTEM,
     `HUMAN GOAL:\n${request.goal}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}`,
+    (request.reasoning ?? "off") as Reasoning,
+    REQUEST_TIMEOUT_MS,
   );
-  const design = ModelDesignSchema.parse(raw);
+  const design = ModelDesignSchema.parse(JSON.parse(routed.content));
 
   const agentIds = design.agentIds
     .filter((id) => knownId(digest, "agent", id))
@@ -404,6 +386,10 @@ async function handleDesign(body: unknown) {
     const droppedAgents = design.agentIds.length - agentIds.length;
     const spanId = endSpan(span, true, {
       latency_ms: latency,
+      provider: routed.provider,
+      model: routed.model,
+      reasoning: request.reasoning ?? "off",
+      failovers: routed.failovers,
       agents_resolved: agentIds.length,
       plan_steps: planSteps.length,
       unverified_flags: unverified.length,
@@ -477,11 +463,18 @@ const server = createServer(async (req, res) => {
     );
   };
   try {
+    if (req.method === "GET" && url.pathname === "/api/models") {
+      json(res, 200, { providers: await listModels(), cooldowns: cooldowns() });
+      finish(200, "models");
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/health") {
       const value = {
         ok: true,
         model: MODEL,
         configured: Boolean(BASE_URL && API_KEY),
+        providers: providers.map((provider) => provider.id),
+        cooldowns: cooldowns(),
       };
       json(res, 200, value);
       finish(200, "health");
