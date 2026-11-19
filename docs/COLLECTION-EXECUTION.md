@@ -1,6 +1,6 @@
 # Collection Execution and Packaging
 
-**Status:** proposal, awaiting owner acceptance. Written 2026-11-19.
+**Status:** accepted by the owner 2026-11-19 (issue #15). Slice 1, the daemon proof, has been run and **passed**; see `collector/RESULTS.md`. Written 2026-11-19.
 
 This document settles one question that [COLLECTION-AND-TEAM-PLAN.md](COLLECTION-AND-TEAM-PLAN.md) left open: where a source-site browser session actually runs, and what ships to a teammate's machine. It does not change the ownership model, the private/shared workspace split, or the rule that the application stores no session cookies.
 
@@ -72,30 +72,30 @@ The distinction matters for support. "Your LinkedIn session expired" and "your l
 
 | Order | Slice | Contents |
 |---|---|---|
-| 1 | Daemon proof | Persistent Playwright profile, manual sign-in, one read-only LinkedIn profile fetch, restart and confirm the session survived |
+| 1 | Daemon proof — **done, passed** | Persistent profile in a real browser, manual sign-in, one read-only LinkedIn profile fetch, restart and confirm the session survived. See `collector/RESULTS.md`. |
 | 2 | Pairing and contract | Localhost API, device pairing to a principal, `source_connection` device fields, status reporting |
 | 3 | Collector integration | Plan tasks executed by the daemon, raw evidence to Octo Files, checkpoints and resume |
 | 4 | Tauri shell | Tray, install, status, spawn and supervise the daemon as a sidecar |
 
-Slice 1 is the cheap experiment. If a persistent profile cannot hold a LinkedIn session across a restart on a real machine, the rest of this plan is wrong and should be revisited before slices 2 through 4 are built.
+Slice 1 was the cheap experiment, and it passed: the session survived a full restart with no challenge. It also produced two findings that refine the design before slice 2:
+
+- **Attach, do not launch.** Google OAuth refuses a browser that automation launched ("This browser or app may not be secure"). The daemon must attach over CDP to a browser the human started, which is what `collector/src/attach.ts` does.
+- **A real browser is required.** A test build (Chrome for Testing) received only a session-scoped cookie and no durable `li_at`, so its login could not survive a restart. The daemon must use the teammate's real browser (Brave, Chrome, Edge), not a bundled test build.
 
 ## What stays unchanged
 
 Octo remains canonical for entities, claims, evidence, source files, RAG, and graph projection. Each teammate still owns their own source sessions and no session is shared or inherited. Private observations still stay in per-person workspaces until explicitly published. The application still never stores cookies, passwords, one-time codes, or raw browser state. Collection still requires human approval before anything becomes a canonical fact.
 
-## Open question: does TinyFish stay
+## TinyFish: answered by slice 1
 
-Going local replaces TinyFish's cloud browser with Playwright on the teammate's machine. That removes a vendor and a credential store, and it gives up the proxy management and anti-detection work TinyFish provides.
+Going local replaces TinyFish's cloud browser with a real browser on the teammate's machine. That removes a vendor and a credential store, and it gives up the proxy management and anti-detection work TinyFish provides.
 
-This document does not settle it, because the answer depends on whether the collector can reach LinkedIn reliably from a home connection without that help. Slice 1 answers it. Two outcomes are acceptable:
+Slice 1 settled it: a plain persistent profile in a real browser reached LinkedIn from a home connection and kept the session across a restart, with no challenge. **Drop TinyFish as the transport and keep the daemon.**
 
-- If a plain persistent profile works, drop TinyFish and keep the daemon.
-- If challenges block collection, keep TinyFish as a *transport* behind the same daemon contract, and the device fields still apply because the daemon still owns pairing and scheduling.
-
-The daemon contract is deliberately written so this choice stays reversible.
+The daemon contract stays reversible: if a later source needs a managed browser, TinyFish can return as a *transport* behind the same contract, and the device fields still apply because the daemon still owns pairing and scheduling.
 
 ## Counter-signal
 
 The local daemon moves an operational burden onto teammates. A daemon that is not running is a collector that is not collecting, and every teammate now has something to install and keep current. If the team turns out to be small and tolerant of a terminal command, the Tauri shell in slice 4 is optional work that can wait indefinitely.
 
-There is also no evidence yet that a local session survives longer than a cloud one for these particular sites. That is an assumption with a plausible mechanism behind it, not a measured result. Slice 1 exists to test it.
+Slice 1 measured the key assumption for LinkedIn: a local session in a real browser survived a restart with no challenge. That is one site, one machine, one restart — not a long-duration or multi-site guarantee. Whether sessions hold for weeks, and whether X, Luma, and Gmail behave the same way, is still untested and belongs to later slices.
