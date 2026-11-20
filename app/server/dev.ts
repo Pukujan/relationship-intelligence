@@ -20,6 +20,7 @@ createAppServer(env).listen(env.PORT, host, () => {
       },
       token: key,
       workspaceId,
+      octoContainerId: workspaceId,
       principalId: "scheduler",
     }));
     console.log("scheduler ticking every 60s");

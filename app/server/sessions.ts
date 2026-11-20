@@ -24,6 +24,7 @@ const owns = (workspaceId: string, principalId: string) =>
 export async function listConversations(
   config: OctoClientConfig,
   token: string,
+  octoContainerId: string,
   workspaceId: string,
   principalId: string,
 ): Promise<Json[]> {
@@ -32,14 +33,14 @@ export async function listConversations(
   const present = await octoSql(
     config,
     token,
-    workspaceId,
+    octoContainerId,
     "SELECT table_name FROM information_schema.tables WHERE table_schema = 'ri_console' AND table_name = 'conversation'",
   );
   if (present.length === 0) return [];
   const rows = await octoSql(
     config,
     token,
-    workspaceId,
+    octoContainerId,
     `SELECT id, workspace_id, scope_kind, scope_id, title, created_at, updated_at, archived_at
      FROM ri_console.conversation WHERE ${owns(workspaceId, principalId)}
      ORDER BY updated_at DESC`,
@@ -61,6 +62,7 @@ export async function listConversations(
 export async function createConversation(
   config: OctoClientConfig,
   token: string,
+  octoContainerId: string,
   workspaceId: string,
   principalId: string,
   input: { title: string; scopeKind: string; scopeId?: string | null },
@@ -80,7 +82,7 @@ export async function createConversation(
   await octoSql(
     config,
     token,
-    workspaceId,
+    octoContainerId,
     `INSERT INTO ri_console.conversation
        (id, workspace_id, principal_id, visibility, scope_kind, scope_id, title, created_at, updated_at)
      VALUES (${lit(id)}, ${lit(workspaceId)}, ${lit(principalId)}, 'private',
@@ -93,6 +95,7 @@ export async function createConversation(
 async function assertOwned(
   config: OctoClientConfig,
   token: string,
+  octoContainerId: string,
   workspaceId: string,
   principalId: string,
   conversationId: string,
@@ -100,7 +103,7 @@ async function assertOwned(
   const rows = await octoSql(
     config,
     token,
-    workspaceId,
+    octoContainerId,
     `SELECT id FROM ri_console.conversation WHERE id = ${lit(conversationId)} AND ${owns(workspaceId, principalId)}`,
   );
   if (rows.length === 0) throw new Error("Unknown conversation");
@@ -109,15 +112,23 @@ async function assertOwned(
 export async function getMessages(
   config: OctoClientConfig,
   token: string,
+  octoContainerId: string,
   workspaceId: string,
   principalId: string,
   conversationId: string,
 ): Promise<Json[]> {
-  await assertOwned(config, token, workspaceId, principalId, conversationId);
+  await assertOwned(
+    config,
+    token,
+    octoContainerId,
+    workspaceId,
+    principalId,
+    conversationId,
+  );
   const rows = await octoSql(
     config,
     token,
-    workspaceId,
+    octoContainerId,
     `SELECT id, role, parts, provider, model, reasoning, created_at
      FROM ri_console.message WHERE conversation_id = ${lit(conversationId)}
      ORDER BY created_at ASC`,
@@ -138,12 +149,20 @@ export async function getMessages(
 export async function appendMessage(
   config: OctoClientConfig,
   token: string,
+  octoContainerId: string,
   workspaceId: string,
   principalId: string,
   conversationId: string,
   message: unknown,
 ): Promise<Json> {
-  await assertOwned(config, token, workspaceId, principalId, conversationId);
+  await assertOwned(
+    config,
+    token,
+    octoContainerId,
+    workspaceId,
+    principalId,
+    conversationId,
+  );
   const parsed = MessageSchema.parse(message);
   // Re-sanitize artifacts at the storage boundary, not only in the copilot.
   const parts = parsed.parts.map((part) =>
@@ -155,7 +174,7 @@ export async function appendMessage(
   await octoSql(
     config,
     token,
-    workspaceId,
+    octoContainerId,
     `INSERT INTO ri_console.message (id, conversation_id, role, parts, provider, model, reasoning, created_at)
      VALUES (${lit(stored.id)}, ${lit(conversationId)}, ${lit(stored.role)}, ${lit(JSON.stringify(parts))}::jsonb,
              ${lit(stored.provider ?? "")}, ${lit(stored.model ?? "")}, ${lit(stored.reasoning ?? "")}, ${lit(stored.createdAt)})
@@ -164,7 +183,7 @@ export async function appendMessage(
   await octoSql(
     config,
     token,
-    workspaceId,
+    octoContainerId,
     `UPDATE ri_console.conversation SET updated_at = ${lit(new Date().toISOString())}
      WHERE id = ${lit(conversationId)}`,
   );
@@ -174,6 +193,7 @@ export async function appendMessage(
 export async function patchConversation(
   config: OctoClientConfig,
   token: string,
+  octoContainerId: string,
   workspaceId: string,
   principalId: string,
   conversationId: string,
@@ -184,7 +204,14 @@ export async function patchConversation(
     scopeId?: string | null | undefined;
   },
 ): Promise<Json> {
-  await assertOwned(config, token, workspaceId, principalId, conversationId);
+  await assertOwned(
+    config,
+    token,
+    octoContainerId,
+    workspaceId,
+    principalId,
+    conversationId,
+  );
   const sets: string[] = [`updated_at = ${lit(new Date().toISOString())}`];
   if (patch.title !== undefined) sets.push(`title = ${lit(patch.title)}`);
   if (patch.archived !== undefined) {
@@ -199,13 +226,13 @@ export async function patchConversation(
   await octoSql(
     config,
     token,
-    workspaceId,
+    octoContainerId,
     `UPDATE ri_console.conversation SET ${sets.join(", ")} WHERE id = ${lit(conversationId)}`,
   );
   const rows = await octoSql(
     config,
     token,
-    workspaceId,
+    octoContainerId,
     `SELECT id, workspace_id, scope_kind, scope_id, title, created_at, updated_at, archived_at
      FROM ri_console.conversation WHERE id = ${lit(conversationId)}`,
   );

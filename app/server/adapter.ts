@@ -1008,6 +1008,8 @@ export async function handleRequest(
           config,
           token,
           workspaceId: requested,
+          octoContainerId: octoWorkspaceId,
+          body,
           principalId: principal.id,
           principal,
           workspaces,
@@ -1022,7 +1024,13 @@ export async function handleRequest(
         sendJson(
           res,
           200,
-          await listConversations(config, token, requested, principal.id),
+          await listConversations(
+            config,
+            token,
+            octoWorkspaceId,
+            requested,
+            principal.id,
+          ),
         );
         return;
       }
@@ -1030,11 +1038,18 @@ export async function handleRequest(
         sendJson(
           res,
           200,
-          await createConversation(config, token, requested, principal.id, {
-            title: String(body.title ?? "New research"),
-            scopeKind: String(body.scopeKind ?? "workspace"),
-            scopeId: typeof body.scopeId === "string" ? body.scopeId : null,
-          }),
+          await createConversation(
+            config,
+            token,
+            octoWorkspaceId,
+            requested,
+            principal.id,
+            {
+              title: String(body.title ?? "New research"),
+              scopeKind: String(body.scopeKind ?? "workspace"),
+              scopeId: typeof body.scopeId === "string" ? body.scopeId : null,
+            },
+          ),
         );
         return;
       }
@@ -1051,6 +1066,7 @@ export async function handleRequest(
             await getMessages(
               config,
               token,
+              octoWorkspaceId,
               requested,
               principal.id,
               conversationId,
@@ -1065,6 +1081,7 @@ export async function handleRequest(
             await appendMessage(
               config,
               token,
+              octoWorkspaceId,
               requested,
               principal.id,
               conversationId,
@@ -1080,6 +1097,7 @@ export async function handleRequest(
             await patchConversation(
               config,
               token,
+              octoWorkspaceId,
               requested,
               principal.id,
               conversationId,

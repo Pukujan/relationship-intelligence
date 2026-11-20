@@ -4,14 +4,18 @@
  * The copilot server (console/server) answers `/api/*` and spends the owner's
  * model keys. It listens on loopback only and has no sign-in of its own: in
  * development Vite proxies to it on localhost. In production this adapter is
- * the only way in, and it forwards a request only for a signed-in session, so
- * nobody on the internet can spend those keys anonymously. The guest demo
- * gets a 401 and the console falls back to its offline router, as before.
+ * the only way in, and it forwards a request only for a signed-in session
+ * that belongs to at least one workspace. Signing in is not enough: anyone can
+ * mint an Octo guest principal and present its token, and a hold-out test
+ * (scripts/validate_sharing.py, S10) showed such an account reaching the
+ * models. The guest demo gets a 401 and the console falls back to its offline
+ * router, as before.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import type { Env } from "./env.js";
 import { type AppSession, isIdleExpired, readSession } from "./session.js";
+import { resolveTenancy } from "./tenancy.js";
 
 /** A workspace digest is large; this caps it well above the largest seen. */
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -26,7 +30,28 @@ export type CopilotGate =
   | { ok: true; principalId: string | null }
   | { ok: false; status: number; body: Record<string, unknown> };
 
-/** Who may reach the copilot server: a signed-in session that is not idle. */
+/**
+ * How long a membership check is trusted for the copilot. Checking costs a
+ * round trip to Octo, and a spoken turn should not wait on it every time. A
+ * removed member can therefore still spend model calls for up to this long;
+ * their access to workspace data ends at once, on the data routes.
+ */
+export const MEMBERSHIP_TRUST_MS = 60_000;
+const memberUntil = new Map<string, number>();
+
+/** True when this session was seen to belong to a workspace recently. */
+export function recentlyMember(key: string, nowMs: number = Date.now()) {
+  const until = memberUntil.get(key) ?? 0;
+  if (until > nowMs) return true;
+  memberUntil.delete(key);
+  return false;
+}
+
+export function rememberMember(key: string, nowMs: number = Date.now()) {
+  memberUntil.set(key, nowMs + MEMBERSHIP_TRUST_MS);
+}
+
+/** First check, from the cookie alone: a signed-in session that is not idle. */
 export function copilotGate(
   session: Pick<AppSession, "octoToken" | "principalId" | "lastSeenAt">,
   nowMs: number = Date.now(),
@@ -99,10 +124,24 @@ export async function proxyCopilot(
   env: Env,
   pathAndQuery: string,
 ): Promise<void> {
-  const gate = copilotGate(await readSession(req, res, env));
+  const session = await readSession(req, res, env);
+  const gate = copilotGate(session);
   if (!gate.ok) {
     sendJson(res, gate.status, gate.body);
     return;
+  }
+  // Second check: the session must belong to a workspace.
+  const memberKey = session.principalId ?? session.octoToken ?? "";
+  if (!recentlyMember(memberKey)) {
+    const tenancy = await resolveTenancy(req, res, env, {
+      baseUrl: env.OCTO_API_URL,
+      timeoutMs: 15_000,
+    });
+    if (!tenancy.ok) {
+      sendJson(res, tenancy.status, tenancy.body);
+      return;
+    }
+    rememberMember(memberKey);
   }
 
   const hasBody = req.method !== "GET" && req.method !== "HEAD";

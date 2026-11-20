@@ -36,7 +36,12 @@ export const SCHEDULE_DDL = [
 export interface ScheduleCtx {
   config: OctoClientConfig;
   token: string;
+  /** The app workspace the rows belong to (`workspace_id`). */
   workspaceId: string;
+  /** The Octo container the SQL runs in. Every app workspace shares one. */
+  octoContainerId: string;
+  /** The request body when the caller already read it; see ProfileRouteContext. */
+  body?: Record<string, unknown>;
   principalId: string;
 }
 
@@ -70,20 +75,20 @@ export async function handleScheduleRoutes(
       const rows = await octoSql(
         ctx.config,
         ctx.token,
-        ctx.workspaceId,
+        ctx.octoContainerId,
         `SELECT * FROM ri_console.schedule WHERE ${owns} ORDER BY next_run_at ASC`,
       );
       const runs = await octoSql(
         ctx.config,
         ctx.token,
-        ctx.workspaceId,
+        ctx.octoContainerId,
         `SELECT r.* FROM ri_console.schedule_run r JOIN ri_console.schedule s ON s.id = r.schedule_id WHERE ${owns.replace(/workspace_id/g, "s.workspace_id").replace(/principal_id/g, "s.principal_id")} ORDER BY r.created_at DESC LIMIT 50`,
       );
       send(200, { schedules: rows, runs });
       return true;
     }
     if (path === "/app-api/schedules" && req.method === "POST") {
-      const body = await readJson(req);
+      const body = (ctx.body as Json | undefined) ?? (await readJson(req));
       const id = randomUUID();
       const cadence = ["daily", "weekly", "once"].includes(String(body.cadence))
         ? String(body.cadence)
@@ -91,7 +96,7 @@ export async function handleScheduleRoutes(
       await octoSql(
         ctx.config,
         ctx.token,
-        ctx.workspaceId,
+        ctx.octoContainerId,
         `INSERT INTO ri_console.schedule (id, workspace_id, principal_id, cadence, scope_kind, scope_id, prompt, next_run_at)
          VALUES (${lit(id)}, ${lit(ctx.workspaceId)}, ${lit(ctx.principalId)}, ${lit(cadence)}, ${lit(body.scopeKind ?? "workspace")}, ${lit(body.scopeId ?? "")}, ${lit(String(body.prompt ?? "").slice(0, 2000))}, ${lit(nextRun(cadence))})`,
       );
@@ -102,11 +107,11 @@ export async function handleScheduleRoutes(
     if (m) {
       const id = m[1];
       if (req.method === "PATCH") {
-        const body = await readJson(req);
+        const body = (ctx.body as Json | undefined) ?? (await readJson(req));
         await octoSql(
           ctx.config,
           ctx.token,
-          ctx.workspaceId,
+          ctx.octoContainerId,
           `UPDATE ri_console.schedule SET paused = ${body.paused ? "true" : "false"} WHERE id = ${lit(id)} AND ${owns}`,
         );
         send(200, { id, paused: Boolean(body.paused) });
@@ -116,7 +121,7 @@ export async function handleScheduleRoutes(
         await octoSql(
           ctx.config,
           ctx.token,
-          ctx.workspaceId,
+          ctx.octoContainerId,
           `DELETE FROM ri_console.schedule WHERE id = ${lit(id)} AND ${owns}`,
         );
         send(200, { id, deleted: true });
@@ -159,11 +164,11 @@ export function startScheduler(
       const ctx = await getCtx();
       if (!ctx) return;
       for (const statement of SCHEDULE_DDL)
-        await octoSql(ctx.config, ctx.token, ctx.workspaceId, statement);
+        await octoSql(ctx.config, ctx.token, ctx.octoContainerId, statement);
       const due = await octoSql(
         ctx.config,
         ctx.token,
-        ctx.workspaceId,
+        ctx.octoContainerId,
         `SELECT id, cadence FROM ri_console.schedule
          WHERE workspace_id = ${lit(ctx.workspaceId)} AND paused = false AND next_run_at <= now()`,
       );
@@ -171,14 +176,14 @@ export function startScheduler(
         await octoSql(
           ctx.config,
           ctx.token,
-          ctx.workspaceId,
+          ctx.octoContainerId,
           `INSERT INTO ri_console.schedule_run (id, schedule_id, status, due_at)
            VALUES (${lit(randomUUID())}, ${lit(row.id)}, 'queued', now())`,
         );
         await octoSql(
           ctx.config,
           ctx.token,
-          ctx.workspaceId,
+          ctx.octoContainerId,
           `UPDATE ri_console.schedule SET next_run_at = ${lit(nextRun(String(row.cadence)))} WHERE id = ${lit(row.id)}`,
         );
       }

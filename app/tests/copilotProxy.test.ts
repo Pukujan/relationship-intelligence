@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { copilotGate, withSessionPrincipal } from "../server/copilotProxy.js";
+import {
+  copilotGate,
+  MEMBERSHIP_TRUST_MS,
+  recentlyMember,
+  rememberMember,
+  withSessionPrincipal,
+} from "../server/copilotProxy.js";
 import { IDLE_LIMIT_MS } from "../server/session.js";
 
 describe("copilot proxy gate (#62)", () => {
@@ -61,6 +67,16 @@ describe("copilot proxy gate (#62)", () => {
         principalId: "p1",
       });
     }
+  });
+
+  it("trusts a membership check for a minute and no longer", () => {
+    expect(recentlyMember("p-new", now)).toBe(false);
+    rememberMember("p-new", now);
+    expect(recentlyMember("p-new", now + MEMBERSHIP_TRUST_MS - 1)).toBe(true);
+    expect(recentlyMember("p-new", now + MEMBERSHIP_TRUST_MS)).toBe(false);
+    // One account's membership says nothing about another's.
+    rememberMember("p-a", now);
+    expect(recentlyMember("p-b", now)).toBe(false);
   });
 
   it("passes through bodies that are not JSON objects", () => {
