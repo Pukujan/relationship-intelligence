@@ -143,6 +143,29 @@ Blocked/uncertain:
 Next:
 - Merge the fix (issue #66) and confirm on the server that the new image is running; then return to routing Talk and the call through the live model.
 
+### 2026-11-20 22:42:59 UTC — agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85","blocked":["Not deployed yet: until this merges, a stranger with a guest token can still call the copilot on the live site."],"changed":["none"],"completed":["After the first copilot gate fix deployed, a guest minted from Octo still got a model answer on the live site, because Octo gives every guest a personal workspace; the gate now requires a token session to belong to this app's own Octo container."],"decisions":["no new decisions"],"evidence":["scripts/validate_sharing.py passes 13 of 13 locally, including a new check that mints a real Octo guest and gets 403 from the copilot routes, and the owner's key session still gets 200; the app's 42 tests, typecheck, lint and build pass."],"evidence_class":"observed","next_action":"After the deploy, repeat the live guest check against business.design-bakery.com and expect 403; then return to routing Talk and the call through the live model.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-20T22:42:59Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"fc76a47f72e33b24935b14da27f5f60abd7ab876c551d5b7a68a8987e20dc40e","request_id":"9e467d65296f40d6a246fbc81683f2ab","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- After the first copilot gate fix deployed, a guest minted from Octo still got a model answer on the live site, because Octo gives every guest a personal workspace; the gate now requires a token session to belong to this app's own Octo container.
+
+Evidence:
+- scripts/validate_sharing.py passes 13 of 13 locally, including a new check that mints a real Octo guest and gets 403 from the copilot routes, and the owner's key session still gets 200; the app's 42 tests, typecheck, lint and build pass.
+
+Decisions:
+- no new decisions
+
+Changed:
+- none
+
+Blocked/uncertain:
+- Not deployed yet: until this merges, a stranger with a guest token can still call the copilot on the live site.
+
+Next:
+- After the deploy, repeat the live guest check against business.design-bakery.com and expect 403; then return to routing Talk and the call through the live model.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
