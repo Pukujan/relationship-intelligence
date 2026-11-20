@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Env } from "../server/env.js";
 import {
-  createWorkspaceWithProvision,
+  buildGoogleConnectorAuthUrl,
+  buildZoomConnectorAuthUrl,
+} from "../server/connectors.js";
+import type { Env } from "../server/env.js";
+import { endSpan, scrubAttributes, startSpan } from "../server/telemetry.js";
+import {
+  createAppWorkspace,
   DDL_VERSION,
   provisionWorkspace,
   removeWorkspaceMember,
@@ -16,28 +21,70 @@ const baseEnv: Env = {
   APP_ORIGIN: "http://localhost:4000",
   OCTO_API_URL: "https://octo.example.test",
   OCTO_API_KEY: "octo_live_ws_ownerkey",
+  OCTO_WORKSPACE_ID: WS_ID,
   SESSION_PASSWORD: "0123456789abcdef0123456789abcdef",
+  GOOGLE_CLIENT_ID: "google-client-id",
+  GOOGLE_CLIENT_SECRET: "google-client-secret",
+  ZOOM_CLIENT_ID: "zoom-client-id",
+  ZOOM_CLIENT_SECRET: "zoom-client-secret",
 };
 
-describe("workspace lifecycle (RI-0013 / #38)", () => {
-  it("returns 501 disabled-with-explanation when OCTO_ACCOUNT_KEY is absent", async () => {
-    const prev = process.env.OCTO_ACCOUNT_KEY;
-    delete process.env.OCTO_ACCOUNT_KEY;
+describe("single-Octo workspace lifecycle (RI-0018)", () => {
+  it("creates an App Workspace inside the single Octo container without OCTO_ACCOUNT_KEY", async () => {
+    const queries: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        const parsed = JSON.parse(String(init?.body ?? "{}")) as {
+          sql?: string;
+        };
+        if (parsed.sql) queries.push(parsed.sql);
+        if (parsed.sql?.includes("information_schema.tables")) {
+          return new Response(
+            JSON.stringify({
+              rows: [
+                { table_name: "workspace" },
+                { table_name: "workspace_member" },
+                { table_name: "ledger_event" },
+                { table_name: "user_connector" },
+                { table_name: "connector_route" },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ rows: [] }), { status: 200 });
+      }),
+    );
     try {
-      const res = await createWorkspaceWithProvision(
+      const res = await createAppWorkspace(
         { baseUrl: baseEnv.OCTO_API_URL, timeoutMs: 5000 },
-        baseEnv,
-        { name: "New Team" },
+        "octo_live_ws_ownerkey",
+        WS_ID,
+        { id: NEW_PID, email: "owner@example.com", displayName: "Owner" },
+        { name: "Design Bakery" },
       );
-      expect(res.ok).toBe(false);
-      expect(res.status).toBe(501);
-      expect(res.body.disabled).toBe(true);
+      expect(res.ok).toBe(true);
+      expect(res.status).toBe(200);
+      expect(res.body.name).toBe("Design Bakery");
+      expect(res.body.role).toBe("owner");
+      expect(
+        queries.some((q) => q.includes("INSERT INTO ri_console.workspace ")),
+      ).toBe(true);
+      expect(
+        queries.some((q) =>
+          q.includes("INSERT INTO ri_console.workspace_member"),
+        ),
+      ).toBe(true);
+      expect(
+        queries.some((q) => q.includes("INSERT INTO ri_console.ledger_event")),
+      ).toBe(true);
     } finally {
-      if (prev !== undefined) process.env.OCTO_ACCOUNT_KEY = prev;
+      vi.unstubAllGlobals();
     }
   });
 
-  it("provisions ri_console DDL idempotently with workspace_meta marker", async () => {
+  it("provisions ri_console DDL idempotently with workspace, ledger, and connector tables", async () => {
     const queries: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -52,7 +99,7 @@ describe("workspace lifecycle (RI-0013 / #38)", () => {
     try {
       const result = await provisionWorkspace(
         { baseUrl: baseEnv.OCTO_API_URL, timeoutMs: 5000 },
-        "octo_live_acc_test",
+        "octo_live_ws_ownerkey",
         WS_ID,
       );
       expect(result.provisioned).toBe(true);
@@ -60,29 +107,29 @@ describe("workspace lifecycle (RI-0013 / #38)", () => {
       expect(queries.some((q) => q.includes("ri_console.workspace_meta"))).toBe(
         true,
       );
+      expect(queries.some((q) => q.includes("ri_console.ledger_event"))).toBe(
+        true,
+      );
+      expect(queries.some((q) => q.includes("ri_console.user_connector"))).toBe(
+        true,
+      );
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it("activates a pending invite during Google sign-in", async () => {
+  it("activates a pending invite in ri_console.workspace_member during Google sign-in", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        const method = init?.method ?? "GET";
-        if (url.endsWith("/api/workspaces")) {
-          return new Response(JSON.stringify([{ id: WS_ID }]), { status: 200 });
-        }
-        if (
-          url.endsWith(`/api/workspaces/${WS_ID}/members`) &&
-          method === "GET"
-        ) {
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { sql?: string };
+        if (body.sql?.includes("FROM ri_console.workspace_member")) {
           return new Response(
             JSON.stringify({
-              members: [
+              rows: [
                 {
-                  email: "invitee@example.com",
+                  workspace_id: WS_ID,
+                  principal_id: NEW_PID,
                   role: "operator",
                   status: "pending",
                 },
@@ -91,15 +138,7 @@ describe("workspace lifecycle (RI-0013 / #38)", () => {
             { status: 200 },
           );
         }
-        if (
-          url.endsWith(`/api/workspaces/${WS_ID}/members`) &&
-          method === "POST"
-        ) {
-          return new Response(JSON.stringify({ principalId: NEW_PID }), {
-            status: 200,
-          });
-        }
-        return new Response("{}", { status: 404 });
+        return new Response(JSON.stringify({ rows: [] }), { status: 200 });
       }),
     );
     try {
@@ -107,6 +146,7 @@ describe("workspace lifecycle (RI-0013 / #38)", () => {
         { baseUrl: baseEnv.OCTO_API_URL, timeoutMs: 5000 },
         "octo_live_ws_ownerkey",
         "invitee@example.com",
+        baseEnv,
       );
       expect(hit).toEqual({
         principalId: NEW_PID,
@@ -118,15 +158,66 @@ describe("workspace lifecycle (RI-0013 / #38)", () => {
     }
   });
 
-  it("blocks removing self or workspace owner", async () => {
+  it("blocks removing self from a workspace", async () => {
     const selfRes = await removeWorkspaceMember(
       { baseUrl: baseEnv.OCTO_API_URL, timeoutMs: 5000 },
       "token",
       WS_ID,
+      WS_ID,
       "admin@example.com",
       "admin@example.com",
+      NEW_PID,
     );
     expect(selfRes.status).toBe(403);
     expect(selfRes.body.error).toBe("CANNOT_REMOVE_SELF");
+  });
+});
+
+describe("Phoenix OTLP telemetry & scrubber (RI-0020)", () => {
+  it("scrubs tokens, secrets, bearer headers, and raw email bodies", () => {
+    const clean = scrubAttributes(
+      {
+        access_token: "secret-123",
+        authorization: "Bearer abc.def.ghi",
+        email_body: "private message content",
+        note: "Call with Bearer tok_999",
+        "ri.workspace_id": WS_ID,
+      },
+      false,
+    );
+    expect(clean.access_token).toBe("[REDACTED]");
+    expect(clean.authorization).toBe("[REDACTED]");
+    expect(clean.email_body).toBe("[REDACTED_CONTENT]");
+    expect(clean.note).toBe("Call with Bearer [REDACTED]");
+    expect(clean["ri.workspace_id"]).toBe(WS_ID);
+  });
+
+  it("gracefully no-ops when PHOENIX_COLLECTOR_ENDPOINT is unset", async () => {
+    const span = startSpan({
+      name: "test.span",
+      kind: "AGENT",
+      workspaceId: WS_ID,
+    });
+    expect(span.traceId).toHaveLength(32);
+    const out = await endSpan(span, "OK", undefined, "");
+    expect(out.exported).toBe(false);
+    expect(out.traceId).toBe(span.traceId);
+  });
+});
+
+describe("user connectors OAuth URLs (RI-0019)", () => {
+  it("builds incremental Google OAuth URLs for gmail, gcal, and gdrive", () => {
+    const gmailUrl = buildGoogleConnectorAuthUrl(baseEnv, "gmail", "st1");
+    const gcalUrl = buildGoogleConnectorAuthUrl(baseEnv, "gcal", "st2");
+    const gdriveUrl = buildGoogleConnectorAuthUrl(baseEnv, "gdrive", "st3");
+    expect(gmailUrl).toContain("gmail.readonly");
+    expect(gcalUrl).toContain("calendar.readonly");
+    expect(gdriveUrl).toContain("drive.readonly");
+  });
+
+  it("builds Zoom OAuth authorize URL when ZOOM_CLIENT_ID/SECRET are set", () => {
+    const zoomUrl = buildZoomConnectorAuthUrl(baseEnv, "zstate");
+    expect(zoomUrl).toContain("https://zoom.us/oauth/authorize");
+    expect(zoomUrl).toContain("state=zstate");
   });
 });

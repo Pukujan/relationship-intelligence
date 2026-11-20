@@ -1,10 +1,13 @@
 /**
- * Single tenancy and role enforcement choke (RI-0012 / #37).
+ * Single tenancy and role enforcement choke (RI-0012 / #37 + RI-0018).
  *
- * Octo remains the sole authority for principals, workspace memberships, and
- * roles. This module ensures principalId-mode sessions (our own Google OAuth
- * flow) resolve workspace memberships against Octo's members endpoint for the
- * session principal — never against the server-side owner key's workspace list.
+ * Single-Octo Slack-like model:
+ *  - One Octo workspace (`octoWorkspaceId`) backs the entire application.
+ *  - Inside `ri_console`, users belong to one or more App Workspaces via
+ *    `ri_console.workspace` + `ri_console.workspace_member` (many-to-many).
+ *  - Every workspace-scoped `/app-api/*` route passes through `resolveTenancy`,
+ *    which returns both `octoWorkspaceId` (the single backing Octo container)
+ *    and `workspace` (the active App Workspace the caller is a member of).
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -17,6 +20,7 @@ import {
   OctoError,
 } from "./octo.js";
 import { type AppSession, isIdleExpired, readSession } from "./session.js";
+import { octoSql } from "./world.js";
 
 export type WorkspaceRole = "owner" | "admin" | "operator" | "member";
 
@@ -26,6 +30,8 @@ const ROLE_RANK: Record<WorkspaceRole, number> = {
   operator: 2,
   member: 1,
 };
+
+const lit = (value: unknown) => `'${String(value).replace(/'/g, "''")}'`;
 
 export function normalizeRole(raw: unknown): WorkspaceRole | null {
   if (typeof raw !== "string") return null;
@@ -60,10 +66,6 @@ interface OctoMemberRow {
   status?: string;
 }
 
-/**
- * Fetch the active members of a single workspace from Octo.
- * Returns [] if the workspace forbids member listing or returns non-2xx.
- */
 async function fetchWorkspaceMembers(
   config: OctoClientConfig,
   bearer: string,
@@ -115,22 +117,72 @@ function matchActiveMember(
   return null;
 }
 
+/**
+ * Load Slack-style App Workspaces from `ri_console.workspace` joined with
+ * `ri_console.workspace_member` inside the single Octo container.
+ * Returns [] cleanly if the tables aren't provisioned yet.
+ */
+async function loadAppWorkspacesFromSql(
+  config: OctoClientConfig,
+  token: string,
+  octoContainerId: string,
+  principalId: string,
+  email?: string,
+): Promise<OctoWorkspace[]> {
+  try {
+    const emailFilter = email
+      ? `OR lower(m.email) = ${lit(email.trim().toLowerCase())}`
+      : "";
+    const rows = await octoSql(
+      config,
+      token,
+      octoContainerId,
+      `SELECT w.id, w.slug, w.name, m.role
+         FROM ri_console.workspace w
+         JOIN ri_console.workspace_member m ON m.workspace_id = w.id
+        WHERE m.status = 'active'
+          AND (m.principal_id = ${lit(principalId)} ${emailFilter})
+        ORDER BY w.created_at ASC`,
+    );
+    return rows.map((row) => {
+      const role = normalizeRole(row.role) ?? "member";
+      return {
+        id: String(row.id),
+        slug: String(row.slug ?? row.id),
+        name: String(row.name ?? "Workspace"),
+        role,
+        isOwner: role === "owner",
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 export interface ResolvedIdentity {
   principal: OctoPrincipal;
   workspaces: OctoWorkspace[];
+  /** Single backing Octo workspace ID for all SQL and graph calls. */
+  octoWorkspaceId: string;
   /** Bearer token used for Octo API calls on behalf of this session. */
   token: string;
 }
 
 /**
- * Resolve the authenticated principal and ONLY the workspaces where that
- * principal is an active member, carrying their effective Octo role.
+ * Resolve the authenticated principal, the single backing Octo container ID,
+ * and ONLY the App Workspaces where that principal is an active member.
  */
 export async function resolvePrincipalWorkspaces(
   config: OctoClientConfig,
   env: Env,
   session: AppSession,
 ): Promise<ResolvedIdentity> {
+  const configuredContainer = (
+    env.OCTO_WORKSPACE_ID ??
+    process.env.OCTO_WORKSPACE_ID ??
+    ""
+  ).trim();
+
   if (session.octoToken) {
     const token = session.octoToken;
     const isWorkspaceKey = /^octo_live_(ws|acc)_/.test(token);
@@ -138,17 +190,36 @@ export async function resolvePrincipalWorkspaces(
       fetchPrincipal(config, token),
       fetchWorkspaces(config, token),
     ]);
-    const workspaces: OctoWorkspace[] = rawWorkspaces.map((w) => ({
+    const octoWorkspaces: OctoWorkspace[] = rawWorkspaces.map((w) => ({
       ...w,
       role:
         normalizeRole(w.role) ??
         (w.isOwner || isWorkspaceKey ? "owner" : "member"),
     }));
-    return { principal, workspaces, token };
+    const octoWorkspaceId = configuredContainer || octoWorkspaces[0]?.id || "";
+    const appWorkspaces = octoWorkspaceId
+      ? await loadAppWorkspacesFromSql(
+          config,
+          token,
+          octoWorkspaceId,
+          principal.id,
+          principal.email,
+        )
+      : [];
+    const byId = new Map<string, OctoWorkspace>();
+    for (const w of octoWorkspaces) byId.set(w.id, w);
+    for (const w of appWorkspaces) byId.set(w.id, w);
+    return {
+      principal,
+      workspaces: [...byId.values()],
+      octoWorkspaceId,
+      token,
+    };
   }
 
   // principalId-mode session (own Google OAuth flow): never trust the owner
-  // key's workspace list directly — verify active membership per workspace.
+  // key's workspace list directly — verify active membership in ri_console
+  // and/or Octo members.
   const ownerKey = env.OCTO_API_KEY ?? "";
   if (!session.principalId || !ownerKey) {
     throw new OctoError(401, "Missing principal session or server key");
@@ -162,19 +233,38 @@ export async function resolvePrincipalWorkspaces(
     isPlatformOwner: false,
   };
   const allWorkspaces = await fetchWorkspaces(config, ownerKey);
-  const memberWorkspaces: OctoWorkspace[] = [];
+  const octoWorkspaceId = configuredContainer || allWorkspaces[0]?.id || "";
+  const byId = new Map<string, OctoWorkspace>();
+
   for (const ws of allWorkspaces) {
     const members = await fetchWorkspaceMembers(config, ownerKey, ws.id);
     const hit = matchActiveMember(members, session.principalId, session.email);
     if (!hit) continue;
     const effectiveRole = normalizeRole(hit.role) ?? "member";
-    memberWorkspaces.push({
+    byId.set(ws.id, {
       ...ws,
       role: effectiveRole,
       isOwner: effectiveRole === "owner",
     });
   }
-  return { principal, workspaces: memberWorkspaces, token: ownerKey };
+
+  if (octoWorkspaceId) {
+    const appWorkspaces = await loadAppWorkspacesFromSql(
+      config,
+      ownerKey,
+      octoWorkspaceId,
+      session.principalId,
+      session.email,
+    );
+    for (const w of appWorkspaces) byId.set(w.id, w);
+  }
+
+  return {
+    principal,
+    workspaces: [...byId.values()],
+    octoWorkspaceId,
+    token: ownerKey,
+  };
 }
 
 export type TenancyResult =
@@ -185,6 +275,7 @@ export type TenancyResult =
       role: WorkspaceRole;
       workspace: OctoWorkspace;
       workspaces: OctoWorkspace[];
+      octoWorkspaceId: string;
       token: string;
     }
   | {
@@ -195,7 +286,6 @@ export type TenancyResult =
 
 /**
  * Single tenancy enforcement choke for every workspace-scoped /app-api/* route.
- * Re-validates membership and effective role against Octo on every request.
  */
 export async function resolveTenancy(
   req: IncomingMessage,
@@ -261,6 +351,7 @@ export async function resolveTenancy(
     role,
     workspace,
     workspaces: resolved.workspaces,
+    octoWorkspaceId: resolved.octoWorkspaceId || workspace.id,
     token: resolved.token,
   };
 }

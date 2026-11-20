@@ -37,6 +37,9 @@ export interface AppSessionData {
   authMode?: "google" | "key";
   /** Advisory cached role from last Octo check; re-resolved on every request. */
   role?: "owner" | "admin" | "operator" | "member";
+  /** CSRF nonce and target provider for incremental connector OAuth round trips. */
+  connectorOauthState?: string;
+  connectorProvider?: string;
   /**
    * Epoch ms of the last authenticated /app-api/* request. Slides the local
    * idle window; absent on cookies sealed before longevity landed, which are
