@@ -15,6 +15,13 @@ import { createServer } from "node:http";
 import nodePath from "node:path";
 import { SessionResponseSchema } from "../shared/contracts.js";
 import {
+  AGENT_TEMPLATES,
+  createCustomAgent,
+  createDraftPlan,
+  listDraftPlans,
+  lockDraftPlan,
+} from "./agents.js";
+import {
   buildGoogleConnectorAuthUrl,
   buildZoomConnectorAuthUrl,
   type ConnectorProviderId,
@@ -670,11 +677,15 @@ export async function handleRequest(
     "/app-api/proposal",
     "/app-api/activity",
     "/app-api/agent-status",
+    "/app-api/agent-templates",
+    "/app-api/agents",
+    "/app-api/draft-plans",
     "/app-api/connector-status",
     "/app-api/plugin-installed",
     "/app-api/projects",
     "/app-api/connectors",
     "/app-api/connectors/routes",
+    "/app-api/connectors/sync-all",
   ];
   const isCreateWorkspace =
     path === "/app-api/workspaces" && req.method === "POST";
@@ -694,6 +705,9 @@ export async function handleRequest(
   );
   const deleteRouteMatch = path.match(
     /^\/app-api\/connectors\/routes\/([^/]+)$/,
+  );
+  const lockDraftPlanMatch = path.match(
+    /^\/app-api\/draft-plans\/([^/]+)\/lock$/,
   );
   const extraRoutes =
     path === "/app-api/profile" ||
@@ -715,6 +729,7 @@ export async function handleRequest(
     connectorDisconnectMatch ||
     connectorSyncMatch ||
     deleteRouteMatch ||
+    lockDraftPlanMatch ||
     extraRoutes
   ) {
     const body =
@@ -745,6 +760,91 @@ export async function handleRequest(
       tenancy;
     const requested = workspace.id;
     try {
+      if (path === "/app-api/agent-templates" && req.method === "GET") {
+        sendJson(res, 200, { templates: AGENT_TEMPLATES });
+        return;
+      }
+      if (path === "/app-api/agents" && req.method === "POST") {
+        const result = await createCustomAgent(
+          config,
+          token,
+          octoWorkspaceId,
+          requested,
+          principal.id,
+          body,
+        );
+        sendJson(res, result.status, result.body);
+        return;
+      }
+      if (path === "/app-api/draft-plans" && req.method === "GET") {
+        sendJson(res, 200, {
+          draftPlans: await listDraftPlans(
+            config,
+            token,
+            octoWorkspaceId,
+            requested,
+            principal.id,
+          ),
+        });
+        return;
+      }
+      if (path === "/app-api/draft-plans" && req.method === "POST") {
+        const result = await createDraftPlan(
+          config,
+          token,
+          octoWorkspaceId,
+          requested,
+          principal.id,
+          body,
+        );
+        sendJson(res, result.status, result.body);
+        return;
+      }
+      if (lockDraftPlanMatch && req.method === "POST") {
+        const result = await lockDraftPlan(
+          config,
+          token,
+          octoWorkspaceId,
+          requested,
+          principal.id,
+          lockDraftPlanMatch[1] ?? "",
+        );
+        sendJson(res, result.status, result.body);
+        return;
+      }
+      if (path === "/app-api/connectors/sync-all" && req.method === "POST") {
+        const { connectors } = await listUserConnectors(
+          config,
+          token,
+          octoWorkspaceId,
+          principal.id,
+          env,
+        );
+        const active = connectors.filter(
+          (c) =>
+            c.status === "connected" &&
+            (c.provider === "gmail" ||
+              c.provider === "gcal" ||
+              c.provider === "gdrive" ||
+              c.provider === "zoom"),
+        );
+        const results = [];
+        for (const c of active) {
+          results.push(
+            await syncUserConnector(
+              config,
+              token,
+              octoWorkspaceId,
+              requested,
+              principal.id,
+              c.provider,
+              env,
+            ),
+          );
+        }
+        sendJson(res, 200, { syncedProviders: active.length, results });
+        return;
+      }
       if (path === "/app-api/connectors" && req.method === "GET") {
         sendJson(
           res,
