@@ -132,3 +132,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr merge --auto --squash "$PR_URL"
+      - name: After the merge lands, check the live hostname
+        if: vars.RI_PUBLIC_URL != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          URL: ${{ vars.RI_PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 36); do
+            state=$(gh pr view "$PR_URL" --json state --jq .state)
+            [ "$state" = "MERGED" ] && break
+            sleep 5
+          done
+          [ "$state" = "MERGED" ] || { echo "PR not merged yet; skipping live check"; exit 0; }
+          curl -fsS --retry 12 --retry-delay 20 "$URL/app-api/health" | grep -q '"status":"ok"'
+          curl -fsS "$URL/console/" | grep -q '<div id="root"'
+          echo "Live console and adapter healthy at $URL after merge"
