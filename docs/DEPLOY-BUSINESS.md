@@ -1,41 +1,44 @@
 # business.design-bakery.com — deployment
 
-The console + API run from this Mac behind a Cloudflare Tunnel; Octo is a remote
-data layer only. Our adapter owns Google sign-in (no Octo redirect).
+The console + API run in a single Docker container (`relationship-intelligence`) on
+`octo-vps` behind Cloudflare Tunnel `business-ri` (`business-ri-cloudflared` on
+`study-os_edge`). Octo (`https://octodb.design-bakery.com`) is the remote data
+and Arize Phoenix OTLP tracing layer; our adapter owns Google sign-in (no Octo redirect).
 
 ## Pieces
 
-- Adapter (app/server) serves `/app-api/*`, `/octo-auth/*`, and the built console
-  at `/console/` (SPA fallback) from one process on :8787.
-- Cloudflare Tunnel `business-ri` (id f025d805-c800-4944-b615-9b4ad7e4db57),
-  config `~/.cloudflared/business-ri.yml`, ingress
-  `business.design-bakery.com -> http://localhost:8787`.
-  Run: `cloudflared tunnel --config ~/.cloudflared/business-ri.yml run business-ri`.
-- DNS: proxied CNAME `business.design-bakery.com` -> tunnel (created via
-  `cloudflared tunnel route dns`).
-- `APP_ORIGIN=https://business.design-bakery.com` (secure cookies).
+- **Adapter (`app/server`):** Serves `/app-api/*`, `/octo-auth/*`, and the built console
+  at `/console/` (SPA fallback, resolved relative to `import.meta.url`) from one
+  process on `:8787` (`127.0.0.1:18098->8787` on `octo-vps`).
+- **VPS Compose & Komodo CD:** `deploy/docker-compose.vps.yml` + `deploy/vps/autodeploy.sh`
+  build `origin/main` from the root `Dockerfile`, swap the container, wait for
+  `/app-api/health`, and roll back on failure (registered in
+  `Pukujan-lab/server-management` `komodo/resources/stacks-vps.toml`).
+- **Cloudflare Tunnel `business-ri`:** Runs in container `business-ri-cloudflared`
+  (`cloudflare/cloudflared:2026.10.7`) on `octo-vps` (`study-os_edge`), routing
+  `business.design-bakery.com -> http://relationship-intelligence:8787`.
+- **Runtime environment:** Lives on `octo-vps` at `~/apps/relationship-intelligence.env`
+  (`chmod 600`), including `APP_ORIGIN=https://business.design-bakery.com` and
+  `PHOENIX_COLLECTOR_ENDPOINT=https://octodb.design-bakery.com/api/workspaces/<OCTO_WORKSPACE_ID>/otel/v1/traces`.
 
-## Build & run
+## Local dev
 
 ```bash
 pnpm --dir console build          # produces console/dist served by the adapter
 cd app && set -a && source .env && set +a && pnpm dev
-cloudflared tunnel --config ~/.cloudflared/business-ri.yml run business-ri
 ```
 
-## Google sign-in (our own client)
+## Google sign-in & connectors (our own client)
 
-- Google Cloud OAuth client, Web application, authorized redirect URI:
-  `https://business.design-bakery.com/octo-auth/google/callback`.
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `app/.env` (gitignored).
-- Consent screen is testing-mode: sign-in emails must be listed as test users.
-- Flow: our `/octo-auth/google/start` (state bound to our session) -> Google ->
-  our callback exchanges the code, verifies the id_token, maps the verified
-  email to an Octo principal via workspace membership, seals our cookie.
-  Data calls use the server-side `OCTO_API_KEY` plus the principal id from our
-  cookie. Octo is never in the redirect path.
+- Google Cloud OAuth client (Web application), authorized redirect URIs:
+  - Sign-in: `https://business.design-bakery.com/octo-auth/google/callback`
+  - User connectors (Gmail / Calendar / Drive): `https://business.design-bakery.com/app-api/connectors/oauth/google/callback`
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` live only in gitignored env files.
+- Flow: `/octo-auth/google/start` (state bound to session) -> Google -> callback
+  exchanges code, verifies `id_token`, maps verified email to an Octo principal
+  via `ri_console.workspace_member`, and seals the session cookie. Octo is never
+  in the browser redirect path.
 
 ## Secrets
 
-Tunnel credentials `~/.cloudflared/<tunnel-id>.json` and `cert.pem` are private;
-never commit. API keys and Google secret live only in gitignored `.env` files.
+Tunnel credentials and API/OAuth secrets stay strictly outside git (`chmod 600` on `octo-vps`).
