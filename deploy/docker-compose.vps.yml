@@ -18,6 +18,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: "8787"
+      SPEECH_GATEWAY_URL: ${SPEECH_GATEWAY_URL:-http://host.docker.internal:18800}
+      SPEECH_PROJECT: ${SPEECH_PROJECT:-design-bakery}
+    extra_hosts:
+      - host.docker.internal:host-gateway
     ports:
       - 127.0.0.1:18098:8787
     networks: [default, edge]

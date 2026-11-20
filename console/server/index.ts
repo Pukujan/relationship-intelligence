@@ -32,7 +32,27 @@ const PORT = Number(process.env.COPILOT_PORT ?? 8799);
 const BASE_URL = (process.env.TOKEN_PLAN_BASE_URL ?? "").replace(/\/$/, "");
 const API_KEY = process.env.TOKEN_PLAN_API_KEY ?? "";
 const MODEL = process.env.COPILOT_MODEL ?? "qwen3.6-flash";
+const SPEECH_GATEWAY_URL = (process.env.SPEECH_GATEWAY_URL ?? "").replace(/\/$/, "");
+const SPEECH_PROJECT = process.env.SPEECH_PROJECT ?? "design-bakery";
 const REQUEST_TIMEOUT_MS = 75_000;
+
+function pcmToWav(pcm: Buffer, sampleRate: number): Buffer {
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
 
 /* ------------------------------------------------------------------ */
 /* Contracts                                                           */
@@ -719,9 +739,14 @@ const json = (
 
 const readBody = async (req: import("node:http").IncomingMessage) => {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = chunk as Buffer;
+    total += buf.length;
+    if (total > 2_500_000) throw new Error("request body too large");
+    chunks.push(buf);
+  }
   const text = Buffer.concat(chunks).toString("utf8");
-  if (text.length > 200_000) throw new Error("request body too large");
   return text ? JSON.parse(text) : {};
 };
 
@@ -734,6 +759,108 @@ const server = createServer(async (req, res) => {
     );
   };
   try {
+    if (req.method === "GET" && url.pathname === "/api/speech/health") {
+      if (!SPEECH_GATEWAY_URL) {
+        json(res, 200, { ok: false });
+        finish(200, "speech unconfigured");
+        return;
+      }
+      try {
+        const r = await fetch(`${SPEECH_GATEWAY_URL}/health`, {
+          signal: AbortSignal.timeout(3_000),
+        });
+        if (!r.ok) {
+          json(res, 200, { ok: false });
+          finish(200, `speech health ${r.status}`);
+          return;
+        }
+        const data = (await r.json()) as { ok?: boolean; stt?: string; tts?: string; active?: string };
+        json(res, 200, {
+          ok: Boolean(data.ok),
+          stt: data.stt ?? "parakeet",
+          tts: data.tts ?? "kokoro",
+          active: data.active ?? "english-fast",
+        });
+        finish(200, "speech healthy");
+      } catch {
+        json(res, 200, { ok: false });
+        finish(200, "speech unreachable");
+      }
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/speech/stt") {
+      if (!SPEECH_GATEWAY_URL) {
+        json(res, 503, { error: "speech_unconfigured" });
+        finish(503, "speech unconfigured");
+        return;
+      }
+      const body = (await readBody(req)) as { audioBase64?: string };
+      const b64 = typeof body.audioBase64 === "string" ? body.audioBase64 : "";
+      if (!b64) {
+        json(res, 400, { error: "missing_audio" });
+        finish(400, "missing audio");
+        return;
+      }
+      const wav = Buffer.from(b64, "base64");
+      const upstream = await fetch(`${SPEECH_GATEWAY_URL}/stt?stack=english-fast`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "audio/wav",
+          "X-Speech-Project": SPEECH_PROJECT,
+        },
+        body: wav,
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!upstream.ok) {
+        json(res, 502, { error: "stt_failed", status: upstream.status });
+        finish(502, `stt ${upstream.status}`);
+        return;
+      }
+      const result = (await upstream.json()) as { text?: string; ms?: number };
+      json(res, 200, { text: String(result.text ?? "").trim(), ms: result.ms ?? 0 });
+      finish(200, `stt ${String(result.text ?? "").length}ch`);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/speech/tts") {
+      if (!SPEECH_GATEWAY_URL) {
+        json(res, 503, { error: "speech_unconfigured" });
+        finish(503, "speech unconfigured");
+        return;
+      }
+      const body = (await readBody(req)) as { text?: string };
+      const text = typeof body.text === "string" ? body.text.trim().slice(0, 800) : "";
+      if (!text) {
+        json(res, 400, { error: "missing_text" });
+        finish(400, "missing text");
+        return;
+      }
+      const upstream = await fetch(`${SPEECH_GATEWAY_URL}/tts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Speech-Project": SPEECH_PROJECT,
+        },
+        body: JSON.stringify({ text, stack: "english-fast" }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!upstream.ok) {
+        json(res, 502, { error: "tts_failed", status: upstream.status });
+        finish(502, `tts ${upstream.status}`);
+        return;
+      }
+      const raw = Buffer.from(await upstream.arrayBuffer());
+      const ct = upstream.headers.get("content-type") ?? "";
+      const rate = Number(upstream.headers.get("x-sample-rate") ?? 24_000) || 24_000;
+      const wav = ct.includes("wav") ? raw : pcmToWav(raw, rate);
+      res.writeHead(200, {
+        "Content-Type": "audio/wav",
+        "Content-Length": wav.length,
+        "Cache-Control": "no-store",
+      });
+      res.end(wav);
+      finish(200, `tts ${wav.length}B`);
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/web-search") {
       const q = url.searchParams.get("q") ?? "";
       json(res, 200, { results: await webSearch(q, 6) });
