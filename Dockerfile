@@ -20,4 +20,4 @@ COPY app/ app/
 COPY --from=build /app/console/dist console/dist
 ENV NODE_ENV=production PORT=8787
 EXPOSE 8787
-CMD ["node", "--env-file-if-exists=app/.env", "--experimental-strip-types", "app/server/dev.ts"]
+CMD ["./app/node_modules/.bin/tsx", "--env-file-if-exists=app/.env", "app/server/dev.ts"]

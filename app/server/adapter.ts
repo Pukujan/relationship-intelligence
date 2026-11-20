@@ -13,6 +13,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import nodePath from "node:path";
+import { fileURLToPath } from "node:url";
 import { SessionResponseSchema } from "../shared/contracts.js";
 import {
   AGENT_TEMPLATES,
@@ -1370,7 +1371,10 @@ export async function handleRequest(
     }
   }
 
-  const consoleDist = nodePath.resolve(process.cwd(), "../console/dist");
+  const consoleDist = nodePath.resolve(
+    nodePath.dirname(fileURLToPath(import.meta.url)),
+    "../../console/dist",
+  );
   if (
     req.method === "GET" &&
     (path === "/" || path === "/console" || path.startsWith("/console/"))
