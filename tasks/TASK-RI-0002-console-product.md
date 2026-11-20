@@ -97,6 +97,29 @@ Blocked/uncertain:
 Next:
 - On the owner's go-ahead, run the copilot server in production with the vault working keys (issue #62), then build the shared assistant for chat, voice and call.
 
+### 2026-11-20 21:59:31 UTC — agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85","blocked":["The agent's SSH key is refused by octo-vps, so the vault working keys are not yet in the production env file; until the owner adds them the deployed copilot has no providers and the console keeps using its offline router."],"changed":["none"],"completed":["The live site had no model because the production image started only the app adapter; the image now also starts the copilot server on loopback and the adapter forwards /api requests to it only for a signed-in session."],"decisions":["The copilot server runs inside the same container as the adapter, restarted by the start script if it exits, so the existing deploy script and health check need no change."],"evidence":["Run side by side locally, the adapter answered 401 to /api requests with no session and, with a sealed test session, listed five providers, returned a Claude Haiku answer and passed a streamed answer through; the app's 40 tests, typecheck, lint and build pass. The Docker image itself was not built locally because this machine has no Docker."],"evidence_class":"observed","next_action":"The owner appends the provider keys to the production env file on octo-vps and recreates the container; then check that /api/models lists providers for a signed-in session on the live site.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-20T21:59:31Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"f3aeebaa26b8d8e610dfe6eb71b05f293d37562980ef8f99386138be7fe77e3a","request_id":"9042adf434a9477bab775fead95e43d9","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- The live site had no model because the production image started only the app adapter; the image now also starts the copilot server on loopback and the adapter forwards /api requests to it only for a signed-in session.
+
+Evidence:
+- Run side by side locally, the adapter answered 401 to /api requests with no session and, with a sealed test session, listed five providers, returned a Claude Haiku answer and passed a streamed answer through; the app's 40 tests, typecheck, lint and build pass. The Docker image itself was not built locally because this machine has no Docker.
+
+Decisions:
+- The copilot server runs inside the same container as the adapter, restarted by the start script if it exits, so the existing deploy script and health check need no change.
+
+Changed:
+- none
+
+Blocked/uncertain:
+- The agent's SSH key is refused by octo-vps, so the vault working keys are not yet in the production env file; until the owner adds them the deployed copilot has no providers and the console keeps using its offline router.
+
+Next:
+- The owner appends the provider keys to the production env file on octo-vps and recreates the container; then check that /api/models lists providers for a signed-in session on the live site.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
