@@ -31,6 +31,7 @@ import {
   listUserConnectors,
   saveUserConnector,
 } from "./connectors.js";
+import { proxyCopilot } from "./copilotProxy.js";
 import { type Env, readEnv } from "./env.js";
 import { fetchPrincipal, OctoError } from "./octo.js";
 import { handleProfileRoutes } from "./profile.js";
@@ -123,6 +124,13 @@ export async function handleRequest(
 
   if (path === "/app-api/health") {
     sendJson(res, 200, { status: "ok" });
+    return;
+  }
+
+  // The copilot server's routes. It has no sign-in of its own, so the proxy
+  // forwards only for a signed-in session (see copilotProxy.ts).
+  if (path.startsWith("/api/")) {
+    await proxyCopilot(req, res, env, `${path}${url.search}`);
     return;
   }
 
