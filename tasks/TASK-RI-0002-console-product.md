@@ -74,6 +74,29 @@ Blocked/uncertain:
 Next:
 - Build the intelligence layer (real orchestrator + research/design mode held for approval + deadline/iteration loop + signal layer), then wire the data layer to Octo and integrate the console into app/ behind Octo sign-in.
 
+### 2026-11-20 21:46:54 UTC — agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85","blocked":["Production has no model: the copilot server is not deployed there and the vault working keys exist only in the owner's local console/.env. The owner has not yet said whether to deploy."],"changed":["none"],"completed":["The copilot could reach only three model providers through raw keys and its fallback order was fixed in code; pull request #63 adds Claude Haiku and Sonnet and OpenRouter's free models, reaches vendors through Octo's vault proxy with working keys, and makes both fallback chains reorderable from the environment. Earlier the same day pull request #60 made the Voice page use the browser's microphone and speech, and pull request #61 made installed agents appear on the Agents page; both are merged."],"decisions":["The free hy4flash-free model sits second in the everyday chain because it took 20 to 40 seconds on a full digest; the owner can put it first with COPILOT_CHAIN_ASK."],"evidence":["Each named model answered in live calls on a local server, a request for Opus was refused, a broken first route fell through to Haiku, and a full workspace digest was answered in about 7 seconds; the console's typecheck, contract tests, orphan check and build pass."],"evidence_class":"observed","next_action":"On the owner's go-ahead, run the copilot server in production with the vault working keys (issue #62), then build the shared assistant for chat, voice and call.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-20T21:46:54Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"6b2984154e89c3e6ee4863f05ace54de18d8bfed2a3c86ce25e80cc919e849db","request_id":"5a22f66d0371494d9ee4391999099893","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- The copilot could reach only three model providers through raw keys and its fallback order was fixed in code; pull request #63 adds Claude Haiku and Sonnet and OpenRouter's free models, reaches vendors through Octo's vault proxy with working keys, and makes both fallback chains reorderable from the environment. Earlier the same day pull request #60 made the Voice page use the browser's microphone and speech, and pull request #61 made installed agents appear on the Agents page; both are merged.
+
+Evidence:
+- Each named model answered in live calls on a local server, a request for Opus was refused, a broken first route fell through to Haiku, and a full workspace digest was answered in about 7 seconds; the console's typecheck, contract tests, orphan check and build pass.
+
+Decisions:
+- The free hy4flash-free model sits second in the everyday chain because it took 20 to 40 seconds on a full digest; the owner can put it first with COPILOT_CHAIN_ASK.
+
+Changed:
+- none
+
+Blocked/uncertain:
+- Production has no model: the copilot server is not deployed there and the vault working keys exist only in the owner's local console/.env. The owner has not yet said whether to deploy.
+
+Next:
+- On the owner's go-ahead, run the copilot server in production with the vault working keys (issue #62), then build the shared assistant for chat, voice and call.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
