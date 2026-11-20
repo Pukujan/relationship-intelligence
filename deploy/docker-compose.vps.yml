@@ -1,0 +1,45 @@
+# relationship-intelligence on octo-vps:
+# Single container serving /app-api/*, /octo-auth/*, and the built console at /console/.
+# Binds loopback on 127.0.0.1:18098 and joins study-os_edge so octo-cloudflared reaches it
+# as http://relationship-intelligence:8787. Komodo deploys it via deploy/vps/autodeploy.sh.
+name: relationship-intelligence
+
+services:
+  web:
+    container_name: relationship-intelligence
+    image: ${RI_IMAGE:-relationship-intelligence:local}
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ${RI_ENV_FILE:-../../relationship-intelligence.env}
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "8787"
+    ports:
+      - 127.0.0.1:18098:8787
+    networks: [default, edge]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8787/app-api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  edge:
+    external: true
+    name: ${EDGE_NETWORK:-study-os_edge}
