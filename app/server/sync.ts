@@ -322,11 +322,7 @@ export async function syncUserConnector(
       LIMIT 1`,
   );
   const row = rows[0];
-  if (
-    !row ||
-    row.status !== "connected" ||
-    typeof row.access_token !== "string"
-  ) {
+  if (row?.status !== "connected" || typeof row.access_token !== "string") {
     return {
       ok: false,
       status: 400,

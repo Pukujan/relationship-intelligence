@@ -5,7 +5,12 @@ import {
 } from "../server/connectors.js";
 import type { Env } from "../server/env.js";
 import { matchConnectorRoute, syncUserConnector } from "../server/sync.js";
-import { endSpan, scrubAttributes, startSpan } from "../server/telemetry.js";
+import {
+  encodeOtlpTraceProtobuf,
+  endSpan,
+  scrubAttributes,
+  startSpan,
+} from "../server/telemetry.js";
 import {
   createAppWorkspace,
   DDL_VERSION,
@@ -203,6 +208,50 @@ describe("Phoenix OTLP telemetry & scrubber (RI-0020)", () => {
     const out = await endSpan(span, "OK", undefined, "");
     expect(out.exported).toBe(false);
     expect(out.traceId).toBe(span.traceId);
+  });
+
+  it("encodes valid OTLP/HTTP protobuf bytes and posts application/x-protobuf", async () => {
+    const span = startSpan({
+      name: "ri.otel.unit",
+      kind: "CHAIN",
+      workspaceId: WS_ID,
+      attributes: { "ri.probe": true, "ri.count": 2 },
+    });
+    const payload = encodeOtlpTraceProtobuf({
+      traceId: span.traceId,
+      spanId: span.spanId,
+      name: span.name,
+      startTimeUnixNano: span.startTimeUnixNano,
+      endTimeUnixNano: span.startTimeUnixNano,
+      attributes: span.attributes,
+      status: "OK",
+      project: "ri-prod",
+    });
+    expect(payload.byteLength).toBeGreaterThan(40);
+    expect(Buffer.from(payload).includes(Buffer.from("ri.otel.unit"))).toBe(
+      true,
+    );
+    let seenContentType = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        seenContentType = headers["Content-Type"] ?? "";
+        return new Response("", { status: 200 });
+      }),
+    );
+    try {
+      const out = await endSpan(
+        span,
+        "OK",
+        undefined,
+        "https://octo.example.test/api/workspaces/ws/otel/v1/traces",
+      );
+      expect(out.exported).toBe(true);
+      expect(seenContentType).toBe("application/x-protobuf");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

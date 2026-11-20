@@ -328,7 +328,7 @@ export async function lockDraftPlan(
       LIMIT 1`,
   );
   const draft = (rows[0]?.doc as Record<string, unknown>) ?? null;
-  if (!draft || draft.kind !== "draft_plan") {
+  if (draft?.kind !== "draft_plan") {
     return {
       ok: false,
       status: 404,
