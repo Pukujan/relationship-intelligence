@@ -195,11 +195,14 @@ export async function handleRequest(
             },
           );
           if (!mRes.ok) continue;
-          const members = (await mRes.json()) as {
-            email?: string;
-            principalId?: string;
-            principal?: { id?: string };
-          }[];
+          const membersBody = (await mRes.json()) as {
+            members?: {
+              email?: string;
+              principalId?: string;
+              principal?: { id?: string };
+            }[];
+          };
+          const members = membersBody.members ?? [];
           const hit = members.find(
             (m) => String(m.email ?? "").toLowerCase() === email,
           );
