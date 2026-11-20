@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, Clock, Pencil, X } from "lucide-react";
+import { Check, Clock, Pencil, RotateCcw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   agentById,
@@ -8,7 +8,7 @@ import {
   personById,
   relativeTime,
 } from "@/data/derive";
-import type { Approval, Decision, World } from "@/data/types";
+import type { Approval, Decision, DeclinePath, World } from "@/data/types";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import {
   EvidenceRow,
@@ -19,6 +19,21 @@ import {
 import { Button } from "@/components/ui/button";
 
 const SWIPE_THRESHOLD = 110;
+
+const DECLINE_LABELS: Record<DeclinePath, { label: string; consequence: string }> = {
+  stop: {
+    label: "Stop",
+    consequence: "Stops this thread cleanly — no mission or follow-up created.",
+  },
+  re_plan: {
+    label: "Re-plan",
+    consequence: "Declines this draft and queues one fresh alternative proposal.",
+  },
+  snooze: {
+    label: "Snooze 24h",
+    consequence: "Holds this decision for 24 hours without cancelling the thread.",
+  },
+};
 
 export const ApprovalCard = ({
   approval,
@@ -34,21 +49,25 @@ export const ApprovalCard = ({
   selected: boolean;
   busy: boolean;
   onSelect: () => void;
-  onDecide: (decision: Decision) => void;
+  onDecide: (decision: Decision, declinePath?: DeclinePath) => void;
   onEdit: () => void;
 }) => {
   const agent = agentById(world, approval.agentId);
   const person = personById(world, approval.personId);
   const company = companyById(world, approval.companyId);
+  const [declinePath, setDeclinePath] = useState<DeclinePath>("stop");
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [leaving, setLeaving] = useState<Decision | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
 
-  const decide = (decision: Decision) => {
+  const decide = (decision: Decision, path?: DeclinePath) => {
     if (leaving || busy) return;
     setLeaving(decision);
-    window.setTimeout(() => onDecide(decision), 170);
+    window.setTimeout(
+      () => onDecide(decision, decision === "declined" ? (path ?? declinePath) : undefined),
+      170,
+    );
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -88,18 +107,12 @@ export const ApprovalCard = ({
     else if (dx < -SWIPE_THRESHOLD) decide("declined");
   };
 
-  const offset = leaving
-    ? leaving === "approved"
-      ? 620
-      : -620
-    : dragX;
-
+  const offset = leaving ? (leaving === "approved" ? 620 : -620) : dragX;
   const swipeIntent =
     dragX > 40 ? "approved" : dragX < -40 ? "declined" : null;
 
   return (
     <div className="relative" id={`approval-${approval.id}`}>
-      {/* Swipe affordance under the card */}
       <div className="pointer-events-none absolute inset-0 flex items-center justify-between overflow-hidden rounded-xl px-5">
         <span
           className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-run transition-opacity"
@@ -112,7 +125,7 @@ export const ApprovalCard = ({
           className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-opacity"
           style={{ opacity: swipeIntent === "declined" ? 1 : 0.25 }}
         >
-          Decline
+          Decline ({DECLINE_LABELS[declinePath].label})
           <X className="h-3.5 w-3.5" />
         </span>
       </div>
@@ -195,18 +208,46 @@ export const ApprovalCard = ({
           </div>
         ) : null}
 
-        <div className="rounded-lg border border-border/60 bg-background/50 p-3">
-          <p className="eyebrow mb-1.5 flex items-center gap-1.5">
-            Proposed action
-            {approval.editedAction ? (
-              <span className="rounded border border-primary/25 bg-primary/10 px-1 py-px text-[9px] normal-case tracking-normal text-primary">
-                edited
-              </span>
-            ) : null}
-          </p>
-          <p className="max-w-[72ch] text-[12.5px] leading-relaxed text-foreground/85">
-            {approval.editedAction ?? approval.proposedAction}
-          </p>
+        {/* RI-0014 (#39): explicit Do / Don't preview with chosen decline consequence */}
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="rounded-lg border border-run/25 bg-run/[0.04] p-2.5">
+            <p className="eyebrow mb-1 flex items-center gap-1.5 text-run">
+              Do (on approve)
+              {approval.editedAction ? (
+                <span className="rounded border border-primary/25 bg-primary/10 px-1 py-px text-[9px] normal-case tracking-normal text-primary">
+                  edited
+                </span>
+              ) : null}
+            </p>
+            <p className="text-[12px] leading-relaxed text-foreground/85">
+              {approval.editedAction ?? approval.proposedAction}
+            </p>
+          </div>
+          <div className="rounded-lg border border-border/70 bg-background/50 p-2.5">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p className="eyebrow">Don&apos;t (on decline)</p>
+              <div className="flex items-center gap-1">
+                {(["stop", "re_plan", "snooze"] as const).map((path) => (
+                  <button
+                    key={path}
+                    type="button"
+                    onClick={() => setDeclinePath(path)}
+                    className={cn(
+                      "rounded px-1.5 py-0.5 text-[9.5px] font-medium transition-colors",
+                      declinePath === path
+                        ? "bg-surface-3 text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {DECLINE_LABELS[path].label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+              {DECLINE_LABELS[declinePath].consequence}
+            </p>
+          </div>
         </div>
 
         <div className="space-y-1.5">
@@ -217,7 +258,7 @@ export const ApprovalCard = ({
           <EvidenceRow evidence={approval.evidence} limit={3} />
         </div>
 
-        <div className="mt-auto flex items-center gap-1.5 pt-1">
+        <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-1">
           <Button
             size="sm"
             className="h-8 flex-1 rounded-lg text-[12px]"
@@ -242,10 +283,14 @@ export const ApprovalCard = ({
             variant="ghost"
             className="h-8 gap-1.5 rounded-lg px-2.5 text-[12px] text-muted-foreground hover:text-foreground"
             disabled={busy || Boolean(leaving)}
-            onClick={() => decide("declined")}
+            onClick={() => decide("declined", declinePath)}
           >
-            <X className="h-3.5 w-3.5" />
-            Decline
+            {declinePath === "re_plan" ? (
+              <RotateCcw className="h-3.5 w-3.5" />
+            ) : (
+              <X className="h-3.5 w-3.5" />
+            )}
+            Decline · {DECLINE_LABELS[declinePath].label}
           </Button>
         </div>
       </article>

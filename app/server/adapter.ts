@@ -49,6 +49,14 @@ import {
   resolveTenancy,
 } from "./tenancy.js";
 import {
+  createWorkspaceWithProvision,
+  inviteWorkspaceMember,
+  listWorkspaceMembers,
+  provisionWorkspace,
+  removeWorkspaceMember,
+  resolveOrActivateGoogleMember,
+} from "./workspaces.js";
+import {
   addProposal,
   ConflictError,
   decideApproval,
@@ -183,49 +191,25 @@ export async function handleRequest(
         if (!payload.email || payload.email_verified === false)
           throw new Error("google email unverified");
         const email = payload.email.toLowerCase();
-        // Map the verified Google identity to an Octo principal via membership.
+        // Resolve active membership or activate a pending invite via Octo.
         const key = env.OCTO_API_KEY ?? "";
-        const wsRes = await fetch(
-          new URL("/api/workspaces", env.OCTO_API_URL),
-          {
-            headers: { Authorization: `Bearer ${key}` },
-            signal: AbortSignal.timeout(15_000),
-          },
+        const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 };
+        const membership = await resolveOrActivateGoogleMember(
+          config,
+          key,
+          email,
         );
-        const workspaces = (await wsRes.json()) as { id: string }[];
-        let principalId: string | null = null;
-        for (const workspace of workspaces) {
-          const mRes = await fetch(
-            new URL(
-              `/api/workspaces/${workspace.id}/members`,
-              env.OCTO_API_URL,
-            ),
-            {
-              headers: { Authorization: `Bearer ${key}` },
-              signal: AbortSignal.timeout(15_000),
-            },
+        if (!membership) {
+          redirect(
+            res,
+            `${env.APP_ORIGIN}/console/signin?auth_error=NOT_A_MEMBER&email=${encodeURIComponent(email)}`,
           );
-          if (!mRes.ok) continue;
-          const membersBody = (await mRes.json()) as {
-            members?: {
-              email?: string;
-              principalId?: string;
-              principal?: { id?: string };
-            }[];
-          };
-          const members = membersBody.members ?? [];
-          const hit = members.find(
-            (m) => String(m.email ?? "").toLowerCase() === email,
-          );
-          if (hit) {
-            principalId = hit.principalId ?? hit.principal?.id ?? null;
-            break;
-          }
+          return;
         }
-        if (!principalId) throw new Error("not a workspace member");
-        session.principalId = principalId;
+        session.principalId = membership.principalId;
         session.email = email;
         session.displayName = payload.name ?? email;
+        session.role = membership.role;
         session.authMode = "google";
         session.lastSeenAt = Date.now();
         await session.save();
@@ -278,6 +262,9 @@ export async function handleRequest(
     sendJson(res, 200, {
       workspaceId: process.env.OCTO_WORKSPACE_ID ?? null,
       keyConnect: true,
+      workspaceCreateEnabled: Boolean(
+        (process.env.OCTO_ACCOUNT_KEY ?? "").trim(),
+      ),
     });
     return;
   }
@@ -486,7 +473,16 @@ export async function handleRequest(
     "/app-api/plugin-installed",
     "/app-api/projects",
   ];
+  const isCreateWorkspace =
+    path === "/app-api/workspaces" && req.method === "POST";
+  const provisionMatch = path.match(
+    /^\/app-api\/workspaces\/([^/]+)\/provision$/,
+  );
   const inviteMatch = path.match(/^\/app-api\/workspaces\/([^/]+)\/invites$/);
+  const membersMatch = path.match(/^\/app-api\/workspaces\/([^/]+)\/members$/);
+  const removeMemberMatch = path.match(
+    /^\/app-api\/workspaces\/([^/]+)\/members\/([^/]+)$/,
+  );
   const extraRoutes =
     path === "/app-api/profile" ||
     path === "/app-api/team" ||
@@ -499,14 +495,21 @@ export async function handleRequest(
   if (
     worldRoutes.includes(path) ||
     path.startsWith("/app-api/sessions") ||
+    isCreateWorkspace ||
+    provisionMatch ||
     inviteMatch ||
+    membersMatch ||
+    removeMemberMatch ||
     extraRoutes
   ) {
     const body =
       req.method === "POST" || req.method === "PATCH"
         ? (JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>)
         : {};
-    const requestedWorkspaceId = (inviteMatch?.[1] ??
+    const requestedWorkspaceId = (provisionMatch?.[1] ??
+      inviteMatch?.[1] ??
+      membersMatch?.[1] ??
+      removeMemberMatch?.[1] ??
       url.searchParams.get("workspaceId") ??
       (typeof body.workspaceId === "string" ? body.workspaceId : undefined)) as
       | string
@@ -525,18 +528,60 @@ export async function handleRequest(
     }
     const { principal, role, workspace, workspaces, token } = tenancy;
     const requested = workspace.id;
-    if (inviteMatch && req.method === "POST") {
-      if (!requireRole(role, "admin")) {
-        sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "admin" });
+    try {
+      if (isCreateWorkspace) {
+        if (!requireRole(role, "owner")) {
+          sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "owner" });
+          return;
+        }
+        const result = await createWorkspaceWithProvision(config, env, body);
+        sendJson(res, result.status, result.body);
         return;
       }
-      sendJson(res, 501, {
-        error: "INVITES_NOT_IMPLEMENTED",
-        detail: "Invite lifecycle lands in RI-0013 (#38).",
-      });
-      return;
-    }
-    try {
+      if (provisionMatch && req.method === "POST") {
+        if (!requireRole(role, "admin")) {
+          sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "admin" });
+          return;
+        }
+        sendJson(res, 200, await provisionWorkspace(config, token, requested));
+        return;
+      }
+      if (inviteMatch && req.method === "POST") {
+        if (!requireRole(role, "admin")) {
+          sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "admin" });
+          return;
+        }
+        const result = await inviteWorkspaceMember(
+          config,
+          token,
+          requested,
+          body,
+        );
+        sendJson(res, result.status, result.body);
+        return;
+      }
+      if (membersMatch && req.method === "GET") {
+        sendJson(res, 200, {
+          members: await listWorkspaceMembers(config, token, requested),
+        });
+        return;
+      }
+      if (removeMemberMatch && req.method === "DELETE") {
+        if (!requireRole(role, "admin")) {
+          sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "admin" });
+          return;
+        }
+        const targetEmail = decodeURIComponent(removeMemberMatch[2] ?? "");
+        const result = await removeWorkspaceMember(
+          config,
+          token,
+          requested,
+          targetEmail,
+          principal.email,
+        );
+        sendJson(res, result.status, result.body);
+        return;
+      }
       if (extraRoutes) {
         const ctx = {
           config,
@@ -658,6 +703,12 @@ export async function handleRequest(
             {
               approvalId: String(body.approvalId),
               decision: body.decision === "approved" ? "approved" : "declined",
+              declinePath:
+                body.declinePath === "re_plan" ||
+                body.declinePath === "snooze" ||
+                body.declinePath === "stop"
+                  ? body.declinePath
+                  : undefined,
               note: typeof body.note === "string" ? body.note : undefined,
               editedAction:
                 typeof body.editedAction === "string"
