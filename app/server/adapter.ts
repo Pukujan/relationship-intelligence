@@ -20,8 +20,10 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { createReadStream, existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
+import nodePath from "node:path";
 import { SessionResponseSchema } from "../shared/contracts.js";
 import { type Env, readEnv } from "./env.js";
 import { fetchPrincipal, fetchWorkspaces, OctoError } from "./octo.js";
@@ -800,6 +802,48 @@ export async function handleRequest(
       });
       return;
     }
+  }
+
+  // Production: serve the built console at /console with SPA fallback, so the
+  // Cloudflare hostname serves app + API from this one process.
+  const consoleDist = nodePath.resolve(process.cwd(), "../console/dist");
+  if (
+    req.method === "GET" &&
+    (path === "/" || path === "/console" || path.startsWith("/console/"))
+  ) {
+    if (path === "/" || path === "/console") {
+      redirect(res, "/console/");
+      return;
+    }
+    const rel = path.slice("/console/".length) || "index.html";
+    let file = nodePath.join(consoleDist, rel);
+    if (!file.startsWith(consoleDist)) {
+      sendJson(res, 403, { error: "FORBIDDEN" });
+      return;
+    }
+    if (!existsSync(file) || statSync(file).isDirectory())
+      file = nodePath.join(consoleDist, "index.html");
+    if (!existsSync(file)) {
+      sendJson(res, 404, { error: "CONSOLE_NOT_BUILT" });
+      return;
+    }
+    const ext = nodePath.extname(file);
+    const types: Record<string, string> = {
+      ".html": "text/html; charset=utf-8",
+      ".js": "text/javascript; charset=utf-8",
+      ".css": "text/css; charset=utf-8",
+      ".svg": "image/svg+xml",
+      ".png": "image/png",
+      ".ico": "image/x-icon",
+      ".woff2": "font/woff2",
+      ".json": "application/json",
+    };
+    res.writeHead(200, {
+      "Content-Type": types[ext] ?? "application/octet-stream",
+      "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
+    });
+    createReadStream(file).pipe(res);
+    return;
   }
 
   sendJson(res, 404, { error: "NOT_FOUND" });
