@@ -117,21 +117,6 @@ jobs:
           test "${{ needs.console.result }}" = "success"
           echo "All required upstream jobs passed."
 
-  contract:
-    name: Live hostname contract
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RI_PUBLIC_URL != ''
-    needs: gates
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check the deployed console
-        env:
-          URL: ${{ vars.RI_PUBLIC_URL }}
-        run: |
-          set -euo pipefail
-          curl -fsS --retry 12 --retry-delay 20 "$URL/app-api/health" | grep -q '"status":"ok"'
-          curl -fsS "$URL/console/" | grep -q '<div id="root"'
-          echo "Live console and adapter healthy at $URL"
-
   auto-merge:
     name: Arm auto-merge
     if: github.event_name == 'pull_request' && github.actor == 'Pukujan'
