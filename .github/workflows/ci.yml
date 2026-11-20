@@ -3,6 +3,7 @@ name: CI
 # The required check is the single aggregate job named `gates`. Every real job
 # feeds it, so a job that is not wired in cannot silently skip the gate.
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
