@@ -56,7 +56,7 @@ const makeLine = (role: DemoLine["role"], text: string): DemoLine => ({
 });
 
 const Voice = () => {
-  const { world } = useData();
+  const { world, session } = useData();
   const {
     call,
     callApprovals,
@@ -381,14 +381,16 @@ const Voice = () => {
   };
 
   const micNotice = !canListen
-    ? "This browser has no speech recognition, so the mic is off. Chrome, Edge and Safari have it. The buttons work everywhere."
+    ? "This browser has no microphone or speech recognition available. Allow mic access or use Chrome, Edge, or Safari."
     : listenError === "blocked"
       ? "Microphone access is blocked for this site. Allow it in the browser's site settings, then tap Talk."
       : misheard
         ? `Heard “${misheard}”. Nothing was decided. Say approve, decline or skip, or use the buttons.`
         : source === "offline"
           ? "The live copilot isn't reachable, so that answer came from the offline matcher. Sign in to a workspace for the real one."
-          : "Your browser's speech service turns your voice into text. Every voice decision shows in the transcript.";
+          : speech.engine
+            ? `Live voice active via ${speech.engine.stt} + ${speech.engine.tts}. Every voice decision shows in the transcript.`
+            : "Your browser's speech service turns your voice into text. Every voice decision shows in the transcript.";
 
   const stateLabel = useMemo(() => {
     if (call.state === "ringing") return "Ringing";
@@ -687,7 +689,11 @@ const Voice = () => {
                   {entry.text}
                 </div>
                 {entry.role === "you" ? (
-                  <PersonAvatar name="Alex Rivera" size="xs" className="mt-0.5" />
+                  <PersonAvatar
+                    name={session?.name ?? "You"}
+                    size="xs"
+                    className="mt-0.5"
+                  />
                 ) : null}
               </div>
             ))}
