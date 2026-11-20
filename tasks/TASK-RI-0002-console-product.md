@@ -120,6 +120,29 @@ Blocked/uncertain:
 Next:
 - The owner appends the provider keys to the production env file on octo-vps and recreates the container; then check that /api/models lists providers for a signed-in session on the live site.
 
+### 2026-11-20 22:35:45 UTC — agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85","blocked":["The fix is not deployed yet, so on the live site an account with no workspace can still reach the copilot until this merges. The test emulates first sign-in with SQL, so creating a first workspace and activating an invite through Google are not covered."],"changed":["none"],"completed":["The owner asked whether several accounts can share one workspace; a new hold-out test with five test accounts found that an account in no workspace could reach the copilot, that conversations and notes failed in every workspace but the first, and that every POST on the profile and schedule routes hung. All three are fixed on this branch."],"decisions":["A workspace membership check on the copilot is trusted for 60 seconds, so a spoken turn does not wait on Octo every time; a removed member can still call the copilot for up to a minute but loses workspace data at once."],"evidence":["scripts/validate_sharing.py passes 12 of 12 checks against a local adapter after the fixes (8 of 11 before), and a count of test rows left behind returned 0; the app's 41 tests, typecheck, lint and build pass."],"evidence_class":"observed","next_action":"Merge the fix (issue #66) and confirm on the server that the new image is running; then return to routing Talk and the call through the live model.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-20T22:35:45Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"60593d6c1be403f627f67b58b57acb81032aed3990349c31ddad54677092aad5","request_id":"d8e3d9f2610f4fbfb742309583960ac1","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- The owner asked whether several accounts can share one workspace; a new hold-out test with five test accounts found that an account in no workspace could reach the copilot, that conversations and notes failed in every workspace but the first, and that every POST on the profile and schedule routes hung. All three are fixed on this branch.
+
+Evidence:
+- scripts/validate_sharing.py passes 12 of 12 checks against a local adapter after the fixes (8 of 11 before), and a count of test rows left behind returned 0; the app's 41 tests, typecheck, lint and build pass.
+
+Decisions:
+- A workspace membership check on the copilot is trusted for 60 seconds, so a spoken turn does not wait on Octo every time; a removed member can still call the copilot for up to a minute but loses workspace data at once.
+
+Changed:
+- none
+
+Blocked/uncertain:
+- The fix is not deployed yet, so on the live site an account with no workspace can still reach the copilot until this merges. The test emulates first sign-in with SQL, so creating a first workspace and activating an invite through Google are not covered.
+
+Next:
+- Merge the fix (issue #66) and confirm on the server that the new image is running; then return to routing Talk and the call through the live model.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
