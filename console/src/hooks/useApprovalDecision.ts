@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useData } from "@/data/store";
-import type { Decision } from "@/data/types";
+import type { Decision, DeclinePath } from "@/data/types";
 
 export const useApprovalDecision = () => {
   const { decide } = useData();
@@ -13,23 +13,39 @@ export const useApprovalDecision = () => {
     async (
       approvalId: string,
       decision: Decision,
-      options?: { note?: string; editedAction?: string; title?: string },
+      options?: {
+        note?: string;
+        editedAction?: string;
+        title?: string;
+        declinePath?: DeclinePath;
+      },
     ) => {
       setPendingId(approvalId);
       try {
         const result = await decide({
           approvalId,
           decision,
+          declinePath: options?.declinePath,
           note: options?.note,
           editedAction: options?.editedAction,
         });
+        const declineText =
+          options?.declinePath === "re_plan"
+            ? `${result.agent.name} queued a fresh re-plan proposal.`
+            : options?.declinePath === "snooze"
+              ? "Snoozed for 24 hours."
+              : `${result.agent.name} stopped this thread — no mission created.`;
         toast.success(
-          decision === "approved" ? "Approved" : "Declined",
+          decision === "approved"
+            ? "Approved"
+            : options?.declinePath === "snooze"
+              ? "Snoozed"
+              : "Declined",
           {
             description:
               decision === "approved"
                 ? `${result.agent.name} is executing now. Logged to the timeline.`
-                : `${result.agent.name} will stop this thread. Logged to the timeline.`,
+                : declineText,
             action: {
               label: "View timeline",
               onClick: () => navigate("/activity"),

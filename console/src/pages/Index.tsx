@@ -251,6 +251,72 @@ const Index = () => {
         ))}
       </div>
 
+      {altitude === "glance" ? (
+        <section className="panel p-4" data-altitude="glance-agenda">
+          <SectionHeader
+            title="Your 3 moves today"
+            count={Math.min(3, totalSignals(signals))}
+            action={
+              <Link
+                to="/approvals"
+                className="focus-ring inline-flex items-center gap-1 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Inbox
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            }
+          />
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Agenda view — at most three one-line moves. Switch to Brief or Deep
+            for timelines and working cards.
+          </p>
+          <div className="mt-3 divide-y divide-border/60">
+            {(() => {
+              const flat = signals
+                .flatMap((group) =>
+                  group.items.map((item) => ({
+                    ...item,
+                    groupLabel: group.label,
+                  })),
+                )
+                .slice(0, 3);
+              if (flat.length === 0) {
+                return (
+                  <p className="py-3 text-[12px] text-muted-foreground">
+                    Nothing needs you right now. Ask the copilot to find the
+                    next move.
+                  </p>
+                );
+              }
+              return flat.map((item) => (
+                <Link
+                  key={`${item.groupLabel}-${item.id}`}
+                  to={item.href}
+                  className="focus-ring group flex items-center gap-3 py-2.5 transition-colors hover:bg-surface-2/40"
+                >
+                  <span className="eyebrow w-24 shrink-0 truncate">
+                    {item.groupLabel}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground">
+                    {item.label}
+                  </span>
+                  <span
+                    className={cn(
+                      "hidden max-w-[220px] truncate text-[11px] text-muted-foreground sm:inline",
+                      item.tone === "warn" && "text-warn",
+                      item.tone === "primary" && "text-primary",
+                    )}
+                  >
+                    {item.detail}
+                  </span>
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100" />
+                </Link>
+              ));
+            })()}
+          </div>
+        </section>
+      ) : (
+        <>
       <section className="panel mb-4 p-4">
         <SectionHeader
           title="Needs attention"
@@ -553,6 +619,9 @@ const Index = () => {
           </button>
         </section>
       </div>
+
+        </>
+      )}
 
       {altitude !== "glance" ? (
       <section className="space-y-3">

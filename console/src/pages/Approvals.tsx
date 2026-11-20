@@ -79,8 +79,12 @@ const Approvals = () => {
     node?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [selectedId]);
 
-  const decide = (approval: Approval, decision: Decision) => {
-    void act(approval.id, decision);
+  const decide = (
+    approval: Approval,
+    decision: Decision,
+    declinePath?: "stop" | "re_plan" | "snooze",
+  ) => {
+    void act(approval.id, decision, { declinePath });
   };
 
   const openEdit = (approval: Approval) => {
@@ -99,7 +103,7 @@ const Approvals = () => {
     if (result) setEditing(null);
   };
 
-  // Keyboard-first decisions.
+  // Keyboard-first decisions (j/k/a/d/s/e).
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (editing) return;
@@ -130,7 +134,10 @@ const Approvals = () => {
         decide(current, "approved");
       } else if (event.key.toLowerCase() === "d" && current) {
         event.preventDefault();
-        decide(current, "declined");
+        decide(current, "declined", "stop");
+      } else if (event.key.toLowerCase() === "s" && current) {
+        event.preventDefault();
+        decide(current, "declined", "snooze");
       } else if (event.key.toLowerCase() === "e" && current) {
         event.preventDefault();
         openEdit(current);
@@ -301,7 +308,7 @@ const Approvals = () => {
                   selected={selectedId === approval.id}
                   busy={pendingId === approval.id}
                   onSelect={() => setSelectedId(approval.id)}
-                  onDecide={(decision) => decide(approval, decision)}
+                  onDecide={(decision, declinePath) => decide(approval, decision, declinePath)}
                   onEdit={() => openEdit(approval)}
                 />
               ))}

@@ -17,6 +17,7 @@ export type ApprovalKind =
   | "replan";
 export type ApprovalStatus = "pending" | "approved" | "declined";
 export type Decision = "approved" | "declined";
+export type DeclinePath = "stop" | "re_plan" | "snooze";
 export type Risk = "low" | "medium" | "high";
 
 export type ActivityType =
@@ -108,6 +109,7 @@ export interface Approval {
   status: ApprovalStatus;
   decidedAt?: string;
   decisionNote?: string;
+  declinePath?: DeclinePath;
   editedAction?: string;
   /**
    * When present, approving this row creates or adjusts work: `mission`
@@ -212,6 +214,7 @@ export interface Person {
   strength: number;
   warmth: Warmth;
   lastContact: string;
+  cadenceDays?: number;
   tags: string[];
   summary: string;
   email: string;
@@ -266,6 +269,7 @@ export interface Workspace {
   name: string;
   region: string;
   ownerName: string;
+  role?: string;
 }
 
 /**
@@ -500,6 +504,7 @@ export interface World {
 export interface DecisionInput {
   approvalId: string;
   decision: Decision;
+  declinePath?: DeclinePath;
   note?: string;
   editedAction?: string;
 }

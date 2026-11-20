@@ -503,9 +503,12 @@ export async function readWorld(
 /* Writes (all private to the acting principal unless shared config)   */
 /* ------------------------------------------------------------------ */
 
+export type DeclinePath = "stop" | "re_plan" | "snooze";
+
 export interface DecisionInput {
   approvalId: string;
   decision: "approved" | "declined";
+  declinePath?: DeclinePath | undefined;
   note?: string | undefined;
   editedAction?: string | undefined;
 }
@@ -611,9 +614,19 @@ export async function decideApproval(
     throw new ConflictError("That decision has already been made.");
   }
 
+  const declinePath: DeclinePath =
+    input.declinePath === "re_plan" || input.declinePath === "snooze"
+      ? input.declinePath
+      : "stop";
   approval.status = input.decision;
   approval.decidedAt = now();
   approval.decisionNote = input.note;
+  if (input.decision === "declined") {
+    approval.declinePath = declinePath;
+    if (declinePath === "snooze") {
+      approval.snoozedUntil = new Date(Date.now() + 86_400_000).toISOString();
+    }
+  }
   if (input.editedAction) approval.editedAction = input.editedAction;
 
   const updated = await octoSql(
@@ -640,6 +653,33 @@ export async function decideApproval(
       principal.id,
       approval.design as Json,
     );
+  } else if (input.decision === "declined" && declinePath === "re_plan") {
+    const replan: Json = {
+      ...approval,
+      id: randomUUID(),
+      parentApprovalId: approval.id,
+      title: `Re-plan: ${String(approval.title)}`,
+      reason:
+        input.note?.trim() ||
+        "Previous proposal was declined with re-plan requested.",
+      status: "pending",
+      createdAt: now(),
+      decidedAt: undefined,
+      declinePath: undefined,
+    };
+    await insertDoc(
+      config,
+      token,
+      workspaceId,
+      principal.id,
+      "approvals",
+      replan,
+    );
+    outcome = "Queued one re-plan proposal.";
+  } else if (input.decision === "declined" && declinePath === "snooze") {
+    outcome = "Snoozed for 24 hours.";
+  } else if (input.decision === "declined") {
+    outcome = "Stopped — no mission or follow-up created.";
   }
 
   const agent = await getDoc(

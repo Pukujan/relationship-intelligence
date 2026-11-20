@@ -575,6 +575,87 @@ const PersonProfile = () => {
 
           <section className="panel p-4">
             <SectionHeader
+              title="Who can introduce me"
+              count={
+                world.people.filter(
+                  (candidate) =>
+                    candidate.id !== person.id &&
+                    ((person.companyId &&
+                      candidate.companyId === person.companyId) ||
+                      events.some((ev) =>
+                        ev.attendeeIds.includes(candidate.id),
+                      ) ||
+                      projects.some((proj) =>
+                        proj.personIds.includes(candidate.id),
+                      )),
+                ).length
+              }
+            />
+            <p className="mt-1 text-[10.5px] text-muted-foreground">
+              Strength-weighted 1-hop warm connectors from shared company,
+              events, or projects.
+            </p>
+            <div className="mt-2.5 space-y-1.5">
+              {(() => {
+                const introPaths = world.people
+                  .filter((candidate) => candidate.id !== person.id)
+                  .map((candidate) => {
+                    const edges: string[] = [];
+                    if (
+                      person.companyId &&
+                      candidate.companyId === person.companyId
+                    ) {
+                      edges.push(`Same company (${company?.name ?? "org"})`);
+                    }
+                    const sharedEvent = events.find((ev) =>
+                      ev.attendeeIds.includes(candidate.id),
+                    );
+                    if (sharedEvent) edges.push(`Event: ${sharedEvent.name}`);
+                    const sharedProject = projects.find((proj) =>
+                      proj.personIds.includes(candidate.id),
+                    );
+                    if (sharedProject)
+                      edges.push(`Project: ${sharedProject.name}`);
+                    return { candidate, edges };
+                  })
+                  .filter((item) => item.edges.length > 0)
+                  .sort((a, b) => b.candidate.strength - a.candidate.strength)
+                  .slice(0, 4);
+
+                if (introPaths.length === 0) {
+                  return (
+                    <p className="text-[11px] text-muted-foreground">
+                      No sourced 1-hop intro path yet. Ask Atlas to enrich
+                      shared events or org history.
+                    </p>
+                  );
+                }
+                return introPaths.map(({ candidate, edges }) => (
+                  <div
+                    key={candidate.id}
+                    className="flex items-center gap-2 rounded-lg border border-border/60 bg-background/40 px-2.5 py-2"
+                  >
+                    <PersonAvatar name={candidate.name} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        to={`/people/${candidate.id}`}
+                        className="block truncate text-[12px] font-medium hover:text-primary"
+                      >
+                        {candidate.name}
+                      </Link>
+                      <p className="truncate text-[10px] text-muted-foreground">
+                        {edges.join(" · ")}
+                      </p>
+                    </div>
+                    <StrengthMeter value={candidate.strength} />
+                  </div>
+                ));
+              })()}
+            </div>
+          </section>
+
+          <section className="panel p-4">
+            <SectionHeader
               title={`Also at ${company?.name ?? "the company"}`}
               count={related.length}
             />
