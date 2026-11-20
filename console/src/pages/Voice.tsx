@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight,
@@ -15,6 +15,8 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
 import { agentById, relativeTime } from "@/data/derive";
 import { useOrchestrator } from "@/components/copilot/OrchestratorProvider";
+import { useSpeech } from "@/hooks/useSpeech";
+import { parseVoiceCommand } from "@/lib/voiceCommands";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import {
   KindBadge,
@@ -34,12 +36,8 @@ interface DemoLine {
   at: string;
 }
 
-const demoPrompts = [
-  "Who should I follow up with this week?",
-  "What's waiting on my approval?",
-  "Prep me for the Halcyon partner dinner",
-  "Who are my strongest relationships?",
-];
+/** How many times the call re-opens the mic for one approval before it waits for a tap. */
+const MAX_COMMAND_RETRIES = 2;
 
 let demoId = 0;
 const makeLine = (role: DemoLine["role"], text: string): DemoLine => ({
@@ -65,8 +63,18 @@ const Voice = () => {
     openCopilot,
   } = useOrchestrator();
 
-  const [listening, setListening] = useState(false);
-  const [demoIndex, setDemoIndex] = useState(0);
+  const speech = useSpeech();
+  const {
+    listening,
+    canListen,
+    listenError,
+    interim,
+    listen,
+    stopListening,
+    speak,
+    stopSpeaking,
+  } = speech;
+  const [misheard, setMisheard] = useState<string | null>(null);
   const [intent, setIntent] = useState<CopilotAnswer | null>(null);
   const [demoLines, setDemoLines] = useState<DemoLine[]>([
     makeLine(
@@ -89,25 +97,118 @@ const Voice = () => {
     node.scrollTop = node.scrollHeight;
   }, [lines.length, call.state]);
 
+  // Talk, off a call: one spoken question in, one spoken answer out.
+  const askByVoice = () => {
+    if (listening) {
+      stopListening();
+      return;
+    }
+    setMisheard(null);
+    listen({
+      onHeard: (prompt) => {
+        const answer = answerFor(prompt);
+        const reply =
+          answer?.summary ?? "I couldn't reach the orchestrator just now.";
+        setDemoLines((current) => [
+          ...current,
+          makeLine("you", prompt),
+          makeLine("copilot", reply),
+        ]);
+        setIntent(answer);
+        speak(reply);
+      },
+    });
+  };
+
+  // On a call the handlers below run from speech callbacks, long after the
+  // render that created them, so they read the latest call through a ref.
+  const live = useRef({ call, callDecision, callSkip, endCall });
+  live.current = { call, callDecision, callSkip, endCall };
+  const retries = useRef(0);
+
+  const listenForCommand = useCallback(() => {
+    const now = live.current.call;
+    if (now.state !== "live" || !now.queue[now.index] || !canListen) return;
+    listen({
+      onHeard: (heard) => {
+        const command = parseVoiceCommand(heard);
+        const actions = live.current;
+        setMisheard(null);
+        if (command === "approve") void actions.callDecision("approved");
+        else if (command === "decline") void actions.callDecision("declined");
+        else if (command === "skip") actions.callSkip();
+        else if (command === "end") actions.endCall();
+        else {
+          // Not clearly one command: say what was heard and decide nothing.
+          setMisheard(heard);
+          if (retries.current < MAX_COMMAND_RETRIES) {
+            retries.current += 1;
+            speak("Say approve, decline, or skip.", listenForCommand);
+          }
+        }
+      },
+      onError: (error) => {
+        if (error === "no-speech" && retries.current < MAX_COMMAND_RETRIES) {
+          retries.current += 1;
+          listenForCommand();
+        }
+      },
+    });
+  }, [canListen, listen, speak]);
+
+  // Read each new copilot line aloud; when the queue goes quiet, open the mic.
+  const spoken = useRef(0);
   useEffect(() => {
-    if (!listening) return;
-    const timer = setTimeout(() => {
-      const prompt = demoPrompts[demoIndex % demoPrompts.length];
-      const answer = answerFor(prompt);
-      setDemoIndex((index) => index + 1);
-      setDemoLines((current) => [
-        ...current,
-        makeLine("you", prompt),
-        makeLine(
-          "copilot",
-          answer?.summary ?? "I couldn't reach the orchestrator just now.",
-        ),
-      ]);
-      setIntent(answer);
-      setListening(false);
-    }, 1900);
-    return () => clearTimeout(timer);
-  }, [listening, demoIndex, answerFor]);
+    if (!onCall) {
+      spoken.current = 0;
+      return;
+    }
+    const fresh = call.transcript.slice(spoken.current);
+    spoken.current = call.transcript.length;
+    for (const entry of fresh) {
+      if (entry.role === "copilot") speak(entry.text, listenForCommand);
+    }
+  }, [call.transcript, onCall, speak, listenForCommand]);
+
+  useEffect(() => {
+    retries.current = 0;
+    setMisheard(null);
+  }, [call.index, call.state]);
+
+  // A tap always beats the voice: stop reading and listening before acting.
+  const quiet = () => {
+    stopSpeaking();
+    stopListening();
+  };
+  const decideByTap = (decision: "approved" | "declined") => {
+    quiet();
+    void callDecision(decision);
+  };
+  const skipByTap = () => {
+    quiet();
+    callSkip();
+  };
+  const hangUp = () => {
+    quiet();
+    endCall();
+  };
+  const answerByVoice = () => {
+    if (listening) {
+      stopListening();
+      return;
+    }
+    stopSpeaking();
+    retries.current = 0;
+    listenForCommand();
+  };
+
+  const micNotice = !canListen
+    ? "This browser has no speech recognition, so the mic is off. Chrome, Edge and Safari have it. The buttons work everywhere."
+    : listenError === "blocked"
+      ? "Microphone access is blocked for this site. Allow it in the browser's site settings, then tap Talk."
+      : misheard
+        ? `Heard “${misheard}”. Nothing was decided. Say approve, decline or skip, or use the buttons.`
+        : "Your browser's speech service turns your voice into text. Every voice decision shows in the transcript.";
 
   const stateLabel = useMemo(() => {
     if (call.state === "ringing") return "Ringing";
@@ -145,7 +246,7 @@ const Voice = () => {
                 size="sm"
                 variant="outline"
                 className="h-9 gap-1.5 rounded-lg text-[12px]"
-                onClick={endCall}
+                onClick={hangUp}
               >
                 <PhoneOff className="h-3.5 w-3.5" />
                 End call
@@ -273,7 +374,7 @@ const Voice = () => {
             </div>
             <p className="text-center text-[12px] text-muted-foreground">
               {call.state === "ringing"
-                ? "Ringing your phone — the copilot will read the queue when you pick up."
+                ? "Connecting. The copilot reads the queue aloud in this tab."
                 : call.state === "live"
                   ? `Reading decision ${Math.min(call.index + 1, call.queue.length)} of ${call.queue.length}.`
                   : call.state === "ended"
@@ -283,7 +384,7 @@ const Voice = () => {
                       : "Tap the mic to speak, or call yourself and decide by voice."}
             </p>
             <p className="text-center text-[10px] text-muted-foreground/70">
-              Mic input is simulated in this preview; the routing is real.
+              {micNotice}
             </p>
           </div>
 
@@ -336,7 +437,7 @@ const Voice = () => {
                 <Button
                   size="sm"
                   className="h-8 flex-1 rounded-lg text-[11.5px]"
-                  onClick={() => callDecision("approved")}
+                  onClick={() => decideByTap("approved")}
                 >
                   <Check className="h-3.5 w-3.5" />
                   Approve
@@ -345,7 +446,7 @@ const Voice = () => {
                   size="sm"
                   variant="outline"
                   className="h-8 flex-1 rounded-lg text-[11.5px]"
-                  onClick={() => callDecision("declined")}
+                  onClick={() => decideByTap("declined")}
                 >
                   <X className="h-3.5 w-3.5" />
                   Decline
@@ -354,7 +455,7 @@ const Voice = () => {
                   size="sm"
                   variant="ghost"
                   className="h-8 gap-1 rounded-lg px-2 text-[11.5px] text-muted-foreground"
-                  onClick={callSkip}
+                  onClick={skipByTap}
                 >
                   <SkipForward className="h-3.5 w-3.5" />
                   Skip
@@ -408,7 +509,7 @@ const Voice = () => {
                     />
                   ))}
                 </span>
-                listening…
+                {interim || "listening…"}
               </div>
             ) : null}
           </div>
@@ -418,8 +519,12 @@ const Voice = () => {
               variant={listening ? "default" : "outline"}
               size="sm"
               className="h-8 gap-1.5 rounded-lg text-[11.5px]"
-              onClick={() => setListening((value) => !value)}
-              disabled={call.state !== "idle"}
+              onClick={call.state === "live" ? answerByVoice : askByVoice}
+              disabled={
+                !canListen ||
+                call.state === "ringing" ||
+                call.state === "ended"
+              }
             >
               {listening ? (
                 <>
@@ -438,7 +543,7 @@ const Voice = () => {
                 size="sm"
                 variant="outline"
                 className="h-8 gap-1.5 rounded-lg text-[11.5px]"
-                onClick={endCall}
+                onClick={hangUp}
               >
                 <PhoneOff className="h-3.5 w-3.5" />
                 End call
@@ -458,9 +563,9 @@ const Voice = () => {
               <button
                 type="button"
                 onClick={() => {
+                  quiet();
                   resetCall();
                   setIntent(null);
-                  setListening(false);
                 }}
                 className="focus-ring rounded px-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
               >

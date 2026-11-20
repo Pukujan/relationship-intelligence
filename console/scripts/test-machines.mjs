@@ -17,6 +17,7 @@ import { createActor } from "xstate";
 import { turnMachine } from "../src/machines/turnMachine.ts";
 import { fillInMachine } from "../src/machines/fillInMachine.ts";
 import { missionMachine, approvalMachine } from "../src/machines/workMachines.ts";
+import { parseVoiceCommand } from "../src/lib/voiceCommands.ts";
 
 let failures = 0;
 const check = async (name, fn) => {
@@ -229,6 +230,66 @@ await check("approval: human can decline", () => {
   assert.equal(value(actor), "declined");
   assert.equal(context(actor).note, "not now");
   actor.stop();
+});
+
+// --- Voice commands (#59): a spoken word writes to the real approval inbox ---
+
+await check("voice: plain commands map to one action", () => {
+  assert.equal(parseVoiceCommand("approve"), "approve");
+  assert.equal(parseVoiceCommand("Yes, go ahead."), "approve");
+  assert.equal(parseVoiceCommand("decline"), "decline");
+  assert.equal(parseVoiceCommand("no"), "decline");
+  assert.equal(parseVoiceCommand("skip that one"), "skip");
+  assert.equal(parseVoiceCommand("end call"), "end");
+});
+
+await check("voice: negated, mixed or long speech decides nothing", () => {
+  for (const heard of [
+    "don't approve",
+    "do not approve that",
+    "never approve",
+    "approve, no wait",
+    "yes skip",
+    "maybe approve",
+    "",
+    "disapprove",
+    "I think we should approve this one after the dinner next week",
+  ]) {
+    assert.equal(parseVoiceCommand(heard), null, heard);
+  }
+});
+
+// Metamorphic: changing how a phrase is written must not change what it means,
+// and adding a negation must never turn anything into an approval.
+await check("voice (metamorphic): case, punctuation and spacing do not change the action", () => {
+  const phrases = ["approve", "yes", "do it", "decline", "nope", "skip", "next", "hang up", "don't approve", "hello there"];
+  const rewrites = [
+    (t) => t.toUpperCase(),
+    (t) => `  ${t}  `,
+    (t) => `${t}!!!`,
+    (t) => t.replace(/ /g, "   "),
+    (t) => `${t}.`,
+    (t) => t.replace(/'/g, "\u2019"),
+  ];
+  for (const phrase of phrases) {
+    const expected = parseVoiceCommand(phrase);
+    for (const rewrite of rewrites) {
+      assert.equal(parseVoiceCommand(rewrite(phrase)), expected, rewrite(phrase));
+    }
+  }
+});
+
+await check("voice (metamorphic): adding a negation never produces an approval", () => {
+  const approvals = ["approve", "approved", "yes", "yep", "yeah", "do it", "go ahead", "send it"];
+  const negations = ["don't", "do not", "not", "never", "wait", "cancel", "maybe", "no"];
+  for (const phrase of approvals) {
+    assert.equal(parseVoiceCommand(phrase), "approve", phrase);
+    for (const negation of negations) {
+      for (const heard of [`${negation} ${phrase}`, `${phrase} ${negation}`]) {
+        assert.notEqual(parseVoiceCommand(heard), "approve", heard);
+      }
+    }
+  }
 });
 
 if (failures > 0) {
