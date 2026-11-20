@@ -30,6 +30,11 @@ export interface AppSessionData {
   loginNonce?: string;
   /** Where to return after the callback. Same-origin paths only. */
   returnTo?: string;
+  /** Our-backend-owned Google sign-in: identity lives in our cookie, not Octo's. */
+  principalId?: string;
+  email?: string;
+  displayName?: string;
+  authMode?: "google" | "key";
   /**
    * Epoch ms of the last authenticated /app-api/* request. Slides the local
    * idle window; absent on cookies sealed before longevity landed, which are

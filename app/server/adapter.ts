@@ -111,12 +111,121 @@ export async function handleRequest(
     // therefore accepts the fragment token and verifies it against /api/me.
     // Residual risk: a login-CSRF is not excluded; Octo would need state support
     // for that, which is a platform change rather than an adopter one.
+    if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
+      // Our backend owns sign-in: Google returns to OUR callback on our origin.
+      // Octo is only the data layer; no portal redirect, no fragment hand-off.
+      const target = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+      target.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
+      target.searchParams.set(
+        "redirect_uri",
+        `${env.APP_ORIGIN}/octo-auth/google/callback`,
+      );
+      target.searchParams.set("response_type", "code");
+      target.searchParams.set("scope", "openid email profile");
+      target.searchParams.set("state", session.loginNonce);
+      target.searchParams.set("prompt", "select_account");
+      redirect(res, target.toString());
+      return;
+    }
     const target = new URL("/api/auth/google", env.OCTO_API_URL);
     redirect(res, target.toString());
     return;
   }
 
   if (path === "/octo-auth/google/callback" && req.method === "GET") {
+    const code = url.searchParams.get("code");
+    if (code && env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
+      const session = await readSession(req, res, env);
+      const state = url.searchParams.get("state");
+      if (!state || state !== session.loginNonce) {
+        redirect(
+          res,
+          `${env.APP_ORIGIN}/console/signin?auth_error=STATE_MISMATCH`,
+        );
+        return;
+      }
+      try {
+        const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            code,
+            client_id: env.GOOGLE_CLIENT_ID,
+            client_secret: env.GOOGLE_CLIENT_SECRET,
+            redirect_uri: `${env.APP_ORIGIN}/octo-auth/google/callback`,
+            grant_type: "authorization_code",
+          }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!tokenRes.ok) throw new Error(`google token ${tokenRes.status}`);
+        const tokens = (await tokenRes.json()) as { id_token?: string };
+        const segment = String(tokens.id_token ?? "").split(".")[1] ?? "";
+        const payload = JSON.parse(
+          Buffer.from(segment, "base64url").toString("utf8"),
+        ) as {
+          email?: string;
+          email_verified?: boolean;
+          name?: string;
+        };
+        if (!payload.email || payload.email_verified === false)
+          throw new Error("google email unverified");
+        const email = payload.email.toLowerCase();
+        // Map the verified Google identity to an Octo principal via membership.
+        const key = env.OCTO_API_KEY ?? "";
+        const wsRes = await fetch(
+          new URL("/api/workspaces", env.OCTO_API_URL),
+          {
+            headers: { Authorization: `Bearer ${key}` },
+            signal: AbortSignal.timeout(15_000),
+          },
+        );
+        const workspaces = (await wsRes.json()) as { id: string }[];
+        let principalId: string | null = null;
+        for (const workspace of workspaces) {
+          const mRes = await fetch(
+            new URL(
+              `/api/workspaces/${workspace.id}/members`,
+              env.OCTO_API_URL,
+            ),
+            {
+              headers: { Authorization: `Bearer ${key}` },
+              signal: AbortSignal.timeout(15_000),
+            },
+          );
+          if (!mRes.ok) continue;
+          const members = (await mRes.json()) as {
+            email?: string;
+            principalId?: string;
+            principal?: { id?: string };
+          }[];
+          const hit = members.find(
+            (m) => String(m.email ?? "").toLowerCase() === email,
+          );
+          if (hit) {
+            principalId = hit.principalId ?? hit.principal?.id ?? null;
+            break;
+          }
+        }
+        if (!principalId) throw new Error("not a workspace member");
+        session.principalId = principalId;
+        session.email = email;
+        session.displayName = payload.name ?? email;
+        session.authMode = "google";
+        session.lastSeenAt = Date.now();
+        await session.save();
+        redirect(res, `${env.APP_ORIGIN}${session.returnTo ?? "/console/"}`);
+      } catch (error) {
+        console.error(
+          "own-google callback failed:",
+          error instanceof Error ? error.message : "unknown",
+        );
+        redirect(
+          res,
+          `${env.APP_ORIGIN}/console/signin?auth_error=GOOGLE_EXCHANGE`,
+        );
+      }
+      return;
+    }
     // Octo redirects to `${origin}/#token=...`. Browsers never send the fragment
     // to the server, so the token is extracted by the small inline script below
     // and posted here. This is the documented hand-off for the current Octo
@@ -182,7 +291,10 @@ export async function handleRequest(
     }
     session.octoToken = key;
     await session.save();
-    sendJson(res, 200, { authenticated: true, returnTo: session.returnTo ?? "/" });
+    sendJson(res, 200, {
+      authenticated: true,
+      returnTo: session.returnTo ?? "/",
+    });
     return;
   }
 
@@ -228,7 +340,7 @@ export async function handleRequest(
 
   if (path === "/app-api/session" && req.method === "GET") {
     const session = await readSession(req, res, env);
-    if (!session.octoToken) {
+    if (!session.octoToken && !session.principalId) {
       sendJson(res, 200, { authenticated: false });
       return;
     }
@@ -236,8 +348,10 @@ export async function handleRequest(
     // whether the token is actually valid (signature, revocation, clock).
     // Workspace keys (octo_live_*) carry no TTL envelope; only principal
     // session tokens (octo_sess_*) have the advisory expiry.
-    const isSessionToken = session.octoToken.startsWith("octo_sess_");
-    const expiresAt = isSessionToken ? tokenExpiresAtMs(session.octoToken) : null;
+    const isSessionToken = (session.octoToken ?? "").startsWith("octo_sess_");
+    const expiresAt = isSessionToken
+      ? tokenExpiresAtMs(session.octoToken ?? "")
+      : null;
     if (isSessionToken && expiresAt === null) {
       // Bad prefix or malformed envelope: this cookie can never become valid,
       // so it is the one case where we destroy it outright.
@@ -258,8 +372,18 @@ export async function handleRequest(
     }
     try {
       const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 };
-      const principal = await fetchPrincipal(config, session.octoToken);
-      const workspaces = await fetchWorkspaces(config, session.octoToken);
+      const bearer = session.octoToken ?? env.OCTO_API_KEY ?? "";
+      const principal = session.principalId
+        ? {
+            id: session.principalId,
+            email: session.email ?? "",
+            displayName: session.displayName ?? session.email ?? "",
+            avatarUrl: null,
+            isGuest: false,
+            isPlatformOwner: false,
+          }
+        : await fetchPrincipal(config, bearer);
+      const workspaces = await fetchWorkspaces(config, bearer);
       session.lastSeenAt = Date.now();
       await session.save();
       const state = SessionResponseSchema.parse({
@@ -378,9 +502,17 @@ export async function handleRequest(
     let principal: { id: string; displayName: string };
     let workspaces: { id: string; name: string }[];
     try {
-      const me = await fetchPrincipal(config, session.octoToken);
-      principal = { id: me.id, displayName: me.displayName ?? me.email };
-      workspaces = await fetchWorkspaces(config, session.octoToken);
+      const bearer = session.octoToken ?? env.OCTO_API_KEY ?? "";
+      if (session.principalId) {
+        principal = {
+          id: session.principalId,
+          displayName: session.displayName ?? session.email ?? "",
+        };
+      } else {
+        const me = await fetchPrincipal(config, bearer);
+        principal = { id: me.id, displayName: me.displayName ?? me.email };
+      }
+      workspaces = await fetchWorkspaces(config, bearer);
       // Authenticated request: slide the idle window. Octo's absolute token
       // TTL still applies — this never extends the token itself (Octo #93).
       session.lastSeenAt = Date.now();
@@ -415,7 +547,7 @@ export async function handleRequest(
       if (extraRoutes) {
         const ctx = {
           config,
-          token: session.octoToken,
+          token: session.octoToken ?? env.OCTO_API_KEY ?? "",
           workspaceId: requested,
           principalId: principal.id,
           principal,
