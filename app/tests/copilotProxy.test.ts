@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   copilotGate,
   MEMBERSHIP_TRUST_MS,
+  NO_SUCH_WORKSPACE,
   recentlyMember,
   rememberMember,
   withSessionPrincipal,
+  workspaceRequiredFor,
 } from "../server/copilotProxy.js";
 import { IDLE_LIMIT_MS } from "../server/session.js";
 
@@ -67,6 +69,24 @@ describe("copilot proxy gate (#62)", () => {
         principalId: "p1",
       });
     }
+  });
+
+  it("requires a token session to belong to the app's own container", () => {
+    // A guest token lists the guest's personal workspace; only the container counts.
+    expect(workspaceRequiredFor({ octoToken: "octo_sess_guest" }, "ws-1")).toBe(
+      "ws-1",
+    );
+    expect(
+      workspaceRequiredFor({ octoToken: "octo_sess_guest" }, " ws-1 "),
+    ).toBe("ws-1");
+    // With no container configured, a token session can never pass.
+    for (const missing of [undefined, "", "   "]) {
+      expect(
+        workspaceRequiredFor({ octoToken: "octo_sess_guest" }, missing),
+      ).toBe(NO_SUCH_WORKSPACE);
+    }
+    // A Google sign-in session has no token: any verified membership will do.
+    expect(workspaceRequiredFor({}, "ws-1")).toBeUndefined();
   });
 
   it("trusts a membership check for a minute and no longer", () => {
