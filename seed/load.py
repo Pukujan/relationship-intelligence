@@ -15,7 +15,7 @@ Design decisions, and why:
 
   * Every structural fact becomes a claim whose JSON `provenance` carries
     {"verb": ...}. That verb is what queries/social.cypher filters on. Encoded
-    verbs: WORKS_AT, MET, PRESENTED_AT, BUILT, POSITION.
+    verbs: WORKS_AT, MET, PRESENTED_AT, BUILT, POSITION, FACT.
 
   * A POSITION needs a verbatim quote: a real sentence, not a label you wrote.
     Paraphrasing someone's beliefs into your own words is the failure mode this
@@ -132,6 +132,18 @@ def validate(doc: dict) -> list[str]:
         for t in p.get("talks") or []:
             _require(bool(t.get("source")), f"{who}: talk {t.get('title')!r} has no source")
 
+        # A fact is any other sourced statement about the person (a profile
+        # link, a public role summary). It is "sourced" only if the source is
+        # something a reader can open, so a URL is required; anything the
+        # owner merely knows belongs under `unverified:` instead.
+        for f in p.get("facts") or []:
+            text = (f.get("text") or "").strip()
+            _require(bool(text), f"{who}: a fact has no text")
+            _require(
+                str(f.get("source") or "").startswith(("http://", "https://")),
+                f"{who}: fact {text[:40]!r} needs a URL source; put it under unverified: if it has none",
+            )
+
         if len(p.get("handles") or []) > 1 and not p.get("confirmed_identity"):
             warnings.append(
                 f"{who}: {len(p['handles'])} handles but confirmed_identity is false — "
@@ -237,6 +249,13 @@ def build_plan(doc: dict) -> dict[str, list[dict]]:
                   _iso(pr.get("retrieved"), "retrieved", p["person"]),
                   _iso(pr.get("retrieved"), "retrieved", p["person"]),
                   [{"locator": pr["source"], "quote": None}])
+
+        for f in p.get("facts") or []:
+            claim(who, f["text"].strip(), "FACT",
+                  {"attribute": f.get("attribute", "")},
+                  _iso(f.get("observed_at") or f.get("retrieved"), "observed_at", p["person"]),
+                  _iso(f.get("retrieved") or f.get("observed_at"), "retrieved", p["person"]),
+                  [{"locator": f["source"], "quote": None}])
 
         for pos in p.get("positions") or []:
             idx = claim(who, f"{who} on {pos['topic']}: {pos['stance']}", "POSITION",
