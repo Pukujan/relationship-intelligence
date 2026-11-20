@@ -10,6 +10,7 @@
  *    carrying a W3C `trace_id` exported to Phoenix when configured.
  */
 import { randomUUID } from "node:crypto";
+import { completeAgentDoc } from "./agentShape.js";
 import type { OctoClientConfig } from "./octo.js";
 import { OctoError } from "./octo.js";
 import { appendLedgerEvent, endSpan, startSpan } from "./telemetry.js";
@@ -474,7 +475,12 @@ export async function readWorld(
     objectives,
     missions,
     plans,
-    agents,
+    // Fill the fields the console's agent cards read; see agentShape.ts.
+    agents: agents.map((agent) =>
+      agent && typeof agent === "object"
+        ? completeAgentDoc(agent as Record<string, unknown>)
+        : agent,
+    ) as Json[],
     tasks,
     runs,
     approvals,

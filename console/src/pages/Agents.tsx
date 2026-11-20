@@ -91,6 +91,7 @@ const Agents = () => {
   const [customRole, setCustomRole] = useState("");
   const [customCadence, setCustomCadence] = useState<"daily" | "pre_event" | "signal">("daily");
   const [customZone, setCustomZone] = useState<"prep" | "suggest" | "co_design">("suggest");
+  const [customDomain, setCustomDomain] = useState<AgentIcon>("research");
   const [customInstructions, setCustomInstructions] = useState("");
 
   const [draftTitle, setDraftTitle] = useState("");
@@ -148,10 +149,21 @@ const Agents = () => {
           templateId: tpl.id,
         }),
       });
-      if (!r.ok) throw new Error("Failed to install agent template");
-      toast.success(`${tpl.name} added to workspace`, {
-        description: `Cadence: ${tpl.cadence} · Autonomy: ${tpl.autonomyZone}`,
-      });
+      if (!r.ok) {
+        throw new Error(
+          r.status === 401
+            ? "Sign in to a workspace first. The guest demo cannot install agents."
+            : `The workspace answered ${r.status}.`,
+        );
+      }
+      const result = (await r.json()) as { alreadyInstalled?: boolean };
+      if (result.alreadyInstalled) {
+        toast.message(`${tpl.name} is already in this workspace`);
+      } else {
+        toast.success(`${tpl.name} added to workspace`, {
+          description: `Cadence: ${tpl.cadence} · Autonomy: ${tpl.autonomyZone}`,
+        });
+      }
       void reload();
     } catch (cause) {
       toast.error("Could not install template", {
@@ -175,6 +187,7 @@ const Agents = () => {
           role: customRole.trim(),
           cadence: customCadence,
           autonomyZone: customZone,
+          domain: customDomain,
           instructions: customInstructions.trim(),
           connectors: ["gmail", "gcal"],
         }),
@@ -293,7 +306,7 @@ const Agents = () => {
       {showBuilder ? (
         <section className="panel space-y-3 p-4">
           <p className="text-[13px] font-semibold">Build a custom workspace agent</p>
-          <div className="grid gap-2 md:grid-cols-4">
+          <div className="grid gap-2 md:grid-cols-5">
             <input
               value={customName}
               onChange={(e) => setCustomName(e.target.value)}
@@ -324,6 +337,16 @@ const Agents = () => {
               <option value="suggest">Zone 2: Suggest (Approvals)</option>
               <option value="co_design">Zone 3: Co-Design Draft Plans</option>
             </select>
+            <select
+              value={customDomain}
+              onChange={(e) => setCustomDomain(e.target.value as AgentIcon)}
+              aria-label="Team"
+              className="h-8 rounded-md border border-border bg-surface-1 px-2 text-[11.5px]"
+            >
+              <option value="sales">Team: Sales</option>
+              <option value="marketing">Team: Marketing</option>
+              <option value="research">Team: Research</option>
+            </select>
           </div>
           <textarea
             value={customInstructions}
@@ -349,7 +372,11 @@ const Agents = () => {
         <section className="space-y-2.5">
           <SectionHeader title="Starter agent templates" count={templates.length} />
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {templates.map((tpl) => (
+            {templates.map((tpl) => {
+              const installed = world.agents.some(
+                (agent) => agent.templateId === tpl.id,
+              );
+              return (
               <article key={tpl.id} className="panel flex flex-col gap-2.5 p-3.5">
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -369,15 +396,25 @@ const Agents = () => {
                     size="sm"
                     variant="outline"
                     className="h-7 px-2 text-[11px]"
-                    disabled={busyId === tpl.id}
+                    disabled={installed || busyId === tpl.id}
                     onClick={() => void installTemplate(tpl)}
                   >
-                    <Plus className="mr-1 h-3 w-3" />
-                    Install
+                    {installed ? (
+                      <>
+                        <Check className="mr-1 h-3 w-3" />
+                        Installed
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="mr-1 h-3 w-3" />
+                        Install
+                      </>
+                    )}
                   </Button>
                 </div>
               </article>
-            ))}
+              );
+            })}
           </div>
         </section>
       ) : null}
