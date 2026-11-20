@@ -1,0 +1,24 @@
+name: Live hostname contract
+
+# Squash auto-merge can leave the main-branch CI run on a pull_request event,
+# so the deployed-hostname check hangs off CI completion instead of a push.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  contract:
+    name: Check the deployed console
+    if: github.event.workflow_run.conclusion == 'success' && vars.RI_PUBLIC_URL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the live hostname
+        env:
+          URL: ${{ vars.RI_PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 12 --retry-delay 20 "$URL/app-api/health" | grep -q '"status":"ok"'
+          curl -fsS "$URL/console/" | grep -q '<div id="root"'
+          echo "Live console and adapter healthy at $URL"
