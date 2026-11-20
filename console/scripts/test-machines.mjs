@@ -17,7 +17,7 @@ import { createActor } from "xstate";
 import { turnMachine } from "../src/machines/turnMachine.ts";
 import { fillInMachine } from "../src/machines/fillInMachine.ts";
 import { missionMachine, approvalMachine } from "../src/machines/workMachines.ts";
-import { parseVoiceCommand } from "../src/lib/voiceCommands.ts";
+import { isConversationOver, parseVoiceCommand, resolveConfirmation } from "../src/lib/voiceCommands.ts";
 import { allowed, askWithFailover, authHeaders, parseChain, parseModelJson } from "../server/providers.ts";
 
 let failures = 0;
@@ -368,6 +368,43 @@ await check("providers: a wrong-shaped answer fails over to the next model", asy
     );
   } finally {
     globalThis.fetch = realFetch;
+  }
+});
+
+// --- Voice conversation (#69): the model suggests, only the person's word records ---
+
+await check("voice: a read-back decision needs a clear yes", () => {
+  for (const heard of ["yes", "Yes.", "yep", "go ahead", "approve", "do it"]) {
+    assert.equal(resolveConfirmation(heard), "confirm", heard);
+  }
+  for (const heard of ["no", "nope", "decline", "skip", "end call"]) {
+    assert.equal(resolveConfirmation(heard), "cancel", heard);
+  }
+  for (const heard of ["", "hmm", "what does that mean", "not yet", "don't", "yes no", "maybe yes",
+    "yes but change the subject line before you send it out"]) {
+    assert.equal(resolveConfirmation(heard), "unclear", heard);
+  }
+});
+
+await check("voice (metamorphic): adding doubt or negation never confirms", () => {
+  const yeses = ["yes", "yep", "yeah", "go ahead", "approve", "do it", "send it"];
+  const doubts = ["don't", "do not", "not", "never", "wait", "cancel", "maybe", "no"];
+  for (const yes of yeses) {
+    assert.equal(resolveConfirmation(yes), "confirm", yes);
+    for (const doubt of doubts) {
+      for (const heard of [`${doubt} ${yes}`, `${yes} ${doubt}`]) {
+        assert.notEqual(resolveConfirmation(heard), "confirm", heard);
+      }
+    }
+  }
+});
+
+await check("voice: a short sign-off ends a conversation, a question does not", () => {
+  for (const heard of ["thanks", "Thank you!", "that's all", "stop", "bye", "never mind"]) {
+    assert.equal(isConversationOver(heard), true, heard);
+  }
+  for (const heard of ["", "who should I thank this week", "stopwatch", "what stops the Halcyon renewal from closing this month"]) {
+    assert.equal(isConversationOver(heard), false, heard);
   }
 });
 

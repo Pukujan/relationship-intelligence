@@ -16,7 +16,12 @@ import { useData } from "@/data/store";
 import { agentById, relativeTime } from "@/data/derive";
 import { useOrchestrator } from "@/components/copilot/OrchestratorProvider";
 import { useSpeech } from "@/hooks/useSpeech";
-import { parseVoiceCommand } from "@/lib/voiceCommands";
+import {
+  isConversationOver,
+  parseVoiceCommand,
+  resolveConfirmation,
+} from "@/lib/voiceCommands";
+import { askVoice, type VoiceApprovalContext } from "@/lib/voiceClient";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import {
   KindBadge,
@@ -38,6 +43,9 @@ interface DemoLine {
 
 /** How many times the call re-opens the mic for one approval before it waits for a tap. */
 const MAX_COMMAND_RETRIES = 2;
+
+/** After this long without an answer, say so: silence reads as "broken". */
+const WAIT_NOTICE_MS = 2200;
 
 let demoId = 0;
 const makeLine = (role: DemoLine["role"], text: string): DemoLine => ({
@@ -75,6 +83,12 @@ const Voice = () => {
     stopSpeaking,
   } = speech;
   const [misheard, setMisheard] = useState<string | null>(null);
+  // Questions and answers spoken during a call, shown alongside its transcript.
+  const [asides, setAsides] = useState<DemoLine[]>([]);
+  const [thinking, setThinking] = useState(false);
+  const [inConversation, setInConversation] = useState(false);
+  // Who answered last: a provider and model, or "offline".
+  const [source, setSource] = useState<string | null>(null);
   const [intent, setIntent] = useState<CopilotAnswer | null>(null);
   const [demoLines, setDemoLines] = useState<DemoLine[]>([
     makeLine(
@@ -85,7 +99,13 @@ const Voice = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const onCall = call.state !== "idle";
-  const lines = onCall ? call.transcript : demoLines;
+  const lines = useMemo(
+    () =>
+      onCall
+        ? [...call.transcript, ...asides].sort((a, b) => a.at.localeCompare(b.at))
+        : demoLines,
+    [onCall, call.transcript, asides, demoLines],
+  );
   const currentApproval = callApprovals[call.index];
   const currentAgent = world
     ? agentById(world, currentApproval?.agentId)
@@ -97,55 +117,195 @@ const Voice = () => {
     node.scrollTop = node.scrollHeight;
   }, [lines.length, call.state]);
 
-  // Talk, off a call: one spoken question in, one spoken answer out.
-  const askByVoice = () => {
-    if (listening) {
-      stopListening();
-      return;
-    }
-    setMisheard(null);
-    listen({
-      onHeard: (prompt) => {
-        const answer = answerFor(prompt);
-        const reply =
-          answer?.summary ?? "I couldn't reach the orchestrator just now.";
-        setDemoLines((current) => [
-          ...current,
-          makeLine("you", prompt),
-          makeLine("copilot", reply),
-        ]);
-        setIntent(answer);
-        speak(reply);
-      },
-    });
+  // What has been said, as context for the model's next spoken turn.
+  const history = useRef<string[]>([]);
+  const remember = (role: "you" | "copilot", text: string) => {
+    history.current = [...history.current, `${role}: ${text}`].slice(-8);
   };
+  const worldRef = useRef(world);
+  worldRef.current = world;
+
+  // One spoken turn through the live model. Says "one moment" when it is
+  // slow, and returns null when the model cannot be reached.
+  const spokenTurn = useCallback(
+    async (heard: string, approval?: VoiceApprovalContext) => {
+      const current = worldRef.current;
+      if (!current) return null;
+      setThinking(true);
+      const waiting = window.setTimeout(
+        () => speak("One moment."),
+        WAIT_NOTICE_MS,
+      );
+      try {
+        return await askVoice({
+          heard,
+          world: current,
+          history: history.current,
+          approval,
+        });
+      } finally {
+        window.clearTimeout(waiting);
+        setThinking(false);
+      }
+    },
+    [speak],
+  );
+
+  // Talk, off a call: a conversation. Each answer is spoken, then the mic
+  // reopens for a follow-up until the person says they are done, stays
+  // silent, or taps.
+  const talking = useRef(false);
+  const stopTalking = useCallback(() => {
+    talking.current = false;
+    setInConversation(false);
+  }, []);
+
+  const converse = useCallback(() => {
+    if (!talking.current) return;
+    listen({
+      onHeard: async (prompt) => {
+        if (isConversationOver(prompt)) {
+          const bye = "Okay. Tap Talk when you need me.";
+          setDemoLines((current) => [
+            ...current,
+            makeLine("you", prompt),
+            makeLine("copilot", bye),
+          ]);
+          stopTalking();
+          speak(bye);
+          return;
+        }
+        setDemoLines((current) => [...current, makeLine("you", prompt)]);
+        remember("you", prompt);
+        const reply = await spokenTurn(prompt);
+        if (!talking.current) return;
+        let say: string;
+        if (reply) {
+          say = reply.say;
+          setIntent(null);
+          setSource(
+            [reply.provider, reply.model].filter(Boolean).join(" · ") || "live",
+          );
+          if (reply.intent === "end") stopTalking();
+        } else {
+          // Signed out, guest demo, or the copilot server is down.
+          const answer = answerFor(prompt);
+          say = answer?.summary ?? "I couldn't reach the copilot just now.";
+          setIntent(answer);
+          setSource("offline");
+        }
+        setDemoLines((current) => [...current, makeLine("copilot", say)]);
+        remember("copilot", say);
+        speak(say, converse);
+      },
+      // Silence, or a blocked mic, ends the conversation.
+      onError: stopTalking,
+    });
+  }, [answerFor, listen, speak, spokenTurn, stopTalking]);
 
   // On a call the handlers below run from speech callbacks, long after the
   // render that created them, so they read the latest call through a ref.
-  const live = useRef({ call, callDecision, callSkip, endCall });
-  live.current = { call, callDecision, callSkip, endCall };
+  const live = useRef({
+    call,
+    callDecision,
+    callSkip,
+    endCall,
+    currentApproval,
+    currentAgent,
+  });
+  live.current = {
+    call,
+    callDecision,
+    callSkip,
+    endCall,
+    currentApproval,
+    currentAgent,
+  };
   const retries = useRef(0);
+  // A decision the model thinks the person asked for, read back and waiting
+  // for their own yes. The model never records a decision.
+  const pendingConfirm = useRef<"approved" | "declined" | null>(null);
+  const aside = (role: DemoLine["role"], text: string) =>
+    setAsides((current) => [...current, makeLine(role, text)]);
 
   const listenForCommand = useCallback(() => {
     const now = live.current.call;
     if (now.state !== "live" || !now.queue[now.index] || !canListen) return;
+    const index = now.index;
+    const stillHere = () =>
+      live.current.call.state === "live" && live.current.call.index === index;
     listen({
-      onHeard: (heard) => {
-        const command = parseVoiceCommand(heard);
+      onHeard: async (heard) => {
         const actions = live.current;
         setMisheard(null);
-        if (command === "approve") void actions.callDecision("approved");
-        else if (command === "decline") void actions.callDecision("declined");
-        else if (command === "skip") actions.callSkip();
-        else if (command === "end") actions.endCall();
-        else {
-          // Not clearly one command: say what was heard and decide nothing.
+
+        // 1. An answer to "say yes or no".
+        if (pendingConfirm.current) {
+          const decision = pendingConfirm.current;
+          pendingConfirm.current = null;
+          const verdict = resolveConfirmation(heard);
+          if (verdict === "confirm") {
+            void actions.callDecision(decision);
+            return;
+          }
+          const text =
+            verdict === "cancel"
+              ? "Okay, nothing recorded. Approve, decline or skip?"
+              : "I didn't hear a yes, so nothing is recorded. Approve, decline or skip?";
+          aside("you", heard);
+          aside("copilot", text);
+          speak(text, listenForCommand);
+          return;
+        }
+
+        // 2. An exact command acts at once.
+        const command = parseVoiceCommand(heard);
+        if (command === "approve") return void actions.callDecision("approved");
+        if (command === "decline") return void actions.callDecision("declined");
+        if (command === "skip") return actions.callSkip();
+        if (command === "end") return actions.endCall();
+
+        // 3. Anything else is a question or a loose instruction: ask the model.
+        aside("you", heard);
+        remember("you", heard);
+        const approval = actions.currentApproval;
+        const reply = await spokenTurn(
+          heard,
+          approval
+            ? {
+                title: approval.title,
+                reason: approval.reason,
+                kind: approval.kind,
+                risk: approval.risk,
+                ...(actions.currentAgent
+                  ? { agentName: actions.currentAgent.name }
+                  : {}),
+              }
+            : undefined,
+        );
+        // A tap may have moved the call on while the model was answering.
+        if (!stillHere()) return;
+        if (!reply) {
           setMisheard(heard);
           if (retries.current < MAX_COMMAND_RETRIES) {
             retries.current += 1;
             speak("Say approve, decline, or skip.", listenForCommand);
           }
+          return;
         }
+        if (reply.intent === "skip") return actions.callSkip();
+        if (reply.intent === "end") return actions.endCall();
+        if (reply.intent === "approve" || reply.intent === "decline") {
+          const approving = reply.intent === "approve";
+          pendingConfirm.current = approving ? "approved" : "declined";
+          const text = `${approving ? "Approve" : "Decline"} “${approval?.title ?? "this one"}”? Say yes or no.`;
+          aside("copilot", text);
+          speak(text, listenForCommand);
+          return;
+        }
+        aside("copilot", reply.say);
+        remember("copilot", reply.say);
+        speak(reply.say, listenForCommand);
       },
       onError: (error) => {
         if (error === "no-speech" && retries.current < MAX_COMMAND_RETRIES) {
@@ -154,7 +314,7 @@ const Voice = () => {
         }
       },
     });
-  }, [canListen, listen, speak]);
+  }, [canListen, listen, speak, spokenTurn]);
 
   // Read each new copilot line aloud; when the queue goes quiet, open the mic.
   const spoken = useRef(0);
@@ -172,13 +332,31 @@ const Voice = () => {
 
   useEffect(() => {
     retries.current = 0;
+    pendingConfirm.current = null;
     setMisheard(null);
   }, [call.index, call.state]);
 
+  // A new call starts with a clean side transcript.
+  useEffect(() => {
+    if (call.state === "ringing") setAsides([]);
+  }, [call.state]);
+
   // A tap always beats the voice: stop reading and listening before acting.
   const quiet = () => {
+    pendingConfirm.current = null;
+    stopTalking();
     stopSpeaking();
     stopListening();
+  };
+  const askByVoice = () => {
+    if (talking.current || listening) {
+      quiet();
+      return;
+    }
+    setMisheard(null);
+    talking.current = true;
+    setInConversation(true);
+    converse();
   };
   const decideByTap = (decision: "approved" | "declined") => {
     quiet();
@@ -208,19 +386,32 @@ const Voice = () => {
       ? "Microphone access is blocked for this site. Allow it in the browser's site settings, then tap Talk."
       : misheard
         ? `Heard “${misheard}”. Nothing was decided. Say approve, decline or skip, or use the buttons.`
-        : "Your browser's speech service turns your voice into text. Every voice decision shows in the transcript.";
+        : source === "offline"
+          ? "The live copilot isn't reachable, so that answer came from the offline matcher. Sign in to a workspace for the real one."
+          : "Your browser's speech service turns your voice into text. Every voice decision shows in the transcript.";
 
   const stateLabel = useMemo(() => {
     if (call.state === "ringing") return "Ringing";
+    if (thinking) return "Thinking";
     if (call.state === "live") return listening ? "Listening" : "Speaking";
     if (call.state === "ended") return "Call ended";
-    return listening ? "Listening" : "Ready";
-  }, [call.state, listening]);
+    if (listening) return "Listening";
+    return inConversation ? "Speaking" : "Ready";
+  }, [call.state, listening, thinking, inConversation]);
 
-  const active = call.state === "live" || call.state === "ringing" || listening;
+  const active =
+    call.state === "live" ||
+    call.state === "ringing" ||
+    listening ||
+    thinking ||
+    inConversation;
   const intentLabel =
     intent?.intentLabel ??
-    (onCall && call.state !== "ended" ? "Reading your approval queue" : null);
+    (onCall && call.state !== "ended"
+      ? "Reading your approval queue"
+      : source && source !== "offline"
+        ? `Answered by ${source}`
+        : null);
   const decided = (approvalId: string) =>
     call.decisions.find((decision) => decision.approvalId === approvalId);
 
@@ -381,7 +572,9 @@ const Voice = () => {
                     ? "The call is over. Decisions are already in your inbox."
                     : listening
                       ? "Go ahead — I'm routing this through the orchestrator."
-                      : "Tap the mic to speak, or call yourself and decide by voice."}
+                      : inConversation
+                        ? "I'm with you. Ask a follow-up, or say “thanks” to finish."
+                        : "Tap Talk and ask in your own words. I'll keep listening for follow-ups."}
             </p>
             <p className="text-center text-[10px] text-muted-foreground/70">
               {micNotice}
@@ -516,7 +709,7 @@ const Voice = () => {
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button
-              variant={listening ? "default" : "outline"}
+              variant={listening || inConversation ? "default" : "outline"}
               size="sm"
               className="h-8 gap-1.5 rounded-lg text-[11.5px]"
               onClick={call.state === "live" ? answerByVoice : askByVoice}
@@ -534,7 +727,7 @@ const Voice = () => {
               ) : (
                 <>
                   <Mic className="h-3.5 w-3.5" />
-                  Talk
+                  {inConversation ? "Stop" : "Talk"}
                 </>
               )}
             </Button>
@@ -574,7 +767,7 @@ const Voice = () => {
             ) : null}
             <span className="ml-auto text-[10px] text-muted-foreground">
               {call.state === "live"
-                ? "Approve, decline, or skip — decisions are logged as you speak."
+                ? "Say approve, decline or skip, or ask me about it."
                 : "Same approvals, same orchestrator, different channel."}
             </span>
           </div>

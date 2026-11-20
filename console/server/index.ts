@@ -254,9 +254,103 @@ Return ONLY a JSON object shaped like:
   "unverified": ["anything the digest cannot support — facts the human should check"]
 }`;
 
+const VoiceRequestSchema = z.object({
+  heard: z.string().min(1).max(600),
+  digest: z.unknown(),
+  principalId: z.string().max(64).optional(),
+  model: z.string().max(80).optional(),
+  history: z.array(z.string().max(400)).max(8).optional(),
+  // The approval being read aloud, when the person is on a call.
+  approval: z
+    .object({
+      title: z.string().max(300),
+      reason: z.string().max(600).optional(),
+      kind: z.string().max(40).optional(),
+      agentName: z.string().max(80).optional(),
+      risk: z.string().max(20).optional(),
+    })
+    .optional(),
+});
+
+const VOICE_INTENTS = ["answer", "approve", "decline", "skip", "end"] as const;
+
+const ModelVoiceSchema = z.object({
+  say: z.string().min(1).max(1_500),
+  // An intent the page does not know is treated as a plain answer.
+  intent: z.enum(VOICE_INTENTS).catch("answer"),
+});
+
+/** A spoken turn should come back fast or not at all. */
+const VOICE_TIMEOUT_MS = 20_000;
+
+const VOICE_SYSTEM = `You are the voice of "Mission Control", a relationship-intelligence assistant.
+The person is speaking to you and will HEAR your reply read aloud, so write for the ear:
+- One to three short sentences. Plain words. No lists, no markdown, no ids, no symbols.
+- Lead with the answer. Say names the way a person would.
+- Answer from the WORLD DIGEST only. If it does not say, say you don't have that yet. Never invent people, companies or facts.
+- If you are unsure what they asked, ask one short question back.
+If APPROVAL ON THE CALL is present, the person is deciding that approval. They may ask about it; answer briefly from what is given.
+You never decide for them. Set "intent" to what they asked for:
+- "approve" or "decline" ONLY when they clearly told you to approve or decline the approval on the call. The app will read it back and ask them to confirm.
+- "skip" when they want to move on without deciding, "end" when they want to stop or hang up.
+- "answer" for everything else, including any question.
+Return ONLY a JSON object: {"say": "what you will say aloud", "intent": "answer|approve|decline|skip|end"}`;
+
 /* ------------------------------------------------------------------ */
 /* Handlers                                                            */
 /* ------------------------------------------------------------------ */
+
+async function handleVoice(body: unknown) {
+  const request = VoiceRequestSchema.parse(body);
+  const started = Date.now();
+  const span = startSpan("copilot.voice", {
+    prompt_chars: request.heard.length,
+    principal_id: request.principalId ?? "anonymous",
+    on_call: Boolean(request.approval),
+  });
+  try {
+    const approval = request.approval
+      ? `\n\nAPPROVAL ON THE CALL:\n${JSON.stringify(request.approval)}`
+      : "";
+    // No web or retrieval lookup here: both add seconds of silence. A spoken
+    // turn answers from the digest; deeper lookups belong to a later slice.
+    const routed = await askWithFailover(
+      resolveRoute(request.model, "voice"),
+      VOICE_SYSTEM,
+      `THE PERSON SAID:\n${request.heard}${approval}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${historyBlock(request.history)}`,
+      "off",
+      VOICE_TIMEOUT_MS,
+      undefined,
+      (content) => void ModelVoiceSchema.parse(parseModelJson(content)),
+    );
+    const reply = ModelVoiceSchema.parse(parseModelJson(routed.content));
+    // A decision intent means nothing without an approval to decide.
+    const intent =
+      !request.approval && (reply.intent === "approve" || reply.intent === "decline" || reply.intent === "skip")
+        ? "answer"
+        : reply.intent;
+    endSpan(span, true, {
+      latency_ms: Date.now() - started,
+      provider: routed.provider,
+      model: routed.model,
+      failovers: routed.failovers,
+      intent,
+    });
+    return {
+      say: clip(reply.say, 600),
+      intent,
+      source: "live-model",
+      provider: routed.provider,
+      model: routed.model,
+    };
+  } catch (error) {
+    endSpan(span, false, {
+      latency_ms: Date.now() - started,
+      error: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+    });
+    throw error;
+  }
+}
 
 async function handleCopilot(body: unknown) {
   const request = CopilotRequestSchema.parse(body);
@@ -673,6 +767,12 @@ const server = createServer(async (req, res) => {
       const answer = await handleCopilot(await readBody(req));
       json(res, 200, answer);
       finish(200, `answer "${answer.intentLabel}"`);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/voice") {
+      const reply = await handleVoice(await readBody(req));
+      json(res, 200, reply);
+      finish(200, `voice ${reply.intent}`);
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/design") {

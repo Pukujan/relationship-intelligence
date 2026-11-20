@@ -7,8 +7,8 @@
  * `octo_tmp_…` lease) is set, the vendor is reached through Octo's vault proxy
  * and this server never holds the vendor's own secret (#62). Routing is explicit
  * policy, not vendor preference: a request may name a route, otherwise a
- * per-tier chain applies (overridable with `COPILOT_CHAIN_ASK` /
- * `COPILOT_CHAIN_DESIGN`), and a rate-limited or failing provider is skipped
+ * per-tier chain applies (overridable with `COPILOT_CHAIN_ASK`,
+ * `COPILOT_CHAIN_DESIGN` and `COPILOT_CHAIN_VOICE`), and a rate-limited or failing provider is skipped
  * for a cooldown window instead of burning retries against it.
  *
  * The ranking policy here is deliberately small and readable. The
@@ -18,7 +18,7 @@
  */
 
 export type Reasoning = "off" | "low" | "medium" | "high";
-export type Tier = "ask" | "design";
+export type Tier = "ask" | "design" | "voice";
 
 export interface Provider {
   id: string;
@@ -192,6 +192,15 @@ const DEFAULT_POLICY: Record<Tier, Chain> = {
     ["qwen", "qwen3.7-plus"],
     ["workbuddy", "hy4flash-free"],
   ],
+  // A spoken turn: the reply is a sentence or two and the person is waiting
+  // in silence, so the fastest model leads (Haiku answered in about 3.5 s
+  // against 7 to 14 s for Qwen flash when tried on 2026-11-20).
+  voice: [
+    ["anthropic", "claude-haiku-5-5"],
+    ["qwen", "qwen3.6-flash"],
+    ["inferhub", "cb/deepseek-v4.1-flash-sg"],
+    ["workbuddy", "hy4flash-free"],
+  ],
 };
 
 /**
@@ -220,6 +229,7 @@ const fromEnv = (spec: string | undefined, fallback: Chain): Chain => {
 const POLICY: Record<Tier, Chain> = {
   ask: fromEnv(env.COPILOT_CHAIN_ASK, DEFAULT_POLICY.ask),
   design: fromEnv(env.COPILOT_CHAIN_DESIGN, DEFAULT_POLICY.design),
+  voice: fromEnv(env.COPILOT_CHAIN_VOICE, DEFAULT_POLICY.voice),
 };
 
 /** The chains in force, for the health endpoint and the model menu. */
