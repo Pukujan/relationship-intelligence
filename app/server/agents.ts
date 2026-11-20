@@ -350,8 +350,9 @@ export async function lockDraftPlan(
     name: "draft_plan.lock",
     kind: "CHAIN",
     workspaceId,
-    projectId:
-      typeof draft.projectId === "string" ? draft.projectId : undefined,
+    ...(typeof draft.projectId === "string"
+      ? { projectId: draft.projectId }
+      : {}),
     principalId,
     cadence: "interactive",
     attributes: { "ri.draft_plan_id": draftPlanId },
