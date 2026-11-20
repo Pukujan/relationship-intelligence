@@ -254,6 +254,30 @@ try:
     record("S12", "a shared note is shared, a private note is not, neither leaves the workspace",
            want, got, [s_sh, s_pr] == [200, 200] and got == want)
 
+    # S13: a real Octo guest. Octo mints a guest for anyone who asks and gives
+    # it a personal workspace, so it "belongs to a workspace" without belonging
+    # to this app. It must not reach the copilot.
+    try:
+        req = urllib.request.Request(f"{OCTO}/api/auth/guest", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json",
+                                              "User-Agent": "ri-sharing-holdout/1.0"})
+        guest_token = json.loads(urllib.request.urlopen(req, timeout=30).read()).get("sessionToken", "")
+    except Exception:
+        guest_token = ""
+    if guest_token:
+        jar_req = urllib.request.Request(BASE + "/app-api/session/accept",
+                                         data=json.dumps({"token": guest_token}).encode(), method="POST",
+                                         headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(jar_req, timeout=30) as r:
+            guest_cookie = (r.headers.get("Set-Cookie") or "").split("ri_session=", 1)[-1].split(";", 1)[0]
+        s_g, _ = call(guest_cookie, "GET", "/api/models")
+        s_gp, _ = call(guest_cookie, "POST", "/api/copilot", {"prompt": "hi", "digest": {}})
+        record("S13", "an Octo guest with its own workspace cannot reach the copilot",
+               [403, 403], [s_g, s_gp], [s_g, s_gp] == [403, 403])
+    else:
+        record("S13", "an Octo guest with its own workspace cannot reach the copilot",
+               [403, 403], "could not mint a guest", False)
+
     # S11: removing a member takes effect on the very next request.
     s_rm, _ = call(jar["owner"], "DELETE", f"/app-api/workspaces/{W}/members/{by['b']['email']}")
     s_after, _ = call(jar["b"], "GET", f"/app-api/world?workspaceId={W}")

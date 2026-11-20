@@ -5,11 +5,14 @@
  * model keys. It listens on loopback only and has no sign-in of its own: in
  * development Vite proxies to it on localhost. In production this adapter is
  * the only way in, and it forwards a request only for a signed-in session
- * that belongs to at least one workspace. Signing in is not enough: anyone can
- * mint an Octo guest principal and present its token, and a hold-out test
- * (scripts/validate_sharing.py, S10) showed such an account reaching the
- * models. The guest demo gets a 401 and the console falls back to its offline
- * router, as before.
+ * that belongs to THIS app: its Octo container, or one of its app workspaces.
+ *
+ * Signing in is not enough, and neither is "belongs to some workspace".
+ * Anyone can mint an Octo guest principal and present its token, and Octo
+ * gives every guest a personal workspace of its own. A live check on
+ * 2026-11-20 showed such a guest getting a model answer. See
+ * `workspaceRequiredFor` for the rule. The console's guest demo has no
+ * session at all, gets a 401, and falls back to its offline router.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
@@ -49,6 +52,28 @@ export function recentlyMember(key: string, nowMs: number = Date.now()) {
 
 export function rememberMember(key: string, nowMs: number = Date.now()) {
   memberUntil.set(key, nowMs + MEMBERSHIP_TRUST_MS);
+}
+
+/**
+ * Which workspace a session must be a member of to use the copilot.
+ *
+ * - A session holding an Octo token (a guest, or the owner's workspace key)
+ *   must be a member of the app's own Octo container. Its token's workspace
+ *   list comes from Octo and includes any personal workspace, so "a member of
+ *   something" proves nothing. With no container configured, nobody passes.
+ * - A session from the app's own Google sign-in holds no token. Its
+ *   memberships are looked up with the server key against the app's own
+ *   tables, so any one of them is a membership of this app: `undefined`
+ *   means "any".
+ */
+export const NO_SUCH_WORKSPACE = "\u0000no-container-configured";
+
+export function workspaceRequiredFor(
+  session: Pick<AppSession, "octoToken">,
+  containerId: string | undefined,
+): string | undefined {
+  if (!session.octoToken) return undefined;
+  return containerId?.trim() || NO_SUCH_WORKSPACE;
 }
 
 /** First check, from the cookie alone: a signed-in session that is not idle. */
@@ -130,13 +155,19 @@ export async function proxyCopilot(
     sendJson(res, gate.status, gate.body);
     return;
   }
-  // Second check: the session must belong to a workspace.
+  // Second check: the session must belong to this app.
   const memberKey = session.principalId ?? session.octoToken ?? "";
   if (!recentlyMember(memberKey)) {
-    const tenancy = await resolveTenancy(req, res, env, {
-      baseUrl: env.OCTO_API_URL,
-      timeoutMs: 15_000,
-    });
+    const tenancy = await resolveTenancy(
+      req,
+      res,
+      env,
+      { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 },
+      workspaceRequiredFor(
+        session,
+        env.OCTO_WORKSPACE_ID ?? process.env.OCTO_WORKSPACE_ID,
+      ),
+    );
     if (!tenancy.ok) {
       sendJson(res, tenancy.status, tenancy.body);
       return;
