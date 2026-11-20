@@ -134,3 +134,34 @@ Copy my email. Never an empty dashboard.
 - Every Glance row is a link or opens Peek.
 - Charts appear only where this matrix names them; no chart without a source
   chip in copilot parts.
+
+## 4. Competitive borrowings (researched 2026-11-19, sources cited)
+
+Nobody ships the whole combination (evidence-canonical graph + agents +
+approval-gated outbound + research copilot). On individual axes, borrow:
+
+1. **Cadence, not silence** (Cloze/People.ai): going-cold threshold per
+   relationship stage/segment; connectors auto-write touches so the timeline
+   fills itself. Slice 6.
+2. **Agenda-thinking Glance** (Sunsama/Motion): Today Glance becomes "your 3
+   moves today" + one sparkline row, replacing four dashboard tiles. Slice 5.
+3. **Saved views + inline edit** (Attio): PortfolioTable gains saved views,
+   column config, optimistic inline edit. Slice 6.
+4. **Enrichment as table columns** (Clay): per-row research action with a
+   source waterfall; results land as evidence chips, never silent facts. Slice 6.
+5. **Intro paths** (Affinity): Person→Deep "who can introduce me" —
+   strength-weighted path query over the graph, edges labelled and sourced. Slice 6.
+6. **Do/Don't + decline path** (Zapier approval steps): approval cards show
+   Do / Don't and what a decline does (stop vs re-plan); keyboard triage
+   (j/k, a, d, e) with optimistic updates (Linear). Slice 4.
+7. **Follow-up chips + sources panel** (Perplexity/Claude artifacts): each
+   thread ends with 2–3 suggested follow-ups and a collapsible sources list. Slice 5.
+
+Cautionary: Relay.app shut down 2026-09 — approvals must live inside the work
+surface, not as a standalone automation product. Mobile and passive capture
+remain honest gaps; neither is faked with seed data.
+
+Sources: affinity.co/blog/crm-network-mapping; getdex.com/blog/cloze-crm-review;
+theaiagentindex.com/agents/clay; producthunt.com/products/attio/reviews;
+sunsama.com/blog/best-to-do-list-and-daily-planner-apps;
+rills.ai/blog/zapier-human-approval-step; relay.app; people.ai; linear.app.
