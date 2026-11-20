@@ -54,7 +54,9 @@ const proof = [
 ];
 
 const SignIn = () => {
-  const { session, signIn } = useData();
+  const { session, signIn, sessionReason, resumeSession, connectWithKey } = useData();
+  const [key, setKey] = useState("");
+  const [keyBusy, setKeyBusy] = useState(false);
   const navigate = useNavigate();
   const [pending, setPending] = useState<"google" | "guest" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +153,51 @@ const SignIn = () => {
                   demo
                 </span>
               </Button>
+              {sessionReason === "octo_token_expired" || sessionReason === "idle_expired" ? (
+                <div className="mb-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+                  {sessionReason === "idle_expired"
+                    ? "You were idle past the 30-minute window, so the local session ended."
+                    : "Your Octo session reached its 20-minute platform limit."}{" "}
+                  Resume with one click — Google remembers you, so it is a single consent tap.
+                  <button
+                    type="button"
+                    onClick={resumeSession}
+                    className="focus-ring ml-2 rounded-md border border-warn/40 px-2 py-0.5 text-[11px] font-medium hover:bg-warn/10"
+                  >
+                    Resume session
+                  </button>
+                </div>
+              ) : null}
+              <div className="mb-3 rounded-lg border border-border/70 bg-surface-1/60 px-3 py-2">
+                <p className="text-[11.5px] text-muted-foreground">
+                  No redirect loop: paste a workspace key from Octo → Keys and connect directly.
+                  Google sign-in may land you on the Octo portal; this path never leaves the console.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={key}
+                    onChange={(e) => setKey(e.target.value)}
+                    type="password"
+                    placeholder="octo_live_ws_…"
+                    aria-label="Workspace key"
+                    className="h-8 min-w-0 flex-1 rounded-md border border-border/70 bg-surface-1 px-2 text-[12px] outline-none"
+                  />
+                  <button
+                    type="button"
+                    disabled={keyBusy || !key.trim()}
+                    onClick={() => {
+                      setKeyBusy(true);
+                      connectWithKey(key.trim()).catch((e) => {
+                        setError(e instanceof Error ? e.message : "Could not connect.");
+                        setKeyBusy(false);
+                      });
+                    }}
+                    className="focus-ring h-8 rounded-md border border-primary/40 bg-primary/10 px-3 text-[11.5px] font-medium text-primary"
+                  >
+                    {keyBusy ? "Connecting…" : "Connect with key"}
+                  </button>
+                </div>
+              </div>
               {error ? (
                 <p role="alert" className="text-[11.5px] text-destructive">
                   {error}

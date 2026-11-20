@@ -8,6 +8,11 @@
  *
  * The cookie is encrypted (iron-session), not merely signed: it carries a
  * bearer token, so confidentiality matters as much as integrity.
+ *
+ * Longevity has two layers: Octo's absolute token TTL (20 minutes, no
+ * refresh) and a sliding idle window on the local cookie (IDLE_LIMIT_MS).
+ * An ended session keeps its cookie when Octo merely refused the token, so
+ * the console can offer a one-click resume rather than a cold sign-in.
  */
 
 import { randomBytes } from "node:crypto";
@@ -25,6 +30,17 @@ export interface AppSessionData {
   loginNonce?: string;
   /** Where to return after the callback. Same-origin paths only. */
   returnTo?: string;
+  /** Our-backend-owned Google sign-in: identity lives in our cookie, not Octo's. */
+  principalId?: string;
+  email?: string;
+  displayName?: string;
+  authMode?: "google" | "key";
+  /**
+   * Epoch ms of the last authenticated /app-api/* request. Slides the local
+   * idle window; absent on cookies sealed before longevity landed, which are
+   * treated as active until their first authenticated request.
+   */
+  lastSeenAt?: number;
 }
 
 export type AppSession = IronSession<AppSessionData>;
@@ -65,4 +81,47 @@ export function safeReturnTo(value: unknown): string {
     !value.startsWith("//")
     ? value
     : "/";
+}
+
+/**
+ * Sliding idle window for the local cookie: 30 minutes without an
+ * authenticated /app-api/* request destroys the session.
+ *
+ * This only governs the local cookie. Octo's absolute token TTL (20 minutes
+ * by default) still applies on top: a token past its `exp` fails at Octo no
+ * matter how recent the activity, because Octo mints no refresh token. A
+ * sliding refresh is requested in Octo issue #93; until then the console
+ * offers a one-click resume instead of silently extending the token.
+ */
+export const IDLE_LIMIT_MS = 30 * 60 * 1000;
+
+export const OCTO_TOKEN_PREFIX = "octo_sess_";
+
+/**
+ * Read the expiry Octo embedded in `octo_sess_<principalId>.<exp>.<sig>`.
+ * `exp` is epoch seconds; returns epoch milliseconds, or null when the token
+ * is not a well-formed session token.
+ *
+ * Trust: the signature is Octo's to verify — this parse is advisory only (it
+ * drives the UI countdown) and never grants access. Every request still
+ * re-validates the token at Octo.
+ */
+export function tokenExpiresAtMs(token: string): number | null {
+  if (!token.startsWith(OCTO_TOKEN_PREFIX)) return null;
+  const parts = token.slice(OCTO_TOKEN_PREFIX.length).split(".");
+  if (parts.length !== 3) return null;
+  const exp = Number(parts[1]);
+  if (!Number.isFinite(exp) || exp <= 0) return null;
+  return exp * 1000;
+}
+
+/** True when the sealed session has been idle longer than IDLE_LIMIT_MS. */
+export function isIdleExpired(
+  session: AppSession,
+  nowMs: number = Date.now(),
+): boolean {
+  return (
+    typeof session.lastSeenAt === "number" &&
+    nowMs - session.lastSeenAt > IDLE_LIMIT_MS
+  );
 }

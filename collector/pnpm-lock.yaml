@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      patchright:
+        specifier: ^1.64.3
+        version: 1.64.3
       playwright:
         specifier: ^1.56.0
         version: 1.65.1
@@ -193,6 +196,16 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
+  patchright-core@1.64.3:
+    resolution: {integrity: sha512-AikBjQ6CcsEtk7pJGlZ7ITxIInVd0a8HWPtuGjx2Y0Ogb88sj1wqICiYFz4du6fbaLQStLNEnWCmYm5uODsEzQ==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  patchright@1.64.3:
+    resolution: {integrity: sha512-DjdhKOHRMW2RcvCJJ4MW9B4Mn7dh4Tu5IAkeiYgmoMfVdG6w2klfNdw0Ci8F/jibp870EIfJhzyN14GN6jDVPg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   playwright-core@1.65.1:
     resolution: {integrity: sha512-hqPpz7blSMPxWVdoeE1yiBSzXsKiVOd2k+kjCvmUywD2GPO2Dd9HfcWnq9NN0GHbNZDFgZ9JfBFr+X5/BLo0qw==}
     engines: {node: '>=20'}
@@ -331,6 +344,12 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  patchright-core@1.64.3: {}
+
+  patchright@1.64.3:
+    dependencies:
+      patchright-core: 1.64.3
 
   playwright-core@1.65.1: {}
 

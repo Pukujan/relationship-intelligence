@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, FolderKanban, Sparkles, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,9 @@ import {
   SectionHeader,
 } from "@/components/common";
 import { ProjectCard, ScopeBanner } from "@/components/work";
+import { AltitudeControl, useAltitude } from "@/components/crm/AltitudeControl";
+import { PortfolioTable } from "@/components/crm/PortfolioTable";
+import { Peek, type PeekTarget } from "@/components/crm/Peek";
 import { Button } from "@/components/ui/button";
 
 const chain = [
@@ -48,6 +52,9 @@ const Projects = () => {
     setActiveProject,
   } = useData();
   const { openCopilot } = useOrchestrator();
+  // Glance-first: the portfolio table is the default read; Deep adds cards.
+  const [altitude] = useAltitude("projects");
+  const [peek, setPeek] = useState<PeekTarget | null>(null);
 
   if (status === "loading") return <PageSkeleton rows={3} />;
   if (status === "error" || !world) {
@@ -70,17 +77,20 @@ const Projects = () => {
         title="Projects"
         description="Every project is a container for outcomes. Objectives measure them, missions execute them, and the people inside stay in the graph — referenced, never copied."
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 gap-1.5 rounded-lg text-[12px]"
-            onClick={() =>
-              openCopilot("Where do my projects stand this week?")
-            }
-          >
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
-            Ask about the work
-          </Button>
+          <>
+            <AltitudeControl view="projects" />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5 rounded-lg text-[12px]"
+              onClick={() =>
+                openCopilot("Where do my projects stand this week?")
+              }
+            >
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              Ask about the work
+            </Button>
+          </>
         }
       />
 
@@ -109,18 +119,26 @@ const Projects = () => {
 
       <section className="space-y-3">
         <SectionHeader title="In this workspace" count={world.projects.length} />
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {world.projects.map((project) => (
-            <ProjectCard
-              key={project.id}
-              world={world}
-              project={project}
-              active={activeProjectId === project.id}
-            />
-          ))}
-        </div>
+        <PortfolioTable
+          world={world}
+          projects={world.projects}
+          onPeek={setPeek}
+        />
+        {altitude === "deep" ? (
+          <div className="grid gap-3 pt-2 md:grid-cols-2 xl:grid-cols-3">
+            {world.projects.map((project) => (
+              <ProjectCard
+                key={project.id}
+                world={world}
+                project={project}
+                active={activeProjectId === project.id}
+              />
+            ))}
+          </div>
+        ) : null}
       </section>
 
+      {altitude === "deep" ? (
       <section className="panel p-4">
         <SectionHeader title="How the chain works" />
         <ol className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -150,6 +168,7 @@ const Projects = () => {
           them — there is only ever one record.
         </p>
       </section>
+      ) : null}
 
       {world.projects.length === 0 ? (
         <div className="panel p-5">
@@ -180,6 +199,15 @@ const Projects = () => {
           See the objectives
         </Link>
       </div>
+
+      <Peek
+        world={world}
+        target={peek}
+        open={Boolean(peek)}
+        onOpenChange={(open) => {
+          if (!open) setPeek(null);
+        }}
+      />
     </div>
   );
 };

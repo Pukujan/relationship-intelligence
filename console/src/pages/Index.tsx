@@ -1,5 +1,6 @@
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { format } from "date-fns";
+import { addDays, endOfDay, format, startOfDay } from "date-fns";
 import {
   AlertTriangle,
   ArrowRight,
@@ -44,6 +45,13 @@ import {
   StrengthMeter,
 } from "@/components/common";
 import { MissionRow, Pill } from "@/components/work";
+import { AltitudeControl, useAltitude } from "@/components/crm/AltitudeControl";
+import { Peek, type PeekTarget } from "@/components/crm/Peek";
+import {
+  UnifiedTimeline,
+  collectTimelineItems,
+  peekTargetForItem,
+} from "@/components/crm/UnifiedTimeline";
 import { Button } from "@/components/ui/button";
 
 const greeting = () => {
@@ -59,6 +67,20 @@ const Index = () => {
   const { openCopilot, startCall, call } = useOrchestrator();
   const { act, pendingId } = useApprovalDecision();
   const navigate = useNavigate();
+  // Today stays glance-first: signals and the week strip lead; team and
+  // activity panels appear as the reader raises the altitude.
+  const [altitude] = useAltitude("today");
+  const [peek, setPeek] = useState<PeekTarget | null>(null);
+  const weekItems = useMemo(() => {
+    if (!world) return [];
+    const today = new Date();
+    return collectTimelineItems(world, {
+      projectId: activeProjectId,
+      kinds: ["mission", "objective", "event", "approval"],
+      from: startOfDay(today),
+      to: endOfDay(addDays(today, 6)),
+    });
+  }, [world, activeProjectId]);
 
   if (status === "loading") {
     return (
@@ -144,6 +166,7 @@ const Index = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <AltitudeControl view="today" />
           <Button
             variant="outline"
             size="sm"
@@ -292,6 +315,37 @@ const Index = () => {
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="panel p-4">
+        <SectionHeader
+          title="Next 7 days"
+          count={weekItems.length}
+          action={
+            <Link
+              to="/calendar"
+              className="focus-ring inline-flex items-center gap-1 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Calendar
+              <ArrowRight className="h-3 w-3" />
+            </Link>
+          }
+        />
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Missions, objective deadlines, events, and expiring decisions on one
+          strip — click anything to peek at its brief.
+        </p>
+        <UnifiedTimeline
+          className="mt-3"
+          items={weekItems}
+          variant="strip"
+          emptyText="Nothing lands in the next seven days in this scope."
+          onSelect={(item) => {
+            const target = peekTargetForItem(item);
+            if (target) setPeek(target);
+            else if (item.href) navigate(item.href);
+          }}
+        />
       </section>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.92fr)]">
@@ -500,6 +554,7 @@ const Index = () => {
         </section>
       </div>
 
+      {altitude !== "glance" ? (
       <section className="space-y-3">
         <SectionHeader
           title="Your team"
@@ -535,7 +590,9 @@ const Index = () => {
           </button>
         </div>
       </section>
+      ) : null}
 
+      {altitude === "deep" ? (
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
         <section className="panel flex flex-col p-4">
           <SectionHeader
@@ -657,6 +714,14 @@ const Index = () => {
           </Link>
         </section>
       </div>
+      ) : null}
+
+      <Peek
+        world={world}
+        target={peek}
+        open={peek !== null}
+        onOpenChange={(open) => { if (!open) setPeek(null); }}
+      />
     </div>
   );
 };

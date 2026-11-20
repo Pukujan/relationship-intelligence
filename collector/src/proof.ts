@@ -15,7 +15,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { chromium, type BrowserContext } from "playwright";
+import { chromium, type BrowserContext } from "patchright";
 
 const ROOT = process.env.RI_PROOF_ROOT ?? "/tmp/ri-daemon-proof";
 const PROFILE_DIR = path.join(ROOT, "profile");
@@ -152,7 +152,7 @@ async function check(): Promise<void> {
     const loggedIn = await hasLinkedInSession(ctx);
     const finalUrl = page.url();
     const navPresent = await page
-      .locator("#global-nav, header.global-nav__header")
+      .locator("#global-nav, header.global-nav__header, nav[aria-label='Primary'], header")
       .first()
       .count();
     record({
@@ -160,8 +160,8 @@ async function check(): Promise<void> {
       at: new Date().toISOString(),
       finalUrl,
       title: await page.title(),
-      loggedIn: loggedIn && navPresent > 0,
-      detail: `li_at=${loggedIn}; global-nav present=${navPresent > 0}; fresh process after restart`,
+      loggedIn: loggedIn && navPresent > 0 && !/login|checkpoint|authwall/.test(page.url()),
+      detail: `li_at=${loggedIn}; nav/header present=${navPresent > 0}; url=${page.url()}; fresh process after restart`,
     });
     if (!loggedIn || /login|authwall|checkpoint/.test(finalUrl)) {
       process.exitCode = 1;

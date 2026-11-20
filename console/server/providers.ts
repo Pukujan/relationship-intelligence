@@ -162,6 +162,7 @@ export async function chat(
   user: string,
   reasoning: Reasoning,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<ChatOutcome> {
   const body: Record<string, unknown> = {
     model: route.model,
@@ -186,7 +187,7 @@ export async function chat(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
       const retryAfter = Number(response.headers.get("retry-after"));
@@ -226,6 +227,7 @@ export async function askWithFailover(
   user: string,
   reasoning: Reasoning,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<FailoverResult> {
   if (routes.length === 0) throw new Error("no available provider (all cooled or unconfigured)");
   let attempts = 0;
@@ -234,7 +236,7 @@ export async function askWithFailover(
   for (const route of routes) {
     for (let attempt = 0; attempt < 2; attempt++) {
       attempts++;
-      const outcome = await chat(route, system, user, reasoning, timeoutMs);
+      const outcome = await chat(route, system, user, reasoning, timeoutMs, signal);
       if (outcome.status === 200 && outcome.content) {
         return { content: outcome.content, provider: route.provider.id, model: route.model, attempts, failovers };
       }

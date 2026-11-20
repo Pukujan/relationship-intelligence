@@ -1,5 +1,19 @@
 import { seedWorld } from "./seed";
 import type {
+  FileLink,
+  FileScope,
+  FilesView,
+  FileUploadResult,
+  LinkEntityKind,
+  NewFileInput,
+  NewNoteInput,
+  ProfileFile,
+  ProfilePatch,
+  SelfProfile,
+  TeamMember,
+} from "./profileTypes";
+import type { Conversation, SessionMessage } from "./sessionTypes";
+import type {
   ActivityEntry,
   ActivityType,
   Agent,
@@ -10,8 +24,10 @@ import type {
   DecisionInput,
   MissionDesign,
   NewProposal,
+  Note,
   Plugin,
   Project,
+  Retrospective,
   Session,
   SessionMode,
   World,
@@ -86,9 +102,103 @@ export interface MissionControlSource {
   ): Promise<Connector>;
   setPluginInstalled(pluginId: string, installed: boolean): Promise<Plugin>;
   logActivity(input: NewActivity): Promise<ActivityEntry>;
+  listSessions(): Promise<Conversation[]>;
+  createSession(input: { title: string; scopeKind: string; scopeId?: string | null }): Promise<Conversation>;
+  loadMessages(sessionId: string): Promise<SessionMessage[]>;
+  appendMessage(sessionId: string, message: SessionMessage): Promise<SessionMessage>;
+  patchSession(sessionId: string, patch: { title?: string; archived?: boolean; scopeKind?: string; scopeId?: string | null }): Promise<Conversation>;
+  /* RI-0010 task C: self/team profile + personal knowledge.
+   * Privacy contract (enforced by the Octo adapter, mirrored by the seed):
+   * writes are principal-private by default; reads return own + shared;
+   * "team"/"shared" file scopes never include another principal's private rows. */
+  loadProfile(): Promise<SelfProfile>;
+  patchProfile(patch: ProfilePatch): Promise<SelfProfile>;
+  loadTeam(): Promise<TeamMember[]>;
+  loadFiles(scope: FileScope): Promise<FilesView>;
+  createFile(input: NewFileInput): Promise<FileUploadResult>;
+  linkFile(fileId: string, link: { entityKind: LinkEntityKind; entityId: string }): Promise<FileLink>;
+  loadNotes(): Promise<Note[]>;
+  createNote(input: NewNoteInput): Promise<Note>;
+  loadRetros(): Promise<Retrospective[]>;
 }
 
+
+/* RI-0010: guest sessions persist in sessionStorage so the demo resumes. */
+const SESSIONS_KEY = "mission-control.sessions.v1";
+interface SeedSessions {
+  conversations: Conversation[];
+  messages: Record<string, SessionMessage[]>;
+}
+const readSeedSessions = (): SeedSessions => {
+  try {
+    const raw = window.sessionStorage.getItem(SESSIONS_KEY);
+    return raw ? (JSON.parse(raw) as SeedSessions) : { conversations: [], messages: {} };
+  } catch {
+    return { conversations: [], messages: {} };
+  }
+};
+const writeSeedSessions = (value: SeedSessions) => {
+  try {
+    window.sessionStorage.setItem(SESSIONS_KEY, JSON.stringify(value));
+  } catch {
+    // storage blocked: sessions stay in memory for this visit
+  }
+};
+
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+/* RI-0010 task C: demo profile/knowledge persistence, same sessionStorage
+ * pattern as guest sessions so edits survive navigation in the demo. */
+const PROFILE_KEY = "mission-control.profile.v1";
+const FILES_KEY = "mission-control.files.v1";
+const NOTES_KEY = "mission-control.notes.v1";
+const LINKS_KEY = "mission-control.fileLinks.v1";
+
+const readStore = <T,>(key: string, fallback: T): T => {
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+const writeStore = (key: string, value: unknown) => {
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // storage blocked: edits live in memory for this visit only
+  }
+};
+
+/** The demo signs in as Alex Rivera; the seed world has no other principals. */
+const DEMO_PRINCIPAL_ID = "principal-alex";
+
+const demoProfile = (): SelfProfile => ({
+  id: `profile-${DEMO_PRINCIPAL_ID}`,
+  workspaceId: seedWorld.workspaces[0]?.id ?? "ws-gtm",
+  principalId: DEMO_PRINCIPAL_ID,
+  displayName: "Alex Rivera",
+  role: "Founder",
+  team: "Fieldstone",
+  resumeFileId: null,
+  preferences: [
+    "Every outbound send needs my approval",
+    "Warm intros before cold outreach",
+  ],
+  goals: ["Save the Halcyon renewal", "Ship the Loomcraft beta"],
+  updatedAt: new Date().toISOString(),
+});
+
+const principalForOwner = (owner: string) =>
+  owner === "Alex Rivera"
+    ? DEMO_PRINCIPAL_ID
+    : `principal-${owner.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+interface StoredNote {
+  note: Note;
+  visibility: "private" | "shared";
+  principalId: string;
+}
 
 /**
  * Materialize an approved proposal against the world.
@@ -240,14 +350,62 @@ export const createLocalSeedSource = (): MissionControlSource => {
     return agent;
   };
 
+  /* Demo knowledge rows created through the source, shared across pages via
+   * sessionStorage (the seed world itself stays the canonical demo fixture). */
+  const createdFiles = () => readStore<ProfileFile[]>(FILES_KEY, []);
+  const createdNotes = () => readStore<StoredNote[]>(NOTES_KEY, []);
+  const storedLinks = () => readStore<Record<string, FileLink[]>>(LINKS_KEY, {});
+
+  const linksForFile = (file: ProfileFile): FileLink[] => {
+    const derived: FileLink[] = [
+      ...file.personIds.map((personId) => ({
+        id: `link-${file.id}-${personId}`,
+        fileId: file.id,
+        entityKind: "person" as const,
+        entityId: personId,
+        principalId: file.principalId,
+      })),
+      ...(file.projectId
+        ? [{
+            id: `link-${file.id}-${file.projectId}`,
+            fileId: file.id,
+            entityKind: "project" as const,
+            entityId: file.projectId,
+            principalId: file.principalId,
+          }]
+        : []),
+    ];
+    return [...derived, ...(storedLinks()[file.id] ?? [])];
+  };
+
+  /** Seed files as owned rows. f1 is private to Alex to demo the privacy rule. */
+  const seedFileRows = (): ProfileFile[] =>
+    world.files.map((file) => ({
+      ...file,
+      principalId: principalForOwner(file.owner),
+      visibility: file.id === "f1" ? ("private" as const) : ("shared" as const),
+      links: [],
+    }));
+
+  const allFileRows = (): ProfileFile[] =>
+    [...seedFileRows(), ...createdFiles()].map((file) => ({
+      ...file,
+      links: linksForFile(file),
+    }));
+
   return {
     kind: "local-seed",
 
     async loadWorld() {
       // A local source still resolves asynchronously so the screens exercise
-      // their real loading states.
+      // their real loading states. Demo-created files/notes ride along so the
+      // Knowledge pages see what the Profile page created.
       await new Promise((resolve) => setTimeout(resolve, 260));
-      return clone(world);
+      return clone({
+        ...world,
+        files: [...world.files, ...createdFiles()],
+        notes: [...world.notes, ...createdNotes().map((entry) => entry.note)],
+      });
     },
 
     async signIn(mode) {
@@ -385,6 +543,190 @@ export const createLocalSeedSource = (): MissionControlSource => {
         };
       }
       return clone(agent);
+    },
+
+    async listSessions() {
+      return clone(readSeedSessions().conversations);
+    },
+
+    async createSession(input) {
+      const store = readSeedSessions();
+      const now = new Date().toISOString();
+      const conversation: Conversation = {
+        id: `sess-live-${++liveId}`,
+        workspaceId: world.workspaces[0]?.id ?? "w1",
+        scopeKind: (input.scopeKind as Conversation["scopeKind"]) ?? "workspace",
+        scopeId: input.scopeId ?? null,
+        title: input.title,
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+      };
+      store.conversations = [conversation, ...store.conversations];
+      store.messages[conversation.id] = [];
+      writeSeedSessions(store);
+      return clone(conversation);
+    },
+
+    async loadMessages(sessionId) {
+      return clone(readSeedSessions().messages[sessionId] ?? []);
+    },
+
+    async appendMessage(sessionId, message) {
+      const store = readSeedSessions();
+      store.messages[sessionId] = [...(store.messages[sessionId] ?? []), message];
+      store.conversations = store.conversations.map((conversation) =>
+        conversation.id === sessionId ? { ...conversation, updatedAt: message.createdAt } : conversation,
+      );
+      writeSeedSessions(store);
+      return clone(message);
+    },
+
+    async patchSession(sessionId, patch) {
+      const store = readSeedSessions();
+      let next: Conversation | null = null;
+      store.conversations = store.conversations.map((conversation) => {
+        if (conversation.id !== sessionId) return conversation;
+        next = {
+          ...conversation,
+          ...(patch.title !== undefined ? { title: patch.title } : {}),
+          ...(patch.scopeKind !== undefined ? { scopeKind: patch.scopeKind as Conversation["scopeKind"] } : {}),
+          ...(patch.scopeId !== undefined ? { scopeId: patch.scopeId } : {}),
+          archivedAt: patch.archived === undefined ? conversation.archivedAt : patch.archived ? new Date().toISOString() : null,
+          updatedAt: new Date().toISOString(),
+        };
+        return next;
+      });
+      writeSeedSessions(store);
+      if (!next) throw new Error(`Unknown session: ${sessionId}`);
+      return clone(next);
+    },
+
+    async loadProfile() {
+      return clone(readStore<SelfProfile>(PROFILE_KEY, demoProfile()));
+    },
+
+    async patchProfile(patch) {
+      const current = readStore<SelfProfile>(PROFILE_KEY, demoProfile());
+      const next: SelfProfile = {
+        ...current,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      writeStore(PROFILE_KEY, next);
+      return clone(next);
+    },
+
+    async loadTeam() {
+      // The demo has one human principal; agents are agents, not teammates.
+      return clone([
+        {
+          id: DEMO_PRINCIPAL_ID,
+          displayName: "Alex Rivera",
+          email: "alex@fieldstone.studio",
+          role: "owner",
+          isSelf: true,
+        },
+      ]);
+    },
+
+    async loadFiles(scope) {
+      // Mirrors the adapter's privacy rule: private rows only appear in the
+      // owner's "mine" scope; team/shared never include anyone's private rows.
+      const rows = allFileRows().filter((file) =>
+        scope === "mine"
+          ? file.principalId === DEMO_PRINCIPAL_ID
+          : scope === "shared"
+            ? file.visibility === "shared" && file.principalId !== DEMO_PRINCIPAL_ID
+            : file.visibility === "shared",
+      );
+      const folders =
+        scope === "shared"
+          ? []
+          : world.folders.map((folder) => ({ ...folder }));
+      return clone({ scope, folders, files: rows });
+    },
+
+    async createFile(input) {
+      const now = new Date().toISOString();
+      const file: ProfileFile = {
+        id: nextId("file-live"),
+        folderId: input.folderId ?? "",
+        name: input.name,
+        kind: input.kind ?? "doc",
+        size: input.size ?? "—",
+        updatedAt: now,
+        owner: "Alex Rivera",
+        summary: input.summary ?? "",
+        personIds: input.personIds ?? [],
+        ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+        ...(input.octoFileId !== undefined ? { octoFileId: input.octoFileId } : {}),
+        principalId: DEMO_PRINCIPAL_ID,
+        // Private by default, exactly like the Octo adapter.
+        visibility: input.visibility ?? "private",
+        links: [],
+      };
+      writeStore(FILES_KEY, [...createdFiles(), file]);
+      return clone({
+        file,
+        uploadUrl: "/api/files",
+        uploadNote:
+          "Demo mode: metadata only. In owner mode the bytes go to Octo Files (MCP upload_file / ingest_document or REST /api/files) — Octo stays canonical.",
+      });
+    },
+
+    async linkFile(fileId, link) {
+      const file = allFileRows().find((item) => item.id === fileId);
+      if (!file) throw new Error(`Unknown file: ${fileId}`);
+      const existing = storedLinks();
+      const mine = existing[fileId] ?? [];
+      const found = mine.find(
+        (item) => item.entityKind === link.entityKind && item.entityId === link.entityId,
+      );
+      if (found) return clone(found);
+      const entry: FileLink = {
+        id: nextId("link-live"),
+        fileId,
+        entityKind: link.entityKind,
+        entityId: link.entityId,
+        principalId: DEMO_PRINCIPAL_ID,
+      };
+      writeStore(LINKS_KEY, { ...existing, [fileId]: [...mine, entry] });
+      return clone(entry);
+    },
+
+    async loadNotes() {
+      // Own notes (whatever their visibility) plus the shared demo notes.
+      const own = createdNotes().map((entry) => entry.note);
+      return clone(
+        [...own, ...world.notes].sort(
+          (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
+        ),
+      );
+    },
+
+    async createNote(input) {
+      const note: Note = {
+        id: nextId("note-live"),
+        title: input.title,
+        kind: input.kind ?? "note",
+        at: new Date().toISOString(),
+        body: input.body,
+        personIds: input.personIds ?? [],
+        ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+        ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
+      };
+      const entry: StoredNote = {
+        note,
+        visibility: input.visibility ?? "private",
+        principalId: DEMO_PRINCIPAL_ID,
+      };
+      writeStore(NOTES_KEY, [...createdNotes(), entry]);
+      return clone(note);
+    },
+
+    async loadRetros() {
+      return clone(world.retrospectives);
     },
 
     async logActivity(input) {

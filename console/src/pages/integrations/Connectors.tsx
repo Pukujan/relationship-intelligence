@@ -37,6 +37,19 @@ const providerIcon: Record<ConnectorProvider, typeof Mail> = {
 const Connectors = () => {
   const { world, status, error, reload, connectConnector } = useData();
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [webResults, setWebResults] = useState<{ title: string; url: string; snippet: string }[]>([]);
+  const [webBusy, setWebBusy] = useState(false);
+
+  const testWeb = async () => {
+    setWebBusy(true);
+    try {
+      const r = await fetch("/api/web-search?q=relationship+intelligence+crm");
+      const body = (await r.json()) as { results?: { title: string; url: string; snippet: string }[] };
+      setWebResults(body.results ?? []);
+    } finally {
+      setWebBusy(false);
+    }
+  };
 
   if (status === "loading") return <PageSkeleton rows={4} />;
   if (status === "error" || !world) {
@@ -76,6 +89,31 @@ const Connectors = () => {
 
   return (
     <div className="space-y-5">
+      <div className="mb-4 rounded-xl border border-border/70 bg-surface-1/60 p-3">
+        <p className="eyebrow mb-2">What is actually wired</p>
+        <div className="flex flex-wrap gap-1.5 text-[10.5px]">
+          <span className="rounded-full border border-run/30 bg-run/10 px-2 py-0.5 text-run">TinyFish web research: live (unverified until sourced)</span>
+          <span className="rounded-full border border-border/70 px-2 py-0.5 text-muted-foreground">LinkedIn: session proof exists (collector), wiring pending #12</span>
+          <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-warn">Gmail / Calendar: needs Google scopes + OAuth client (owner action)</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => void testWeb()}
+          disabled={webBusy}
+          className="focus-ring mt-2 rounded-md border border-border/70 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+        >
+          {webBusy ? "Searching…" : "Test web search"}
+        </button>
+        {webResults.length ? (
+          <div className="mt-2 space-y-1">
+            {webResults.map((r) => (
+              <p key={r.url} className="truncate text-[11px] text-muted-foreground">
+                <span className="text-foreground/80">{r.title}</span> · {r.snippet.slice(0, 90)} · <span className="text-amber-400">unverified</span>
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </div>
       <PageHeader
         eyebrow="Integrations"
         title="Connectors"

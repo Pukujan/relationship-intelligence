@@ -15,6 +15,8 @@ import { createServer } from "node:http";
 import { z } from "zod";
 import { endSpan, recordEvals, startSpan } from "./telemetry.ts";
 import { queryRag, ragPromptBlock } from "./rag.ts";
+import { webSearch, webPromptBlock } from "./web.ts";
+import { PartSchema, sanitizeArtifactHtml } from "../src/data/sessionTypes.ts";
 import {
   askWithFailover,
   cooldowns,
@@ -54,6 +56,8 @@ const CopilotRequestSchema = z.object({
   principalId: z.string().max(64).optional(),
   model: z.string().max(80).optional(),
   reasoning: z.enum(["off", "low", "medium", "high"]).optional(),
+  sessionId: z.string().max(60).optional(),
+  history: z.array(z.string().max(1200)).max(6).optional(),
 });
 
 // The schema accepts generously and the handler clips to display limits: a
@@ -85,6 +89,8 @@ const DesignRequestSchema = z.object({
   principalId: z.string().max(64).optional(),
   model: z.string().max(80).optional(),
   reasoning: z.enum(["off", "low", "medium", "high"]).optional(),
+  sessionId: z.string().max(60).optional(),
+  history: z.array(z.string().max(1200)).max(6).optional(),
 });
 
 const ModelDesignSchema = z.object({
@@ -263,10 +269,11 @@ async function handleCopilot(body: unknown) {
   });
   try {
     const matches = await queryRag(request.prompt);
+    const web = matches.length ? [] : await webSearch(request.prompt);
     const routed = await askWithFailover(
       resolveRoute(request.model, "ask"),
       COPILOT_SYSTEM,
-      `USER REQUEST:\n${request.prompt}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}`,
+      `USER REQUEST:\n${request.prompt}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}${webPromptBlock(web)}${historyBlock(request.history)}`,
       (request.reasoning ?? "off") as Reasoning,
       REQUEST_TIMEOUT_MS,
     );
@@ -311,6 +318,7 @@ async function handleCopilot(body: unknown) {
       agents_resolved: agents.length,
       steps: steps.length,
       rag_matches: matches.length,
+      web_matches: web.length,
     });
     void recordEvals(spanId, [
       { name: "schema_valid", score: 1, label: "pass", explanation: "model answer parsed and clipped to contract" },
@@ -351,10 +359,11 @@ async function handleDesign(body: unknown) {
   });
   try {
   const matches = await queryRag(request.goal);
+  const web = matches.length ? [] : await webSearch(request.goal);
   const routed = await askWithFailover(
     resolveRoute(request.model, "design"),
     DESIGN_SYSTEM,
-    `HUMAN GOAL:\n${request.goal}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}`,
+    `HUMAN GOAL:\n${request.goal}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}${webPromptBlock(web)}`,
     (request.reasoning ?? "off") as Reasoning,
     REQUEST_TIMEOUT_MS,
   );
@@ -395,6 +404,7 @@ async function handleDesign(body: unknown) {
       unverified_flags: unverified.length,
       project_reused: projectId ? 1 : 0,
       rag_matches: matches.length,
+      web_matches: web.length,
     });
     void recordEvals(spanId, [
       { name: "schema_valid", score: 1, label: "pass", explanation: "design parsed and clipped to contract" },
@@ -427,6 +437,164 @@ async function handleDesign(body: unknown) {
     });
     throw error;
   }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* RI-0010: streaming session turns                                    */
+/* ------------------------------------------------------------------ */
+
+const PARTS_SYSTEM = `You are the orchestrator of "Mission Control", a relationship-intelligence console.
+Answer from the WORLD DIGEST and HYBRID SEARCH MATCHES only; never invent ids, people, or facts.
+Return ONLY a JSON object: {"parts": [ ... ]} where each part is one of:
+ {"kind":"text","text":"...","evidence":[{"label":"source","detail":"..."}]}
+ {"kind":"table","columns":["..."],"rows":[["..."]]}
+ {"kind":"kpi","label":"...","value":"...","delta":"...","direction":"up|down|flat"}
+ {"kind":"sparkline","label":"...","series":[numbers]}
+ {"kind":"graph","nodes":[{"id":"digest id","label":"name","kind":"person|company"}],"edges":[{"from":"id","to":"id","label":"relation"}]}
+ {"kind":"timeline","entries":[{"at":"ISO date","label":"...","detail":"..."}]}
+ {"kind":"proposal","design":{missionName,missionSummary,projectId?,projectName?,objectiveName,objectiveTarget,horizon,dueInDays,agentIds,autonomy,planSteps:[{label,detail,agentId?}],rationale,unverified:[]}}
+ {"kind":"approval","approvalId":"pending approval id from digest"}
+ {"kind":"artifact","title":"...","html":"<static html, no scripts>","sources":[{"label":"...","detail":"..."}]}
+Prefer visual parts (table, kpi, sparkline, graph, timeline) over long prose when the data supports them.
+Use 2-6 parts. Every factual part carries evidence or is flagged unverified in text. Proposals are held for
+human approval; nothing sends. Artifacts are static presentations of validated data only.`;
+
+const ChatStreamSchema = z.object({
+  prompt: z.string().min(1).max(2_000),
+  digest: z.unknown(),
+  model: z.string().max(80).optional(),
+  reasoning: z.enum(["off", "low", "medium", "high"]).optional(),
+  sessionId: z.string().max(60).optional(),
+  history: z.array(z.string().max(1200)).max(6).optional(),
+});
+
+/**
+ * Single-writer turn queue (#25): turns on one session serialize, so concurrent
+ * submits can interleave reads but never writes. Framework-agnostic — the same
+ * queue is required whether the turn pipeline is XState or LangGraph.
+ */
+const turnQueues = new Map<string, Promise<unknown>>();
+const enqueueTurn = <T,>(key: string, run: () => Promise<T>): Promise<T> => {
+  const prev = turnQueues.get(key) ?? Promise.resolve();
+  const next = prev.then(run, run);
+  turnQueues.set(key, next.catch(() => undefined));
+  return next;
+};
+
+const historyBlock = (history?: string[]) =>
+  history && history.length
+    ? `\n\nCONVERSATION SO FAR in this thread (continue from it, do not restart):\n${history
+        .map((h, i) => `${i + 1}. ${h}`)
+        .join("\n")}`
+    : "";
+
+function groundPart(part: z.infer<typeof PartSchema>, digest: Digest): boolean {
+  if (part.kind === "graph") {
+    return part.nodes.every((node) =>
+      node.kind === "company"
+        ? knownId(digest, "company", node.id)
+        : knownId(digest, "person", node.id),
+    );
+  }
+  if (part.kind === "approval") return knownId(digest, "approval", part.approvalId);
+  if (part.kind === "proposal") {
+    const design = ModelDesignSchema.safeParse(part.design);
+    if (!design.success) return false;
+    return design.data.agentIds.every((id) => knownId(digest, "agent", id));
+  }
+  return true;
+}
+
+async function handleChatStream(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  body: unknown,
+) {
+  const request = ChatStreamSchema.parse(body);
+  const digest = readDigest(request.digest);
+  return enqueueTurn(request.sessionId ?? "anonymous", () => runTurn(req, res, request, digest));
+}
+
+async function runTurn(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  request: z.infer<typeof ChatStreamSchema>,
+  digest: Digest,
+) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  const controller = new AbortController();
+  req.on("close", () => controller.abort());
+
+  const started = Date.now();
+  const span = startSpan("copilot.session-turn", {
+    prompt_chars: request.prompt.length,
+    digest_people: digest.people.length,
+    reasoning: request.reasoning ?? "off",
+  });
+  let dropped = 0;
+  let partCount = 0;
+  try {
+    send("phase", { label: "Scoping the world digest" });
+    const matches = await queryRag(request.prompt);
+    const web = matches.length ? [] : await webSearch(request.prompt);
+    send("phase", { label: matches.length ? `Hybrid search: ${matches.length} matches` : "Hybrid search: index thin" });
+    send("phase", { label: "Routing to a provider" });
+    const routed = await askWithFailover(
+      resolveRoute(request.model, "ask"),
+      PARTS_SYSTEM,
+      `USER REQUEST:\n${request.prompt}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}${webPromptBlock(web)}${historyBlock(request.history)}`,
+      (request.reasoning ?? "off") as Reasoning,
+      REQUEST_TIMEOUT_MS,
+      controller.signal,
+    );
+    send("phase", { label: `Validating parts from ${routed.provider}` });
+    const parsed = z.object({ parts: z.array(PartSchema).max(12) }).parse(JSON.parse(routed.content));
+    for (const rawPart of parsed.parts) {
+      if (controller.signal.aborted) break;
+      if (!groundPart(rawPart, digest)) {
+        dropped++;
+        continue;
+      }
+      const part =
+        rawPart.kind === "artifact"
+          ? { ...rawPart, html: sanitizeArtifactHtml(rawPart.html) }
+          : rawPart.kind === "mermaid"
+            ? { ...rawPart, source: rawPart.source.replace(/```/g, "").replace(/<\/script>/gi, "<\\/script>").slice(0, 4000) }
+            : rawPart;
+      partCount++;
+      send("part", part);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    const latency = Date.now() - started;
+    const spanId = endSpan(span, true, {
+      latency_ms: latency,
+      provider: routed.provider,
+      model: routed.model,
+      parts: partCount,
+      dropped_parts: dropped,
+      failovers: routed.failovers,
+    });
+    void recordEvals(spanId, [
+      { name: "schema_valid", score: 1, label: "pass", explanation: "parts parsed against the part contract" },
+      { name: "ids_grounded", score: dropped === 0 ? 1 : 0, label: dropped === 0 ? "pass" : "fail", explanation: `${dropped} part(s) referenced ids absent from the digest` },
+      { name: "sandbox_safe", score: 1, label: "pass", explanation: "artifact html sanitized server-side before streaming" },
+    ]);
+    send("done", { provider: routed.provider, model: routed.model, reasoning: request.reasoning ?? "off", parts: partCount, dropped });
+  } catch (error) {
+    if (!controller.signal.aborted) {
+      endSpan(span, false, { error: error instanceof Error ? error.message.slice(0, 200) : "unknown" });
+      send("error", { message: error instanceof Error ? error.message : "turn failed" });
+    }
+  }
+  res.end();
 }
 
 /* ------------------------------------------------------------------ */
@@ -463,6 +631,12 @@ const server = createServer(async (req, res) => {
     );
   };
   try {
+    if (req.method === "GET" && url.pathname === "/api/web-search") {
+      const q = url.searchParams.get("q") ?? "";
+      json(res, 200, { results: await webSearch(q, 6) });
+      finish(200, "web search");
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/models") {
       json(res, 200, { providers: await listModels(), cooldowns: cooldowns() });
       finish(200, "models");
@@ -478,6 +652,11 @@ const server = createServer(async (req, res) => {
       };
       json(res, 200, value);
       finish(200, "health");
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/chat-stream") {
+      await handleChatStream(req, res, await readBody(req));
+      finish(200, "session turn streamed");
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/copilot") {

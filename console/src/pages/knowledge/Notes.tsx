@@ -4,13 +4,17 @@ import {
   ArrowRight,
   CalendarDays,
   NotebookPen,
+  Plus,
   Search,
   Sparkles,
   Users,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
+import { createLocalSeedSource } from "@/data/source";
+import { createOctoSource } from "@/data/octoSource";
 import {
   agentById,
   projectById,
@@ -30,6 +34,137 @@ import {
 import { Pill } from "@/components/work";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import type { NoteKind } from "@/data/types";
+
+/**
+ * RI-0010 task C: note creation through the source seam. Owner mode writes a
+ * principal-private ri_console.note row via the adapter — a note is the
+ * person's record until they explicitly share it.
+ */
+const NewNoteDialog = ({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: () => void;
+}) => {
+  const { session } = useData();
+  const source = useMemo(
+    () =>
+      session?.mode === "owner"
+        ? createOctoSource(() => session.workspaceId)
+        : createLocalSeedSource(),
+    [session?.mode, session?.workspaceId],
+  );
+  const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<NoteKind>("note");
+  const [body, setBody] = useState("");
+  const [shared, setShared] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!title.trim()) return;
+    setBusy(true);
+    try {
+      await source.createNote({
+        title: title.trim(),
+        kind,
+        body: body.trim(),
+        visibility: shared ? "shared" : "private",
+      });
+      toast.success(
+        shared ? "Note saved and shared with the team." : "Note saved — private to you.",
+      );
+      setTitle("");
+      setBody("");
+      setShared(false);
+      onOpenChange(false);
+      onCreated();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Could not save note.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>New note</DialogTitle>
+          <DialogDescription>
+            Private to you by default. Share it only when you choose to.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="knowledge-note-title" className="text-[11px]">Title</Label>
+            <Input
+              id="knowledge-note-title"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="e.g. Renewal call — follow-ups"
+              className="h-9 rounded-lg text-[12px]"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="knowledge-note-kind" className="text-[11px]">Kind</Label>
+            <select
+              id="knowledge-note-kind"
+              value={kind}
+              onChange={(event) => setKind(event.target.value as NoteKind)}
+              className="focus-ring h-9 w-full rounded-lg border border-border/70 bg-surface-1 px-2 text-[12px]"
+            >
+              <option value="note">Note</option>
+              <option value="meeting">Meeting note</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="knowledge-note-body" className="text-[11px]">Body</Label>
+            <Textarea
+              id="knowledge-note-body"
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+              placeholder="What was said, decided, or noticed…"
+              className="min-h-[96px] rounded-lg text-[12px]"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={shared}
+              onChange={(event) => setShared(event.target.checked)}
+              className="focus-ring h-3.5 w-3.5 rounded border-border"
+            />
+            Share with the team
+          </label>
+        </div>
+        <DialogFooter>
+          <Button
+            size="sm"
+            className="rounded-lg"
+            disabled={!title.trim() || busy}
+            onClick={() => void submit()}
+          >
+            {busy ? "Saving…" : "Save note"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 const Notes = () => {
   const { world, status, error, reload } = useData();
@@ -38,6 +173,7 @@ const Notes = () => {
   const focusId = searchParams.get("focus");
   const [filter, setFilter] = useState<"all" | "meeting" | "note">("all");
   const [query, setQuery] = useState("");
+  const [newNoteOpen, setNewNoteOpen] = useState(false);
 
   const notes = useMemo(() => {
     if (!world) return [];
@@ -78,16 +214,32 @@ const Notes = () => {
         title="Notes & meeting notes"
         description="What was said, who was in the room, and which project it moved. Meeting notes stay attached to the people they mention."
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 gap-1.5 rounded-lg text-[12px]"
-            onClick={() => openCopilot("Summarise my meeting notes this week")}
-          >
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
-            Summarise the week
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5 rounded-lg text-[12px]"
+              onClick={() => setNewNoteOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New note
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5 rounded-lg text-[12px]"
+              onClick={() => openCopilot("Summarise my meeting notes this week")}
+            >
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              Summarise the week
+            </Button>
+          </>
         }
+      />
+      <NewNoteDialog
+        open={newNoteOpen}
+        onOpenChange={setNewNoteOpen}
+        onCreated={reload}
       />
 
       <div className="flex flex-wrap items-center gap-2">

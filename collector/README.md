@@ -14,9 +14,11 @@ execution. If it passes, slice 2 builds the real contract on top.
 pnpm install --store-dir "$HOME/Library/pnpm/store"
 PLAYWRIGHT_BROWSERS_PATH=/tmp/ri-daemon-proof/browsers pnpm exec playwright install chromium
 
-pnpm signin   # opens a browser window; a human signs into LinkedIn manually
-pnpm fetch    # one read-only visit to the signed-in user's own profile
-pnpm check    # fresh process: did the session survive the restart?
+pnpm run signin   # stealth (patchright) window; a human signs into LinkedIn manually
+pnpm run fetch    # one read-only visit to the signed-in user's own profile
+pnpm run check    # fresh process: did the session survive the restart?
+
+Note: `pnpm fetch` alone is a built-in pnpm command, not this script — always `pnpm run fetch`.
 ```
 
 Each command is a separate process against the same profile directory, so
@@ -37,6 +39,11 @@ Everything sensitive stays outside the repository, under
 `/tmp` is deliberate for the proof: it is wiped on reboot, so a live
 session does not linger on the machine after the experiment. The real
 daemon will choose a durable, permission-restricted location.
+
+Owner chose to KEEP the signed-in profile (2026-11-19). A durable private copy
+lives at `~/.cache/ri-daemon-proof` (0700). Reuse it with:
+`RI_PROOF_ROOT=$HOME/.cache/ri-daemon-proof pnpm run check` (or signin/fetch).
+Delete that directory to revoke the persisted session.
 
 ## Boundaries
 

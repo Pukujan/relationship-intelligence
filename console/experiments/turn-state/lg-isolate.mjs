@@ -1,0 +1,11 @@
+import { MemorySaver } from "@langchain/langgraph";
+import { buildGraph } from "./langgraph-turn.mjs";
+const saver = new MemorySaver();
+const g1 = buildGraph(saver, { interruptBefore: ["validate"] });
+console.log("invoking g1...");
+const mid = await g1.invoke({ detour: false }, { configurable: { thread_id: "iso1" } });
+console.log("g1 done:", mid.stage, JSON.stringify(mid.log));
+const g2 = buildGraph(saver);
+console.log("invoking g2 resume...");
+const fin = await g2.invoke(null, { configurable: { thread_id: "iso1" } });
+console.log("g2 done:", fin.stage, JSON.stringify(fin.log));

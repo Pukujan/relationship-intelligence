@@ -76,10 +76,36 @@ jobs:
       - name: Build
         run: pnpm --dir app run build
 
+  console:
+    name: Console types, lint, machines, orphans and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+      - name: Install console dependencies
+        run: pnpm install --dir console --frozen-lockfile
+      - name: Typecheck
+        run: pnpm --dir console typecheck
+      - name: Lint
+        run: pnpm --dir console exec eslint .
+      - name: Machine contracts
+        run: pnpm --dir console test:machines
+      - name: Orphan check
+        run: node console/scripts/check-orphans.mjs
+      - name: Build
+        run: pnpm --dir console build
+
   gates:
     name: gates
     if: always()
-    needs: [planning, train, app]
+    needs: [planning, train, app, console]
     runs-on: ubuntu-latest
     steps:
       - name: Require upstream jobs green
@@ -88,4 +114,35 @@ jobs:
           test "${{ needs.planning.result }}" = "success"
           test "${{ needs.train.result }}" = "success"
           test "${{ needs.app.result }}" = "success"
+          test "${{ needs.console.result }}" = "success"
           echo "All required upstream jobs passed."
+
+  contract:
+    name: Live hostname contract
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RI_PUBLIC_URL != ''
+    needs: gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the deployed console
+        env:
+          URL: ${{ vars.RI_PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 12 --retry-delay 20 "$URL/app-api/health" | grep -q '"status":"ok"'
+          curl -fsS "$URL/console/" | grep -q '<div id="root"'
+          echo "Live console and adapter healthy at $URL"
+
+  auto-merge:
+    name: Arm auto-merge
+    if: github.event_name == 'pull_request' && github.actor == 'Pukujan'
+    needs: gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Enable squash auto-merge on the PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"

@@ -150,8 +150,18 @@ export const missionPlanProgress = (world: World, mission: Mission) => {
   return Math.round((done / plan.steps.length) * 100);
 };
 
-export const buildWorldDigest = (world: World): WorldDigest => {
-  const people = relevantPeople(world);
+export const buildWorldDigest = (
+  world: World,
+  options?: { includePeopleIds?: string[] },
+): WorldDigest => {
+  // A pinned scope must always reach the model, even when the person is not
+  // in the "relevant" subset (cold/referenced/recent). Otherwise a scoped tab
+  // silently sends an empty digest.
+  const include = new Set(options?.includePeopleIds ?? []);
+  const people = [
+    ...relevantPeople(world),
+    ...world.people.filter((person) => include.has(person.id) && !relevantPeople(world).some((p) => p.id === person.id)),
+  ];
   const companyIds = new Set(people.map((person) => person.companyId));
   for (const project of world.projects) {
     for (const id of project.companyIds) companyIds.add(id);
