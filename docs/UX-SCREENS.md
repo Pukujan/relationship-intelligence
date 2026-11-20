@@ -1,6 +1,6 @@
 # UX — Screen-by-screen content contract (RI-0017 / Slice 5)
 
-**Status:** plan. Answers "what is on each screen at each version, what UX
+**Status:** plan; redesign gated by research issue #42 (RI-0017) — no redesign implementation before docs/RESEARCH-UX.md + owner sign-off. Answers "what is on each screen at each version, what UX
 system, where are the charts". Companion: `PDD-WORKSPACES-ROLES.md` (flows),
 `SDD-WORKSPACES-ROLES.md` (enforcement). Every component named below already
 exists in `console/src`; nothing here invents a new dependency.

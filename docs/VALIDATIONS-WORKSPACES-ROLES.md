@@ -1,6 +1,6 @@
 # Validations — Workspaces, roles, tenancy (RI-0017)
 
-**Status:** hold-out suite written BEFORE implementation, per owner direction.
+**Status:** hold-out suite written BEFORE implementation, per owner direction. Issue log: #37-#42; redesign relations U1-U3 gated by #42.
 `scripts/validate_tenancy.py` is deliberately **not imported by any product
 code**; CI runs it as a contract job after deploy. It is red today where the
 SDD's invariants are not yet enforced — that red is the specification.

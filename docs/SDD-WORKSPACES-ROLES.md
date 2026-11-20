@@ -1,6 +1,6 @@
 # SDD — Workspaces, roles, and permissions (RI-0017)
 
-**Status:** plan, not implemented. Owner direction 2026-11-19: plan first, write
+**Status:** plan, not implemented. Issue log: #37 (RI-0012), #38 (RI-0013); redesign slices #39/#40/#41 are blocked by research gate #42 (RI-0017). Owner direction 2026-11-19: plan first, write
 SDD/PDD and metamorphic/hold-out validations first, then implement in slices.
 Companion: `PDD-WORKSPACES-ROLES.md`, `VALIDATIONS-WORKSPACES-ROLES.md`,
 hold-out suite `scripts/validate_tenancy.py` (red until Slice 1 lands).
