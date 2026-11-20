@@ -19,7 +19,7 @@
  * re-validates at Octo.
  */
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
@@ -47,11 +47,15 @@ import {
   addProposal,
   decideApproval,
   logActivity,
+  octoSql,
   patchDoc,
   readWorld,
 } from "./world.js";
 
 const MAX_BODY_BYTES = 8 * 1024;
+
+/** SQL literal quoting, same helper as world.ts / sessions.ts. */
+const lit = (value: unknown) => `'${String(value).replace(/'/g, "''")}'`;
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -423,7 +427,8 @@ export async function handleRequest(
 
   if (path === "/app-api/connections" && req.method === "GET") {
     const session = await readSession(req, res, env);
-    if (!session.octoToken) {
+    // Our own Google flow seals a principalId with no Octo token; accept both.
+    if (!session.octoToken && !session.principalId) {
       sendJson(res, 401, { error: "UNAUTHENTICATED" });
       return;
     }
@@ -437,7 +442,7 @@ export async function handleRequest(
     // user with no connections gets an empty list rather than an error.
     try {
       const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 };
-      await fetchPrincipal(config, session.octoToken); // still valid?
+      await fetchPrincipal(config, session.octoToken ?? env.OCTO_API_KEY ?? ""); // still valid?
       session.lastSeenAt = Date.now();
       await session.save();
       sendJson(res, 200, { connections: [] });
@@ -479,6 +484,7 @@ export async function handleRequest(
     "/app-api/agent-status",
     "/app-api/connector-status",
     "/app-api/plugin-installed",
+    "/app-api/projects",
   ];
   const extraRoutes =
     path === "/app-api/profile" ||
@@ -487,14 +493,16 @@ export async function handleRequest(
     path.startsWith("/app-api/files/") ||
     path === "/app-api/notes" ||
     path === "/app-api/retros" ||
-    path.startsWith("/app-api/schedules");
+    path.startsWith("/app-api/schedules") ||
+    path.startsWith("/app-api/projects/");
   if (
     worldRoutes.includes(path) ||
     path.startsWith("/app-api/sessions") ||
     extraRoutes
   ) {
     const session = await readSession(req, res, env);
-    if (!session.octoToken) {
+    // Our own Google flow seals a principalId with no Octo token; accept both.
+    if (!session.octoToken && !session.principalId) {
       sendJson(res, 401, { error: "UNAUTHENTICATED" });
       return;
     }
@@ -569,7 +577,7 @@ export async function handleRequest(
           200,
           await listConversations(
             config,
-            session.octoToken,
+            session.octoToken ?? env.OCTO_API_KEY ?? "",
             requested,
             principal.id,
           ),
@@ -582,7 +590,7 @@ export async function handleRequest(
           200,
           await createConversation(
             config,
-            session.octoToken,
+            session.octoToken ?? env.OCTO_API_KEY ?? "",
             requested,
             principal.id,
             {
@@ -606,7 +614,7 @@ export async function handleRequest(
             200,
             await getMessages(
               config,
-              session.octoToken,
+              session.octoToken ?? env.OCTO_API_KEY ?? "",
               requested,
               principal.id,
               conversationId,
@@ -620,7 +628,7 @@ export async function handleRequest(
             200,
             await appendMessage(
               config,
-              session.octoToken,
+              session.octoToken ?? env.OCTO_API_KEY ?? "",
               requested,
               principal.id,
               conversationId,
@@ -635,7 +643,7 @@ export async function handleRequest(
             200,
             await patchConversation(
               config,
-              session.octoToken,
+              session.octoToken ?? env.OCTO_API_KEY ?? "",
               requested,
               principal.id,
               conversationId,
@@ -665,7 +673,7 @@ export async function handleRequest(
           200,
           await readWorld(
             config,
-            session.octoToken,
+            session.octoToken ?? env.OCTO_API_KEY ?? "",
             requested,
             principal,
             workspaces,
@@ -679,7 +687,7 @@ export async function handleRequest(
           200,
           await decideApproval(
             config,
-            session.octoToken,
+            session.octoToken ?? env.OCTO_API_KEY ?? "",
             requested,
             principal,
             workspaces,
@@ -702,7 +710,7 @@ export async function handleRequest(
           200,
           await addProposal(
             config,
-            session.octoToken,
+            session.octoToken ?? env.OCTO_API_KEY ?? "",
             requested,
             principal.id,
             body.proposal as Record<string, unknown>,
@@ -716,7 +724,7 @@ export async function handleRequest(
           200,
           await logActivity(
             config,
-            session.octoToken,
+            session.octoToken ?? env.OCTO_API_KEY ?? "",
             requested,
             principal.id,
             body.entry as Record<string, unknown>,
@@ -730,7 +738,7 @@ export async function handleRequest(
           200,
           await patchDoc(
             config,
-            session.octoToken,
+            session.octoToken ?? env.OCTO_API_KEY ?? "",
             requested,
             principal.id,
             "agents",
@@ -749,7 +757,7 @@ export async function handleRequest(
           200,
           await patchDoc(
             config,
-            session.octoToken,
+            session.octoToken ?? env.OCTO_API_KEY ?? "",
             requested,
             principal.id,
             "connectors",
@@ -770,7 +778,7 @@ export async function handleRequest(
           200,
           await patchDoc(
             config,
-            session.octoToken,
+            session.octoToken ?? env.OCTO_API_KEY ?? "",
             requested,
             principal.id,
             "plugins",
@@ -780,6 +788,85 @@ export async function handleRequest(
             },
           ),
         );
+        return;
+      }
+      if (path === "/app-api/projects" && req.method === "POST") {
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        if (!name) {
+          sendJson(res, 400, { error: "BAD_REQUEST" });
+          return;
+        }
+        const id = randomUUID();
+        // Same doc shape applyDesign writes; 'shared' so the whole workspace
+        // sees the container (readOps only surfaces shared rows or own rows).
+        const doc = {
+          id,
+          workspaceId: requested,
+          name,
+          kind: "initiative",
+          status: "active",
+          owner: principal.id,
+          summary: typeof body.summary === "string" ? body.summary.trim() : "",
+          personIds: [],
+          companyIds: [],
+          eventIds: [],
+          startedAt: new Date().toISOString(),
+        };
+        await octoSql(
+          config,
+          session.octoToken ?? env.OCTO_API_KEY ?? "",
+          requested,
+          `INSERT INTO ri_console.project (id, workspace_id, principal_id, visibility, doc)
+           VALUES (${lit(id)}, ${lit(requested)}, ${lit(principal.id)}, 'shared', ${lit(JSON.stringify(doc))}::jsonb)
+           ON CONFLICT (id) DO UPDATE SET doc = EXCLUDED.doc, updated_at = now()`,
+        );
+        sendJson(res, 200, { id });
+        return;
+      }
+      const projectMatch = path.match(/^\/app-api\/projects\/([^/]+)$/);
+      if (projectMatch && req.method === "DELETE") {
+        const projectId = projectMatch[1] ?? "";
+        const token = session.octoToken ?? env.OCTO_API_KEY ?? "";
+        const owns = `workspace_id = ${lit(requested)} AND (principal_id = ${lit(principal.id)} OR visibility = 'shared')`;
+        const existing = await octoSql(
+          config,
+          token,
+          requested,
+          `SELECT id FROM ri_console.project WHERE id = ${lit(projectId)} AND ${owns}`,
+        );
+        if (existing.length === 0) throw new Error("Unknown project");
+        // Plan docs carry missionId, not projectId: remove them through their
+        // missions before the missions themselves disappear.
+        await octoSql(
+          config,
+          token,
+          requested,
+          `DELETE FROM ri_console.plan
+            WHERE ${owns}
+              AND doc->>'missionId' IN (
+                SELECT id FROM ri_console.mission
+                 WHERE ${owns} AND doc->>'projectId' = ${lit(projectId)}
+              )`,
+        );
+        await octoSql(
+          config,
+          token,
+          requested,
+          `DELETE FROM ri_console.mission WHERE ${owns} AND doc->>'projectId' = ${lit(projectId)}`,
+        );
+        await octoSql(
+          config,
+          token,
+          requested,
+          `DELETE FROM ri_console.objective WHERE ${owns} AND doc->>'projectId' = ${lit(projectId)}`,
+        );
+        await octoSql(
+          config,
+          token,
+          requested,
+          `DELETE FROM ri_console.project WHERE id = ${lit(projectId)} AND ${owns}`,
+        );
+        sendJson(res, 200, { id: projectId, deleted: true });
         return;
       }
     } catch (error) {
