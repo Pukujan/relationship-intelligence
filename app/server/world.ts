@@ -293,11 +293,10 @@ export async function readCanonical(
           (max, p) => Math.max(max, strengthOf(p.provenance.strength)),
           0,
         );
-      const lastContact = mine.reduce(
-        (latest, c) =>
-          String(c.validFrom) > latest ? String(c.validFrom) : latest,
-        "",
-      );
+      const lastContact = mine.reduce((latest, c) => {
+        const current = String(c.validFrom ?? "");
+        return current.localeCompare(latest) > 0 ? current : latest;
+      }, "");
       const quietDays = lastContact
         ? Math.max(
             0,
