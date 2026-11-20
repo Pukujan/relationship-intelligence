@@ -166,6 +166,29 @@ Blocked/uncertain:
 Next:
 - After the deploy, repeat the live guest check against business.design-bakery.com and expect 403; then return to routing Talk and the call through the live model.
 
+### 2026-11-20 22:51:32 UTC — agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85","blocked":["A real microphone and real audio are still untested, because the test browser has neither. Interrupting the copilot by voice while it speaks is not built."],"changed":["none"],"completed":["The Voice page could hear and speak but not hold a conversation; Talk now answers from the live model and reopens the microphone for follow-ups, a call answers questions about the approval being read, and a loosely worded decision is read back and recorded only on a clear yes."],"decisions":["The model's reply carries an intent that can only trigger a read-back; the write still needs the person's own word through the strict parser. The voice chain leads with Claude Haiku because it answered in about 3.5 seconds against 7 to 14 for Qwen flash."],"evidence":["With a stub recogniser on a local build, Talk answered two linked questions from Claude Haiku and stopped on 'thanks'; on a call the top 3 of 13 approvals were read, a question was answered without advancing, a loose approval was read back and recorded on 'yes', and a second was dropped on 'no'. The console's typecheck, contract tests, orphan check and build pass."],"evidence_class":"observed","next_action":"After the deploy, the owner tries Talk in Chrome on the live site, signed in; then decide between importing the owner's relationship data and the pre-meeting brief.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-20T22:51:32Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"2b5d20a08a6af96608e9693510e266b74fd3d93c1e28b8e2688aa3937108b8e8","request_id":"dd906e6c718b435e8e6596a79d66a636","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- The Voice page could hear and speak but not hold a conversation; Talk now answers from the live model and reopens the microphone for follow-ups, a call answers questions about the approval being read, and a loosely worded decision is read back and recorded only on a clear yes.
+
+Evidence:
+- With a stub recogniser on a local build, Talk answered two linked questions from Claude Haiku and stopped on 'thanks'; on a call the top 3 of 13 approvals were read, a question was answered without advancing, a loose approval was read back and recorded on 'yes', and a second was dropped on 'no'. The console's typecheck, contract tests, orphan check and build pass.
+
+Decisions:
+- The model's reply carries an intent that can only trigger a read-back; the write still needs the person's own word through the strict parser. The voice chain leads with Claude Haiku because it answered in about 3.5 seconds against 7 to 14 for Qwen flash.
+
+Changed:
+- none
+
+Blocked/uncertain:
+- A real microphone and real audio are still untested, because the test browser has neither. Interrupting the copilot by voice while it speaks is not built.
+
+Next:
+- After the deploy, the owner tries Talk in Chrome on the live site, signed in; then decide between importing the owner's relationship data and the pre-meeting brief.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
