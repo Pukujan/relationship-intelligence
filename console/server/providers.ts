@@ -1,12 +1,15 @@
 /**
  * Provider pool, model chooser, reasoning control, and rate-limit-aware routing.
  *
- * Three routes are configured from the environment (keys never leave the
- * server): Qwen/Alibaba (Token Plan), InferHub, and the WorkBuddy router reached
- * through Octo's vault proxy. Routing is explicit policy, not vendor preference:
- * a request may name a route, otherwise a per-tier default chain applies, and a
- * rate-limited or failing provider is skipped for a cooldown window instead of
- * burning retries against it.
+ * Routes are configured from the environment (keys never leave the server):
+ * Qwen/Alibaba (Token Plan), InferHub, the WorkBuddy router, Anthropic and
+ * OpenRouter's free models. Where a vault working key (`*_VAULT_KEY`, an
+ * `octo_tmp_…` lease) is set, the vendor is reached through Octo's vault proxy
+ * and this server never holds the vendor's own secret (#62). Routing is explicit
+ * policy, not vendor preference: a request may name a route, otherwise a
+ * per-tier chain applies (overridable with `COPILOT_CHAIN_ASK` /
+ * `COPILOT_CHAIN_DESIGN`), and a rate-limited or failing provider is skipped
+ * for a cooldown window instead of burning retries against it.
  *
  * The ranking policy here is deliberately small and readable. The
  * inference-recommendation-engine package is the intended future advisor for
@@ -23,7 +26,16 @@ export interface Provider {
   baseUrl: string;
   key: string;
   reasoning: "effort" | "thinking" | "none";
+  /** Recommended models: listed first in the menu and used when a chain names none. */
   seedModels: string[];
+  /** How the key is sent. Defaults to `Authorization: Bearer`. */
+  auth?: "bearer" | "x-api-key";
+  /** False for vendors that reject OpenAI's `response_format: json_object`. */
+  jsonMode?: boolean;
+  /** False for vendors whose models reject a `temperature` setting. */
+  temperature?: boolean;
+  /** When set, only matching model ids are offered or routed. */
+  allow?: RegExp;
 }
 
 export interface Route {
@@ -32,6 +44,18 @@ export interface Route {
 }
 
 const env = process.env;
+
+/** Octo's vault proxy, path form: the upstream URL follows the proxy path. */
+const VAULT_PROXY = (env.OCTO_VAULT_PROXY_URL ?? "https://octodb.design-bakery.com/api/vault/proxy").replace(/\/$/, "");
+const viaVault = (upstream: string) => `${VAULT_PROXY}/${upstream}`;
+
+export const authHeaders = (provider: Provider): Record<string, string> =>
+  provider.auth === "x-api-key"
+    ? { "x-api-key": provider.key }
+    : { Authorization: `Bearer ${provider.key}` };
+
+export const allowed = (provider: Provider, model: string) =>
+  !provider.allow || provider.allow.test(model);
 
 export const providers: Provider[] = ([
   {
@@ -45,8 +69,11 @@ export const providers: Provider[] = ([
   {
     id: "inferhub",
     displayName: "InferHub",
-    baseUrl: (env.INFERHUB_BASE_URL ?? "https://api.inferhub.dev/v1").replace(/\/$/, ""),
-    key: env.IINFERHUB_API_KEY ?? "",
+    // A vault working key wins; the raw key is the fallback for older setups.
+    baseUrl: env.INFERHUB_VAULT_KEY
+      ? viaVault("https://api.inferhub.dev/v1")
+      : (env.INFERHUB_BASE_URL ?? "https://api.inferhub.dev/v1").replace(/\/$/, ""),
+    key: env.INFERHUB_VAULT_KEY ?? env.IINFERHUB_API_KEY ?? "",
     reasoning: "effort",
     seedModels: ["cb/deepseek-v4.1-flash-sg", "ali/qwen4-max", "ali/qwen3.8-omni-flash"],
   },
@@ -56,7 +83,30 @@ export const providers: Provider[] = ([
     baseUrl: (env.WORKBUDDY_BASE_URL ?? "https://octodb.design-bakery.com/api/vault/proxy/v1").replace(/\/$/, ""),
     key: env.WORKBUDDY_ROUTER_KEY ?? "",
     reasoning: "effort",
-    seedModels: [],
+    seedModels: ["hy4flash-free", "hy4flash", "deepseek-v4.1-flash-sg"],
+  },
+  {
+    id: "anthropic",
+    displayName: "Claude · Anthropic (Octo vault proxy)",
+    baseUrl: viaVault("https://api.anthropic.com/v1"),
+    key: env.ANTHROPIC_VAULT_KEY ?? "",
+    reasoning: "none",
+    seedModels: ["claude-haiku-5-5", "claude-sonnet-5-5"],
+    auth: "x-api-key",
+    jsonMode: false,
+    temperature: false,
+    // The owner's vault item allows Haiku and Sonnet only.
+    allow: /haiku|sonnet/,
+  },
+  {
+    id: "openrouter",
+    displayName: "OpenRouter free models (Octo vault proxy)",
+    baseUrl: viaVault("https://openrouter.ai/api/v1"),
+    key: env.OPENROUTER_VAULT_KEY ?? "",
+    reasoning: "none",
+    // The owner's rule: always an exact free model, never an auto-router.
+    seedModels: ["nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3.5-super-vl:free"],
+    allow: /:free$/,
   },
 ] as Provider[]).filter((provider) => Boolean(provider.key));
 
@@ -87,14 +137,18 @@ export async function listModels(): Promise<
     if (!cached || Date.now() - cached.at >= MODEL_CACHE_MS) {
       try {
         const response = await fetch(`${provider.baseUrl}/models`, {
-          headers: { Authorization: `Bearer ${provider.key}` },
+          headers: authHeaders(provider),
           signal: AbortSignal.timeout(10_000),
         });
         if (response.ok) {
           const body = (await response.json()) as { data?: { id?: string }[] };
-          const ids = (body.data ?? []).map((m) => String(m.id ?? "")).filter(Boolean);
+          const ids = (body.data ?? [])
+            .map((m) => String(m.id ?? ""))
+            .filter((id) => id && allowed(provider, id));
           if (ids.length) {
-            models = ids;
+            // Recommended models first, so a short menu shows the useful ones.
+            const seeds = provider.seedModels.filter((seed) => ids.includes(seed));
+            models = [...seeds, ...ids.filter((id) => !seeds.includes(id))];
             modelCache.set(provider.id, { at: Date.now(), models });
           }
         }
@@ -114,18 +168,68 @@ export async function listModels(): Promise<
   return out;
 }
 
-const POLICY: Record<Tier, [string, string][]> = {
+type Chain = [string, string][];
+
+/**
+ * Default chains. `ask` is the everyday turn: a fast cheap model first, then
+ * the free one. (The free model took 20 to 40 seconds on a full workspace
+ * digest when tried on 2026-11-20, too slow to lead; put it first with
+ * `COPILOT_CHAIN_ASK` if cost matters more than speed.) `design` is the harder
+ * turn: a strong model first.
+ */
+const DEFAULT_POLICY: Record<Tier, Chain> = {
   ask: [
     ["qwen", "qwen3.6-flash"],
+    ["workbuddy", "hy4flash-free"],
     ["inferhub", "cb/deepseek-v4.1-flash-sg"],
-    ["workbuddy", ""],
+    ["anthropic", "claude-haiku-5-5"],
+    ["openrouter", ""],
   ],
   design: [
-    ["qwen", "qwen3.7-plus"],
+    ["qwen", "qwen4-max-preview"],
+    ["anthropic", "claude-sonnet-5-5"],
     ["inferhub", "ali/qwen4-max"],
-    ["workbuddy", ""],
+    ["qwen", "qwen3.7-plus"],
+    ["workbuddy", "hy4flash-free"],
   ],
 };
+
+/**
+ * Parse `provider/model, provider/model, …`. A bare `provider` means that
+ * provider's first recommended model. Model ids may contain slashes.
+ */
+export function parseChain(spec: string | undefined): Chain {
+  if (!spec) return [];
+  const chain: Chain = [];
+  for (const raw of spec.split(",")) {
+    const entry = raw.trim();
+    if (!entry) continue;
+    const slash = entry.indexOf("/");
+    const providerId = (slash === -1 ? entry : entry.slice(0, slash)).trim();
+    const model = slash === -1 ? "" : entry.slice(slash + 1).trim();
+    if (providerId) chain.push([providerId, model]);
+  }
+  return chain;
+}
+
+const fromEnv = (spec: string | undefined, fallback: Chain): Chain => {
+  const parsed = parseChain(spec);
+  return parsed.length ? parsed : fallback;
+};
+
+const POLICY: Record<Tier, Chain> = {
+  ask: fromEnv(env.COPILOT_CHAIN_ASK, DEFAULT_POLICY.ask),
+  design: fromEnv(env.COPILOT_CHAIN_DESIGN, DEFAULT_POLICY.design),
+};
+
+/** The chains in force, for the health endpoint and the model menu. */
+export const chains = () =>
+  Object.fromEntries(
+    (Object.keys(POLICY) as Tier[]).map((tier) => [
+      tier,
+      resolveRoute(undefined, tier).map((route) => `${route.provider.id}/${route.model}`),
+    ]),
+  );
 
 /** Ordered candidates: explicit choice first, then the tier policy, skipping cooled providers. */
 export function resolveRoute(requested: string | undefined, tier: Tier): Route[] {
@@ -134,7 +238,7 @@ export function resolveRoute(requested: string | undefined, tier: Tier): Route[]
     const [providerId, ...rest] = requested.split("/");
     const model = rest.join("/");
     const provider = providers.find((p) => p.id === providerId);
-    if (provider && model) chain.push([providerId, model]);
+    if (provider && model && allowed(provider, model)) chain.push([providerId, model]);
   }
   chain.push(...POLICY[tier]);
   const routes: Route[] = [];
@@ -142,7 +246,7 @@ export function resolveRoute(requested: string | undefined, tier: Tier): Route[]
     const provider = providers.find((p) => p.id === providerId);
     if (!provider || !available(provider)) continue;
     const chosen = model || provider.seedModels[0] || "";
-    if (!chosen) continue;
+    if (!chosen || !allowed(provider, chosen)) continue;
     if (routes.some((r) => r.provider.id === provider.id && r.model === chosen)) continue;
     routes.push({ provider, model: chosen });
   }
@@ -166,13 +270,15 @@ export async function chat(
 ): Promise<ChatOutcome> {
   const body: Record<string, unknown> = {
     model: route.model,
-    temperature: 0.2,
-    response_format: { type: "json_object" },
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
   };
+  // The prompts already demand JSON; this only adds the vendor's JSON mode
+  // where the vendor accepts it.
+  if (route.provider.jsonMode !== false) body.response_format = { type: "json_object" };
+  if (route.provider.temperature !== false) body.temperature = 0.2;
   if (reasoning !== "off") {
     if (route.provider.reasoning === "effort") body.reasoning_effort = reasoning;
     if (route.provider.reasoning === "thinking") body.enable_thinking = true;
@@ -183,7 +289,7 @@ export async function chat(
     const response = await fetch(`${route.provider.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${route.provider.key}`,
+        ...authHeaders(route.provider),
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
@@ -220,7 +326,12 @@ export interface FailoverResult {
   failovers: number;
 }
 
-/** Try candidates in order; back off within a provider, cool it down and move on on 429. */
+/**
+ * Try candidates in order; back off within a provider, cool it down and move
+ * on on 429. `check` lets the caller reject an answer that arrived but does
+ * not fit its schema: it throws, and the next route is tried instead of the
+ * whole turn failing on one model's malformed reply.
+ */
 export async function askWithFailover(
   routes: Route[],
   system: string,
@@ -228,6 +339,7 @@ export async function askWithFailover(
   reasoning: Reasoning,
   timeoutMs: number,
   signal?: AbortSignal,
+  check?: (content: string) => void,
 ): Promise<FailoverResult> {
   if (routes.length === 0) throw new Error("no available provider (all cooled or unconfigured)");
   let attempts = 0;
@@ -238,7 +350,13 @@ export async function askWithFailover(
       attempts++;
       const outcome = await chat(route, system, user, reasoning, timeoutMs, signal);
       if (outcome.status === 200 && outcome.content) {
-        return { content: outcome.content, provider: route.provider.id, model: route.model, attempts, failovers };
+        try {
+          check?.(outcome.content);
+          return { content: outcome.content, provider: route.provider.id, model: route.model, attempts, failovers };
+        } catch {
+          lastError = `${route.provider.id}/${route.model} answered in the wrong shape`;
+          break;
+        }
       }
       lastError = outcome.error ?? `upstream ${outcome.status}`;
       if (outcome.status === 429) {
@@ -254,4 +372,23 @@ export async function askWithFailover(
     failovers++;
   }
   throw new Error(`model unavailable: ${lastError}`);
+}
+
+/**
+ * Parse a model's JSON answer. Some strong models wrap the one object they
+ * were asked for in a single-element array; unwrap that instead of failing the
+ * whole turn on a shape the schema check would reject.
+ */
+export function parseModelJson(content: string): unknown {
+  const parsed: unknown = JSON.parse(content);
+  if (
+    Array.isArray(parsed) &&
+    parsed.length === 1 &&
+    parsed[0] !== null &&
+    typeof parsed[0] === "object" &&
+    !Array.isArray(parsed[0])
+  ) {
+    return parsed[0];
+  }
+  return parsed;
 }

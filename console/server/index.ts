@@ -19,8 +19,10 @@ import { webSearch, webPromptBlock } from "./web.ts";
 import { PartSchema, sanitizeArtifactHtml } from "../src/data/sessionTypes.ts";
 import {
   askWithFailover,
+  chains,
   cooldowns,
   listModels,
+  parseModelJson,
   providers,
   resolveRoute,
   type Reasoning,
@@ -276,8 +278,10 @@ async function handleCopilot(body: unknown) {
       `USER REQUEST:\n${request.prompt}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}${webPromptBlock(web)}${historyBlock(request.history)}`,
       (request.reasoning ?? "off") as Reasoning,
       REQUEST_TIMEOUT_MS,
+      undefined,
+      (content) => void ModelAnswerSchema.parse(parseModelJson(content)),
     );
-    const answer = ModelAnswerSchema.parse(JSON.parse(routed.content));
+    const answer = ModelAnswerSchema.parse(parseModelJson(routed.content));
 
   // Anything referencing an id that is not in the digest is dropped: the model
   // can describe the world, it cannot create entities in it. Overlong lists
@@ -366,8 +370,10 @@ async function handleDesign(body: unknown) {
     `HUMAN GOAL:\n${request.goal}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${ragPromptBlock(matches)}${webPromptBlock(web)}`,
     (request.reasoning ?? "off") as Reasoning,
     REQUEST_TIMEOUT_MS,
+    undefined,
+    (content) => void ModelDesignSchema.parse(parseModelJson(content)),
   );
-  const design = ModelDesignSchema.parse(JSON.parse(routed.content));
+  const design = ModelDesignSchema.parse(parseModelJson(routed.content));
 
   const agentIds = design.agentIds
     .filter((id) => knownId(digest, "agent", id))
@@ -489,6 +495,8 @@ const historyBlock = (history?: string[]) =>
         .join("\n")}`
     : "";
 
+const PartsAnswerSchema = z.object({ parts: z.array(PartSchema).max(12) });
+
 function groundPart(part: z.infer<typeof PartSchema>, digest: Digest): boolean {
   if (part.kind === "graph") {
     return part.nodes.every((node) =>
@@ -554,9 +562,10 @@ async function runTurn(
       (request.reasoning ?? "off") as Reasoning,
       REQUEST_TIMEOUT_MS,
       controller.signal,
+      (content) => void PartsAnswerSchema.parse(parseModelJson(content)),
     );
     send("phase", { label: `Validating parts from ${routed.provider}` });
-    const parsed = z.object({ parts: z.array(PartSchema).max(12) }).parse(JSON.parse(routed.content));
+    const parsed = PartsAnswerSchema.parse(parseModelJson(routed.content));
     for (const rawPart of parsed.parts) {
       if (controller.signal.aborted) break;
       if (!groundPart(rawPart, digest)) {
@@ -638,7 +647,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/models") {
-      json(res, 200, { providers: await listModels(), cooldowns: cooldowns() });
+      json(res, 200, { providers: await listModels(), cooldowns: cooldowns(), chains: chains() });
       finish(200, "models");
       return;
     }
@@ -648,6 +657,7 @@ const server = createServer(async (req, res) => {
         model: MODEL,
         configured: Boolean(BASE_URL && API_KEY),
         providers: providers.map((provider) => provider.id),
+        chains: chains(),
         cooldowns: cooldowns(),
       };
       json(res, 200, value);

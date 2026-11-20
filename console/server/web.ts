@@ -10,8 +10,13 @@ export interface WebResult {
   snippet: string;
 }
 
-const KEY = process.env.TINYFISH_API_KEY ?? process.env.tinyfish_api_key ?? "";
-const BASE = (process.env.TINYFISH_BASE_URL ?? "https://agent.tinyfish.ai").replace(/\/$/, "");
+// A vault working key (an `octo_tmp_…` lease) wins: the search then goes
+// through Octo's vault proxy and this server never holds TinyFish's own key.
+const VAULT_KEY = process.env.TINYFISH_VAULT_KEY ?? "";
+const VAULT_PROXY = (process.env.OCTO_VAULT_PROXY_URL ?? "https://octodb.design-bakery.com/api/vault/proxy").replace(/\/$/, "");
+const KEY = VAULT_KEY || (process.env.TINYFISH_API_KEY ?? process.env.tinyfish_api_key ?? "");
+const DIRECT = (process.env.TINYFISH_BASE_URL ?? "https://agent.tinyfish.ai").replace(/\/$/, "");
+const BASE = VAULT_KEY ? `${VAULT_PROXY}/https://agent.tinyfish.ai` : DIRECT;
 
 export async function webSearch(query: string, limit = 4): Promise<WebResult[]> {
   if (!KEY || !query.trim()) return [];

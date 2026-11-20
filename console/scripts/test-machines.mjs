@@ -18,6 +18,7 @@ import { turnMachine } from "../src/machines/turnMachine.ts";
 import { fillInMachine } from "../src/machines/fillInMachine.ts";
 import { missionMachine, approvalMachine } from "../src/machines/workMachines.ts";
 import { parseVoiceCommand } from "../src/lib/voiceCommands.ts";
+import { allowed, askWithFailover, authHeaders, parseChain, parseModelJson } from "../server/providers.ts";
 
 let failures = 0;
 const check = async (name, fn) => {
@@ -289,6 +290,84 @@ await check("voice (metamorphic): adding a negation never produces an approval",
         assert.notEqual(parseVoiceCommand(heard), "approve", heard);
       }
     }
+  }
+});
+
+// --- Provider chain (#62): which model answers, and in what order ---
+
+await check("providers: a chain spec parses to provider and model pairs", () => {
+  assert.deepEqual(parseChain("workbuddy/hy4flash-free, anthropic/claude-haiku-5-5"), [
+    ["workbuddy", "hy4flash-free"],
+    ["anthropic", "claude-haiku-5-5"],
+  ]);
+  // Model ids keep their own slashes and colons; a bare provider means its default.
+  assert.deepEqual(parseChain("inferhub/alitp/qwen4-max-preview,openrouter"), [
+    ["inferhub", "alitp/qwen4-max-preview"],
+    ["openrouter", ""],
+  ]);
+  assert.deepEqual(parseChain(undefined), []);
+  assert.deepEqual(parseChain(" , ,"), []);
+});
+
+await check("providers (metamorphic): spacing and empty entries do not change a chain", () => {
+  const spec = "qwen/qwen4-max-preview,anthropic/claude-sonnet-5-5,workbuddy";
+  const expected = parseChain(spec);
+  for (const rewrite of [
+    (t) => t.replace(/,/g, " , "),
+    (t) => `  ${t}  `,
+    (t) => `${t},`,
+    (t) => t.replace(/,/g, ",,"),
+  ]) {
+    assert.deepEqual(parseChain(rewrite(spec)), expected, rewrite(spec));
+  }
+});
+
+await check("providers: an allow-list keeps Opus out and a key style picks the header", () => {
+  const claude = { id: "anthropic", key: "k", auth: "x-api-key", allow: /haiku|sonnet/ };
+  assert.equal(allowed(claude, "claude-sonnet-5-5"), true);
+  assert.equal(allowed(claude, "claude-haiku-5-5"), true);
+  assert.equal(allowed(claude, "claude-opus-5-5"), false);
+  assert.equal(allowed({ id: "qwen", key: "k" }, "anything"), true);
+  assert.deepEqual(authHeaders(claude), { "x-api-key": "k" });
+  assert.deepEqual(authHeaders({ id: "qwen", key: "k" }), { Authorization: "Bearer k" });
+});
+
+await check("providers: a model answer wrapped in a one-item array is unwrapped", () => {
+  assert.deepEqual(parseModelJson('[{"missionName":"x"}]'), { missionName: "x" });
+  assert.deepEqual(parseModelJson('{"missionName":"x"}'), { missionName: "x" });
+  // Anything else is left for the schema check to reject.
+  assert.deepEqual(parseModelJson('[{"a":1},{"a":2}]'), [{ a: 1 }, { a: 2 }]);
+  assert.deepEqual(parseModelJson("[]"), []);
+  assert.deepEqual(parseModelJson("[[1]]"), [[1]]);
+});
+
+await check("providers: a wrong-shaped answer fails over to the next model", async () => {
+  const realFetch = globalThis.fetch;
+  const asked = [];
+  globalThis.fetch = async (_url, init) => {
+    const model = JSON.parse(init.body).model;
+    asked.push(model);
+    const content = model === "bad" ? '{"oops":true}' : '{"ok":true}';
+    return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
+  };
+  try {
+    const provider = { id: "p", displayName: "P", baseUrl: "https://example.test", key: "k", reasoning: "none", seedModels: [] };
+    const result = await askWithFailover(
+      [{ provider, model: "bad" }, { provider, model: "good" }],
+      "system", "user", "off", 5_000, undefined,
+      (content) => { if (!JSON.parse(content).ok) throw new Error("wrong shape"); },
+    );
+    assert.equal(result.model, "good");
+    assert.equal(result.failovers, 1);
+    assert.deepEqual(asked, ["bad", "good"]);
+    // With no second route, the wrong shape is an error, never a silent pass.
+    await assert.rejects(
+      askWithFailover([{ provider, model: "bad" }], "system", "user", "off", 5_000, undefined,
+        (content) => { if (!JSON.parse(content).ok) throw new Error("wrong shape"); }),
+      /wrong shape/,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
   }
 });
 
