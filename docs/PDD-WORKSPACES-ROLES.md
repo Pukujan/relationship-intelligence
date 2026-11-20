@@ -1,6 +1,6 @@
 # PDD — Workspaces, roles, and the four creation flows (RI-0017)
 
-**Status:** plan, not implemented. Companion to `SDD-WORKSPACES-ROLES.md`.
+**Status:** plan, not implemented. Issue log: #37/#38 proceed; #39/#40/#41 blocked by research gate #42. Companion to `SDD-WORKSPACES-ROLES.md`.
 Owner direction 2026-11-19: "how do I make new project / new workspace / join
 new workspace / new project from my teammate?" and "there is way too much on
 screen". This document answers both with screens, not promises.
