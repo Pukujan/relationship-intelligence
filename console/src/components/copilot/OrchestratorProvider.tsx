@@ -29,6 +29,10 @@ export interface TranscriptLine {
   at: string;
 }
 
+/** How many approvals one call reads. */
+const CALL_QUEUE_LIMIT = 3;
+const RISK_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+
 export type CallState = "idle" | "ringing" | "live" | "ended";
 
 export interface CallDecision {
@@ -136,7 +140,12 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
   const startCall = useCallback(() => {
     const current = worldRef.current;
     if (!current) return;
-    const queue = pendingApprovals(current).map((approval) => approval.id);
+    // A call is a short briefing: the few decisions that matter most, not
+    // the whole inbox read aloud.
+    const queue = [...pendingApprovals(current)]
+      .sort((a, b) => RISK_RANK[a.risk] - RISK_RANK[b.risk])
+      .slice(0, CALL_QUEUE_LIMIT)
+      .map((approval) => approval.id);
     setCall({
       state: "ringing",
       startedAt: new Date().toISOString(),
@@ -161,7 +170,11 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
               transcript: [
                 ...session.transcript,
                 line("copilot", count
-                  ? `You're live. ${count} decisions are waiting — I'll read them one at a time. Say approve, decline, or skip.`
+                  ? `You're live. ${
+                      count > CALL_QUEUE_LIMIT
+                        ? `${count} decisions are waiting, and I'll read the ${CALL_QUEUE_LIMIT} that matter most`
+                        : `${count} ${count === 1 ? "decision is" : "decisions are"} waiting`
+                    }. Say approve, decline or skip, or ask me about one.`
                   : "You're live. Your approval inbox is clear, so there is nothing to decide."),
               ],
             }
@@ -207,7 +220,7 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
         transcript: [
           ...session.transcript,
           line("copilot", session.decisions.length
-            ? `Call ended. ${session.decisions.length} decisions taken by voice — everything is in your inbox and the timeline.`
+            ? `Call ended. ${session.decisions.length} ${session.decisions.length === 1 ? "decision" : "decisions"} taken by voice — everything is in your inbox and the timeline.`
             : "Call ended. Nothing was decided."),
         ],
       };
@@ -225,7 +238,7 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
           transcript: [
             ...session.transcript,
             line("copilot", session.decisions.length
-              ? `That's everything. ${session.decisions.length} decisions taken by voice — logged to your inbox and the timeline.`
+              ? `That's everything. ${session.decisions.length} ${session.decisions.length === 1 ? "decision" : "decisions"} taken by voice — logged to your inbox and the timeline.`
               : "That's everything. Nothing was decided."),
           ],
         };

@@ -49,3 +49,30 @@ export const parseVoiceCommand = (heard: string): VoiceCommand | null => {
   // Exactly one intent, or nothing: "yes, skip" is refused too.
   return matched.length === 1 ? matched[0] : null;
 };
+
+/**
+ * What a reply to "Approve <title>? Say yes or no." means.
+ *
+ * The model may suggest that the person wants to approve or decline, but it
+ * never writes: the page reads the decision back and only the person's own
+ * clear word records it. "Yes" confirms whichever decision was read back;
+ * "no" drops it; anything else, including a negation or a new question, is
+ * unclear and records nothing.
+ */
+export type Confirmation = "confirm" | "cancel" | "unclear";
+
+export const resolveConfirmation = (heard: string): Confirmation => {
+  const command = parseVoiceCommand(heard);
+  if (command === "approve") return "confirm";
+  if (command === "decline" || command === "skip" || command === "end") return "cancel";
+  return "unclear";
+};
+
+/** Phrases that end a spoken conversation off a call. */
+const DONE = ["stop", "that's all", "that is all", "thanks", "thank you", "i'm done", "goodbye", "bye", "never mind"];
+
+export const isConversationOver = (heard: string): boolean => {
+  const text = normalise(heard);
+  if (!text || text.split(" ").length > MAX_WORDS) return false;
+  return DONE.some((phrase) => containsPhrase(text, phrase));
+};
