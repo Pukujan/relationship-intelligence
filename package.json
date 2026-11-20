@@ -6,6 +6,10 @@
   "packageManager": "pnpm@12.14.0",
   "scripts": {
     "dev": "pnpm --dir app dev",
+    "dev:console": "pnpm --dir console dev",
+    "build:all": "pnpm --dir console build && pnpm --dir app build",
+    "check:orphans": "node console/scripts/check-orphans.mjs",
+    "check:machines": "node console/scripts/test-machines.mjs",
     "build": "pnpm --dir app build",
     "typecheck": "pnpm --dir app typecheck",
     "lint": "pnpm --dir app lint",
