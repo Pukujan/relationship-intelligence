@@ -69,7 +69,7 @@ const Index = () => {
   const navigate = useNavigate();
   // Today stays glance-first: signals and the week strip lead; team and
   // activity panels appear as the reader raises the altitude.
-  const [altitude] = useAltitude("today");
+  const [altitude, setAltitude] = useAltitude("today");
   const [peek, setPeek] = useState<PeekTarget | null>(null);
   const weekItems = useMemo(() => {
     if (!world) return [];
@@ -166,7 +166,7 @@ const Index = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <AltitudeControl view="today" />
+          <AltitudeControl view="today" value={altitude} onChange={setAltitude} />
           <Button
             variant="outline"
             size="sm"

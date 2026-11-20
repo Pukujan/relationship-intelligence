@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useMachine } from "@xstate/react";
-import { Archive, ArchiveRestore, Loader2, PanelRight, Plus, Send, Sparkles, X } from "lucide-react";
+import { Archive, ArchiveRestore, Loader2, PanelRight, Plus, Search, Send, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
@@ -11,9 +11,11 @@ import { isTurnLive, turnMachine } from "@/machines/turnMachine";
 import type { Conversation, SessionMessage } from "@/data/sessionTypes";
 import { PartRenderer } from "./PartRenderer";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 const IDLE_ARCHIVE_DAYS = 14;
 const TAB_WARN = 8;
+const THREAD_PAGE_SIZE = 8;
 
 const scopeLabel = (conversation: Conversation, world: ReturnType<typeof useData>["world"]) => {
   if (!world || !conversation.scopeId) return "workspace";
@@ -80,6 +82,8 @@ const SessionWorkspace = () => {
   const [reasoning, setReasoning] = useState("off");
   const [modelOptions, setModelOptions] = useState<{ provider: string; models: string[] }[]>([]);
   const [showArchived, setShowArchived] = useState(false);
+  const [railQuery, setRailQuery] = useState("");
+  const [threadLimit, setThreadLimit] = useState(THREAD_PAGE_SIZE);
   const [contextOpen, setContextOpen] = useState(true);
   const [newScope, setNewScope] = useState<{ kind: string; id: string | null }>({ kind: "workspace", id: null });
   const abortRef = useRef<AbortController | null>(null);
@@ -88,6 +92,15 @@ const SessionWorkspace = () => {
   const active = sessions.find((s) => s.id === activeId) ?? null;
   const openSessions = sessions.filter((s) => !s.archivedAt);
   const archived = sessions.filter((s) => s.archivedAt);
+  const query = railQuery.trim().toLowerCase();
+  const matchesQuery = (conversation: Conversation) =>
+    !query || conversation.title.toLowerCase().includes(query) || scopeLabel(conversation, world).toLowerCase().includes(query);
+  const filteredOpen = openSessions.filter(matchesQuery);
+  const filteredArchived = archived.filter(matchesQuery);
+  // Searching is exhaustive (every match shows); otherwise the rail pages
+  // through open threads THREAD_PAGE_SIZE at a time.
+  const visibleOpen = query ? filteredOpen : filteredOpen.slice(0, threadLimit);
+  const hiddenCount = filteredOpen.length - visibleOpen.length;
 
   useEffect(() => {
     fetch("/api/models")
@@ -257,13 +270,23 @@ const SessionWorkspace = () => {
             <Plus className="h-3.5 w-3.5" />
           </Button>
         </div>
+        <div className="relative mb-2">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={railQuery}
+            onChange={(event) => { setRailQuery(event.target.value); setThreadLimit(THREAD_PAGE_SIZE); }}
+            placeholder="Search threads…"
+            aria-label="Search threads"
+            className="h-7 rounded-lg border-border/70 bg-surface-1 pl-6 text-[11.5px]"
+          />
+        </div>
         {openSessions.length > TAB_WARN ? (
           <p className="mb-2 rounded-md border border-warn/30 bg-warn/10 px-2 py-1 text-[10.5px] text-warn">
             {openSessions.length} open threads — archive what you're done with.
           </p>
         ) : null}
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
-          {openSessions.map((conversation) => (
+          {visibleOpen.map((conversation) => (
             <div key={conversation.id} className={cn("group flex items-center gap-1 rounded-lg px-2 py-1.5", conversation.id === activeId ? "bg-surface-2" : "hover:bg-surface-2/60")}>
               <button type="button" className="min-w-0 flex-1 text-left" onClick={() => { setDraft(false); setActiveId(conversation.id); }}>
                 <p className="truncate text-[12px] font-medium">{conversation.title}</p>
@@ -278,14 +301,25 @@ const SessionWorkspace = () => {
               </button>
             </div>
           ))}
-          {!openSessions.length ? <p className="px-2 text-[11px] text-muted-foreground">No threads yet. Ask something.</p> : null}
+          {hiddenCount > 0 ? (
+            <button
+              type="button"
+              className="focus-ring w-full rounded-lg px-2 py-1.5 text-left text-[11.5px] text-muted-foreground transition-colors hover:bg-surface-2/60 hover:text-foreground"
+              onClick={() => setThreadLimit((limit) => limit + THREAD_PAGE_SIZE)}
+            >
+              Show more (+{hiddenCount})
+            </button>
+          ) : null}
+          {!filteredOpen.length ? (
+            <p className="px-2 text-[11px] text-muted-foreground">{query ? "No threads match your search." : "No threads yet. Ask something."}</p>
+          ) : null}
         </div>
         <button type="button" className="mt-2 px-1 text-[10.5px] text-muted-foreground hover:text-foreground" onClick={() => setShowArchived((v) => !v)}>
           {showArchived ? "Hide" : "Show"} archived ({archived.length})
         </button>
         {showArchived ? (
           <div className="mt-1 space-y-1">
-            {archived.map((conversation) => (
+            {filteredArchived.map((conversation) => (
               <div key={conversation.id} className="flex items-center gap-1 rounded-lg px-2 py-1">
                 <button type="button" className="min-w-0 flex-1 truncate text-left text-[11px] text-muted-foreground" onClick={() => { void patchSession(conversation.id, { archived: false }); setDraft(false); setActiveId(conversation.id); }}>
                   {conversation.title}
