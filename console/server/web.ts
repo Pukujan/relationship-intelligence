@@ -11,17 +11,15 @@ export interface WebResult {
 }
 
 const KEY = process.env.TINYFISH_API_KEY ?? process.env.tinyfish_api_key ?? "";
-const BASE = (process.env.TINYFISH_BASE_URL ?? "https://api.tinyfish.ai").replace(/\/$/, "");
+const BASE = (process.env.TINYFISH_BASE_URL ?? "https://agent.tinyfish.ai").replace(/\/$/, "");
 
 export async function webSearch(query: string, limit = 4): Promise<WebResult[]> {
   if (!KEY || !query.trim()) return [];
   try {
-    const response = await fetch(`${BASE}/v1/search`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ query, limit }),
-      signal: AbortSignal.timeout(10_000),
-    });
+    const response = await fetch(
+      `${BASE}/v1/search?query=${encodeURIComponent(query)}&limit=${limit}`,
+      { headers: { "X-API-Key": KEY }, signal: AbortSignal.timeout(10_000) },
+    );
     if (!response.ok) return [];
     const body = (await response.json()) as { results?: unknown[]; data?: unknown[] };
     const rows = body.results ?? body.data ?? [];
@@ -29,7 +27,7 @@ export async function webSearch(query: string, limit = 4): Promise<WebResult[]> 
       const item = (raw ?? {}) as Record<string, unknown>;
       return {
         title: String(item.title ?? item.name ?? "").slice(0, 160),
-        url: String(item.url ?? item.link ?? "").slice(0, 300),
+        url: String(item.url ?? item.link ?? (item.site_name ? `https://${item.site_name}` : "")).slice(0, 300),
         snippet: String(item.snippet ?? item.content ?? item.description ?? "").slice(0, 400),
       };
     }).filter((r) => r.url || r.snippet);

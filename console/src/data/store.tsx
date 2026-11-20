@@ -99,6 +99,7 @@ interface DataContextValue {
   sessionReason: string | null;
   /** Re-authenticate through Octo and return to the current path. */
   resumeSession: () => void;
+  connectWithKey: (key: string) => Promise<void>;
   /** True when the last adapter read failed and a stale snapshot is shown. */
   offline: boolean;
   signIn: (mode: SessionMode) => Promise<Session>;
@@ -177,7 +178,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     let cancelled = false;
     fetch("/app-api/session", { credentials: "same-origin" })
       .then((response) => (response.ok ? response.json() : { authenticated: false }))
-      .then((state: AdapterSession) => {
+      .then(async (state: AdapterSession) => {
         if (cancelled) return;
         if (state.authenticated && state.principal && state.workspaces?.length) {
           // Restore the owner's last selected workspace so reloads resume the
@@ -188,8 +189,19 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
           } catch {
             stored = null;
           }
+          // Prefer the workspace this console is configured for (the one with
+          // the ri_console schema), then the owner's last selection, then first.
+          let configured: string | null = null;
+          try {
+            const cfg = await fetch("/app-api/config", { credentials: "same-origin" }).then((r) => r.json());
+            configured = cfg.workspaceId ?? null;
+          } catch {
+            configured = null;
+          }
           const selected =
-            state.workspaces.find((workspace) => workspace.id === stored) ?? state.workspaces[0];
+            state.workspaces.find((workspace) => workspace.id === configured) ??
+            state.workspaces.find((workspace) => workspace.id === stored) ??
+            state.workspaces[0];
           setSession({
             mode: "owner",
             name: state.principal.displayName ?? state.principal.email,
@@ -290,6 +302,20 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     },
     [session],
   );
+
+  const connectWithKey = useCallback(async (key: string) => {
+    const r = await fetch("/app-api/session/accept-key", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    });
+    if (!r.ok) {
+      const body = (await r.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error === "KEY_REJECTED" ? "Octo rejected that key." : "Key must start with octo_live_ws_ or octo_live_acc_.");
+    }
+    window.location.reload();
+  }, []);
 
   const refreshSessions = useCallback(async () => {
     if (!session) return;
@@ -553,6 +579,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       sessionExpiresAt,
       sessionReason,
       resumeSession,
+      connectWithKey,
       offline,
       signIn,
       signOut,
@@ -583,6 +610,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       sessionExpiresAt,
       sessionReason,
       resumeSession,
+      connectWithKey,
       offline,
       signIn,
       signOut,

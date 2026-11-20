@@ -149,6 +149,43 @@ export async function handleRequest(
     return;
   }
 
+  if (path === "/app-api/config" && req.method === "GET") {
+    sendJson(res, 200, {
+      workspaceId: process.env.OCTO_WORKSPACE_ID ?? null,
+      keyConnect: true,
+    });
+    return;
+  }
+
+  // Workspace-key connect: avoids the Octo-portal redirect entirely for the
+  // owner's local console. The key carries owner authority; per-teammate
+  // privacy still requires the principal flow once octo-database#93 lands.
+  if (path === "/app-api/session/accept-key" && req.method === "POST") {
+    const session = await readSession(req, res, env);
+    let key: unknown;
+    try {
+      key = JSON.parse(await readBody(req)).key;
+    } catch {
+      sendJson(res, 400, { error: "BAD_REQUEST" });
+      return;
+    }
+    if (typeof key !== "string" || !/^octo_live_(ws|acc)_/.test(key)) {
+      sendJson(res, 400, { error: "INVALID_KEY" });
+      return;
+    }
+    try {
+      const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 };
+      await fetchPrincipal(config, key);
+    } catch {
+      sendJson(res, 401, { error: "KEY_REJECTED" });
+      return;
+    }
+    session.octoToken = key;
+    await session.save();
+    sendJson(res, 200, { authenticated: true, returnTo: session.returnTo ?? "/" });
+    return;
+  }
+
   if (path === "/app-api/session/accept" && req.method === "POST") {
     const session = await readSession(req, res, env);
     let token: unknown;
@@ -197,8 +234,11 @@ export async function handleRequest(
     }
     // Advisory expiry for the console countdown; Octo stays the authority on
     // whether the token is actually valid (signature, revocation, clock).
-    const expiresAt = tokenExpiresAtMs(session.octoToken);
-    if (expiresAt === null) {
+    // Workspace keys (octo_live_*) carry no TTL envelope; only principal
+    // session tokens (octo_sess_*) have the advisory expiry.
+    const isSessionToken = session.octoToken.startsWith("octo_sess_");
+    const expiresAt = isSessionToken ? tokenExpiresAtMs(session.octoToken) : null;
+    if (isSessionToken && expiresAt === null) {
       // Bad prefix or malformed envelope: this cookie can never become valid,
       // so it is the one case where we destroy it outright.
       session.destroy();
