@@ -79,6 +79,8 @@ export interface Agent {
   sparkline: number[];
   kpis: Kpi[];
   joinedAt: string;
+  /** Set when the agent was installed from a starter template. */
+  templateId?: string | null;
 }
 
 export interface AgentRun {

@@ -16,6 +16,11 @@
 
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import {
+  AGENT_DOMAINS,
+  type AgentDomain,
+  completeAgentDoc,
+} from "./agentShape.js";
 import type { OctoClientConfig } from "./octo.js";
 import { appendLedgerEvent, endSpan, startSpan } from "./telemetry.js";
 import { ensureAppWorkspaceTables } from "./workspaces.js";
@@ -27,6 +32,8 @@ export interface AgentTemplate {
   id: string;
   name: string;
   role: string;
+  /** The team section the installed agent appears under on the Agents page. */
+  domain: AgentDomain;
   cadence: "daily" | "pre_event" | "signal";
   autonomyZone: "prep" | "suggest" | "co_design";
   connectors: string[];
@@ -37,6 +44,7 @@ export interface AgentTemplate {
 export const AGENT_TEMPLATES: AgentTemplate[] = [
   {
     id: "tpl-chief-of-staff",
+    domain: "research",
     name: "Chief of Staff",
     role: "Daily Brief & Triage",
     cadence: "daily",
@@ -49,6 +57,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
   },
   {
     id: "tpl-event-prep",
+    domain: "research",
     name: "Event Prep & Follow-Up",
     role: "Per-Event Lifecycle (T-7d / T-24h / T+24h)",
     cadence: "pre_event",
@@ -61,6 +70,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
   },
   {
     id: "tpl-project-researcher",
+    domain: "research",
     name: "Project & Grant Researcher",
     role: "Deep Research & Co-Design",
     cadence: "signal",
@@ -73,6 +83,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
   },
   {
     id: "tpl-relationship-outreach",
+    domain: "sales",
     name: "Relationship Outreach",
     role: "Warmth & Cadence Guard",
     cadence: "daily",
@@ -93,6 +104,7 @@ export const CreateCustomAgentSchema = z.object({
   autonomyZone: z.enum(["prep", "suggest", "co_design"]).default("suggest"),
   connectors: z.array(z.string().trim().min(1)).max(10).default([]),
   templateId: z.string().trim().optional(),
+  domain: z.enum(AGENT_DOMAINS).optional(),
   projectId: z.string().trim().nullable().optional(),
 });
 
@@ -145,6 +157,33 @@ export async function createCustomAgent(
   }
   await ensureAppWorkspaceTables(config, token, octoContainerId);
   const data = parsed.data;
+
+  // Installing the same template twice returns the agent already there, so a
+  // second click cannot fill the workspace with copies.
+  if (data.templateId) {
+    const existing = await octoSql(
+      config,
+      token,
+      octoContainerId,
+      `SELECT doc FROM ri_console.agent
+        WHERE workspace_id = ${lit(workspaceId)}
+          AND doc->>'templateId' = ${lit(data.templateId)}
+        ORDER BY updated_at ASC LIMIT 1`,
+    );
+    const found = existing[0]?.doc;
+    if (found && typeof found === "object") {
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          agent: completeAgentDoc(found as Record<string, unknown>),
+          alreadyInstalled: true,
+        },
+      };
+    }
+  }
+
+  const template = AGENT_TEMPLATES.find((item) => item.id === data.templateId);
   const id = `agent-${randomUUID().slice(0, 8)}`;
   const span = startSpan({
     name: "agent.create",
@@ -159,9 +198,11 @@ export async function createCustomAgent(
     },
   });
 
-  const doc = {
+  const createdAt = new Date().toISOString();
+  const doc = completeAgentDoc({
     id,
     workspaceId,
+    domain: data.domain ?? template?.domain ?? "research",
     name: data.name,
     role: data.role,
     status: "idle",
@@ -172,9 +213,9 @@ export async function createCustomAgent(
     templateId: data.templateId ?? null,
     projectId: data.projectId ?? null,
     createdBy: principalId,
-    createdAt: new Date().toISOString(),
+    createdAt,
     metrics: { tasksDone: 0, approvalsPending: 0, accuracy: 100 },
-  };
+  });
 
   await octoSql(
     config,
