@@ -1,22 +1,11 @@
 /**
  * HTTP adapter: the only server surface the browser talks to.
  *
- * Routes:
- *   GET  /app-api/session          current principal + their Octo workspaces
- *   GET  /octo-auth/google/start   begin Google sign-in through Octo
- *   GET  /octo-auth/google/callback  finish sign-in, seal the session cookie
- *   POST /app-api/logout           destroy the local session
- *
- * No route accepts an Octo token or API key from the browser. That is the point
- * of the adapter: the browser gets a cookie, and Octo keeps authority over who
- * the principal is and which workspaces they may enter.
- *
- * Session longevity: authenticated /app-api/* requests slide a 30-minute idle
- * window (session.ts). Octo's absolute 20-minute token TTL still applies on
- * top — sliding refresh is requested in Octo issue #93. When Octo refuses a
- * token we keep the cookie and report a reason so the console can offer a
- * one-click resume; the cookie alone grants nothing, every request still
- * re-validates at Octo.
+ * Single-Octo model (RI-0018) + User Connectors & Routing (RI-0019) + Dual
+ * Ledger & Phoenix Tracing (RI-0020):
+ *  - Every SQL/graph call hits the single backing `octoWorkspaceId` container.
+ *  - App Workspaces, memberships, user connectors, routing rules, and
+ *    immutable ledger events live in `ri_console.*` inside that container.
  */
 
 import { randomBytes, randomUUID } from "node:crypto";
@@ -25,6 +14,15 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import nodePath from "node:path";
 import { SessionResponseSchema } from "../shared/contracts.js";
+import {
+  buildGoogleConnectorAuthUrl,
+  buildZoomConnectorAuthUrl,
+  type ConnectorProviderId,
+  createConnectorRoute,
+  deleteConnectorRoute,
+  listUserConnectors,
+  saveUserConnector,
+} from "./connectors.js";
 import { type Env, readEnv } from "./env.js";
 import { fetchPrincipal, OctoError } from "./octo.js";
 import { handleProfileRoutes } from "./profile.js";
@@ -43,13 +41,14 @@ import {
   listConversations,
   patchConversation,
 } from "./sessions.js";
+import { syncUserConnector } from "./sync.js";
 import {
   requireRole,
   resolvePrincipalWorkspaces,
   resolveTenancy,
 } from "./tenancy.js";
 import {
-  createWorkspaceWithProvision,
+  createAppWorkspace,
   inviteWorkspaceMember,
   listWorkspaceMembers,
   provisionWorkspace,
@@ -68,8 +67,6 @@ import {
 } from "./world.js";
 
 const MAX_BODY_BYTES = 8 * 1024;
-
-/** SQL literal quoting, same helper as world.ts / sessions.ts. */
 const lit = (value: unknown) => `'${String(value).replace(/'/g, "''")}'`;
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -104,7 +101,6 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-/** Generate a request id for logs without logging any credential or body. */
 function requestId(): string {
   return randomBytes(8).toString("hex");
 }
@@ -127,14 +123,7 @@ export async function handleRequest(
     session.loginNonce = newOauthState();
     session.returnTo = safeReturnTo(url.searchParams.get("returnTo"));
     await session.save();
-    // Octo owns the Google OAuth flow and does not forward a `state` parameter,
-    // so there is no way to bind the callback to this nonce. The callback route
-    // therefore accepts the fragment token and verifies it against /api/me.
-    // Residual risk: a login-CSRF is not excluded; Octo would need state support
-    // for that, which is a platform change rather than an adopter one.
     if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
-      // Our backend owns sign-in: Google returns to OUR callback on our origin.
-      // Octo is only the data layer; no portal redirect, no fragment hand-off.
       const target = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       target.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
       target.searchParams.set(
@@ -191,13 +180,14 @@ export async function handleRequest(
         if (!payload.email || payload.email_verified === false)
           throw new Error("google email unverified");
         const email = payload.email.toLowerCase();
-        // Resolve active membership or activate a pending invite via Octo.
         const key = env.OCTO_API_KEY ?? "";
         const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 };
         const membership = await resolveOrActivateGoogleMember(
           config,
           key,
           email,
+          env,
+          payload.name ?? email,
         );
         if (!membership) {
           redirect(
@@ -226,10 +216,6 @@ export async function handleRequest(
       }
       return;
     }
-    // Octo redirects to `${origin}/#token=...`. Browsers never send the fragment
-    // to the server, so the token is extracted by the small inline script below
-    // and posted here. This is the documented hand-off for the current Octo
-    // auth contract.
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
@@ -260,18 +246,254 @@ export async function handleRequest(
 
   if (path === "/app-api/config" && req.method === "GET") {
     sendJson(res, 200, {
-      workspaceId: process.env.OCTO_WORKSPACE_ID ?? null,
+      workspaceId:
+        env.OCTO_WORKSPACE_ID ?? process.env.OCTO_WORKSPACE_ID ?? null,
       keyConnect: true,
-      workspaceCreateEnabled: Boolean(
-        (process.env.OCTO_ACCOUNT_KEY ?? "").trim(),
+      workspaceCreateEnabled: true,
+      googleConnectorsReady: Boolean(
+        env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET,
       ),
+      zoomConnectorReady: Boolean(env.ZOOM_CLIENT_ID && env.ZOOM_CLIENT_SECRET),
+      phoenixConfigured: Boolean(env.PHOENIX_COLLECTOR_ENDPOINT),
     });
     return;
   }
 
-  // Workspace-key connect: avoids the Octo-portal redirect entirely for the
-  // owner's local console. The key carries owner authority; per-teammate
-  // privacy still requires the principal flow once octo-database#93 lands.
+  // Incremental Google OAuth for user-level Gmail / Google Calendar / Google Drive
+  if (
+    path === "/app-api/connectors/oauth/google/start" &&
+    req.method === "GET"
+  ) {
+    const provider = url.searchParams.get("provider");
+    if (provider !== "gmail" && provider !== "gcal" && provider !== "gdrive") {
+      sendJson(res, 400, { error: "INVALID_PROVIDER" });
+      return;
+    }
+    const session = await readSession(req, res, env);
+    if (!session.octoToken && !session.principalId) {
+      redirect(res, `${env.APP_ORIGIN}/console/signin`);
+      return;
+    }
+    const state = newOauthState();
+    session.connectorOauthState = state;
+    session.connectorProvider = provider;
+    await session.save();
+    const authUrl = buildGoogleConnectorAuthUrl(env, provider, state);
+    if (!authUrl) {
+      redirect(
+        res,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=GOOGLE_NOT_CONFIGURED`,
+      );
+      return;
+    }
+    redirect(res, authUrl);
+    return;
+  }
+
+  if (
+    path === "/app-api/connectors/oauth/google/callback" &&
+    req.method === "GET"
+  ) {
+    const session = await readSession(req, res, env);
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const provider = session.connectorProvider;
+    if (
+      !code ||
+      !state ||
+      state !== session.connectorOauthState ||
+      (provider !== "gmail" && provider !== "gcal" && provider !== "gdrive") ||
+      !env.GOOGLE_CLIENT_ID ||
+      !env.GOOGLE_CLIENT_SECRET
+    ) {
+      redirect(
+        res,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=STATE_MISMATCH`,
+      );
+      return;
+    }
+    try {
+      const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          code,
+          client_id: env.GOOGLE_CLIENT_ID,
+          client_secret: env.GOOGLE_CLIENT_SECRET,
+          redirect_uri: `${env.APP_ORIGIN}/app-api/connectors/oauth/google/callback`,
+          grant_type: "authorization_code",
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!tokenRes.ok) throw new Error(`google token ${tokenRes.status}`);
+      const tokens = (await tokenRes.json()) as {
+        access_token?: string;
+        refresh_token?: string;
+        expires_in?: number;
+        scope?: string;
+        id_token?: string;
+      };
+      const seg = String(tokens.id_token ?? "").split(".")[1] ?? "";
+      let accountEmail: string | null = session.email ?? null;
+      if (seg) {
+        try {
+          const p = JSON.parse(
+            Buffer.from(seg, "base64url").toString("utf8"),
+          ) as { email?: string };
+          if (p.email) accountEmail = p.email.toLowerCase();
+        } catch {
+          // ignore malformed id_token
+        }
+      }
+      const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 20_000 };
+      const tenancy = await resolveTenancy(req, res, env, config);
+      if (!tenancy.ok) {
+        redirect(res, `${env.APP_ORIGIN}/console/signin`);
+        return;
+      }
+      await saveUserConnector(
+        config,
+        tenancy.token,
+        tenancy.octoWorkspaceId,
+        tenancy.workspace.id,
+        tenancy.principal.id,
+        {
+          provider,
+          status: "connected",
+          accountEmail,
+          scopes: tokens.scope ? tokens.scope.split(/\s+/) : undefined,
+          accessToken: tokens.access_token ?? null,
+          refreshToken: tokens.refresh_token ?? null,
+          expiresAt: tokens.expires_in
+            ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
+            : null,
+        },
+      );
+      redirect(
+        res,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connected=${provider}`,
+      );
+    } catch (error) {
+      console.error(
+        "google connector callback failed:",
+        error instanceof Error ? error.message : "unknown",
+      );
+      redirect(
+        res,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=EXCHANGE_FAILED`,
+      );
+    }
+    return;
+  }
+
+  // Zoom OAuth 2.0 for user-level meetings & recordings
+  if (path === "/app-api/connectors/oauth/zoom/start" && req.method === "GET") {
+    const session = await readSession(req, res, env);
+    if (!session.octoToken && !session.principalId) {
+      redirect(res, `${env.APP_ORIGIN}/console/signin`);
+      return;
+    }
+    const state = newOauthState();
+    session.connectorOauthState = state;
+    session.connectorProvider = "zoom";
+    await session.save();
+    const authUrl = buildZoomConnectorAuthUrl(env, state);
+    if (!authUrl) {
+      redirect(
+        res,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=ZOOM_NOT_CONFIGURED`,
+      );
+      return;
+    }
+    redirect(res, authUrl);
+    return;
+  }
+
+  if (
+    path === "/app-api/connectors/oauth/zoom/callback" &&
+    req.method === "GET"
+  ) {
+    const session = await readSession(req, res, env);
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    if (
+      !code ||
+      !state ||
+      state !== session.connectorOauthState ||
+      !env.ZOOM_CLIENT_ID ||
+      !env.ZOOM_CLIENT_SECRET
+    ) {
+      redirect(
+        res,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=ZOOM_STATE_MISMATCH`,
+      );
+      return;
+    }
+    try {
+      const basic = Buffer.from(
+        `${env.ZOOM_CLIENT_ID}:${env.ZOOM_CLIENT_SECRET}`,
+      ).toString("base64");
+      const tokenRes = await fetch("https://zoom.us/oauth/token", {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${basic}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: `${env.APP_ORIGIN}/app-api/connectors/oauth/zoom/callback`,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!tokenRes.ok) throw new Error(`zoom token ${tokenRes.status}`);
+      const tokens = (await tokenRes.json()) as {
+        access_token?: string;
+        refresh_token?: string;
+        expires_in?: number;
+        scope?: string;
+      };
+      const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 20_000 };
+      const tenancy = await resolveTenancy(req, res, env, config);
+      if (!tenancy.ok) {
+        redirect(res, `${env.APP_ORIGIN}/console/signin`);
+        return;
+      }
+      await saveUserConnector(
+        config,
+        tenancy.token,
+        tenancy.octoWorkspaceId,
+        tenancy.workspace.id,
+        tenancy.principal.id,
+        {
+          provider: "zoom",
+          status: "connected",
+          accountEmail: tenancy.principal.email || null,
+          scopes: tokens.scope ? tokens.scope.split(/\s+/) : undefined,
+          accessToken: tokens.access_token ?? null,
+          refreshToken: tokens.refresh_token ?? null,
+          expiresAt: tokens.expires_in
+            ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
+            : null,
+        },
+      );
+      redirect(
+        res,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connected=zoom`,
+      );
+    } catch (error) {
+      console.error(
+        "zoom connector callback failed:",
+        error instanceof Error ? error.message : "unknown",
+      );
+      redirect(
+        res,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=ZOOM_EXCHANGE_FAILED`,
+      );
+    }
+    return;
+  }
+
   if (path === "/app-api/session/accept-key" && req.method === "POST") {
     const session = await readSession(req, res, env);
     let key: unknown;
@@ -320,7 +542,6 @@ export async function handleRequest(
       const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 };
       await fetchPrincipal(config, token);
     } catch (error) {
-      // Diagnostic class only: status and prefix, never the token itself.
       console.error(
         "session accept: Octo refused the token:",
         error instanceof OctoError ? error.status : "non-octo-error",
@@ -347,24 +568,16 @@ export async function handleRequest(
       sendJson(res, 200, { authenticated: false });
       return;
     }
-    // Advisory expiry for the console countdown; Octo stays the authority on
-    // whether the token is actually valid (signature, revocation, clock).
-    // Workspace keys (octo_live_*) carry no TTL envelope; only principal
-    // session tokens (octo_sess_*) have the advisory expiry.
     const isSessionToken = (session.octoToken ?? "").startsWith("octo_sess_");
     const expiresAt = isSessionToken
       ? tokenExpiresAtMs(session.octoToken ?? "")
       : null;
     if (isSessionToken && expiresAt === null) {
-      // Bad prefix or malformed envelope: this cookie can never become valid,
-      // so it is the one case where we destroy it outright.
       session.destroy();
       sendJson(res, 200, { authenticated: false });
       return;
     }
     if (isIdleExpired(session)) {
-      // Sliding idle window ended. Destroy, but tell the console why so the
-      // sign-in screen can offer Resume instead of a cold first sign-in.
       session.destroy();
       sendJson(res, 200, {
         authenticated: false,
@@ -387,18 +600,12 @@ export async function handleRequest(
         principal,
         workspaces,
       });
-      // expiresAt rides alongside the validated contract; the shared schema
-      // does not carry it yet (integrator owns contracts.ts).
       sendJson(res, 200, { ...state, expiresAt });
     } catch (error) {
       if (
         error instanceof OctoError &&
         (error.status === 401 || error.status === 403)
       ) {
-        // Octo refused the token (absolute TTL passed, or revoked). Keep the
-        // cookie: it grants nothing on its own, and keeping it lets the
-        // console resume in place (returnTo, workspace selection) instead of
-        // bouncing the user through a cold Google sign-in.
         sendJson(res, 200, {
           authenticated: false,
           reason: "octo_token_expired",
@@ -414,7 +621,6 @@ export async function handleRequest(
 
   if (path === "/app-api/connections" && req.method === "GET") {
     const session = await readSession(req, res, env);
-    // Our own Google flow seals a principalId with no Octo token; accept both.
     if (!session.octoToken && !session.principalId) {
       sendJson(res, 401, { error: "UNAUTHENTICATED" });
       return;
@@ -424,12 +630,9 @@ export async function handleRequest(
       sendJson(res, 401, { error: "UNAUTHENTICATED", reason: "idle_expired" });
       return;
     }
-    // Source connections live in the Octo workspace database, keyed by the
-    // current principal. Until Slice 001 creates that table, an authenticated
-    // user with no connections gets an empty list rather than an error.
     try {
       const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 };
-      await fetchPrincipal(config, session.octoToken ?? env.OCTO_API_KEY ?? ""); // still valid?
+      await fetchPrincipal(config, session.octoToken ?? env.OCTO_API_KEY ?? "");
       session.lastSeenAt = Date.now();
       await session.save();
       sendJson(res, 200, { connections: [] });
@@ -438,8 +641,6 @@ export async function handleRequest(
         error instanceof OctoError &&
         (error.status === 401 || error.status === 403)
       ) {
-        // Keep the cookie so GET /app-api/session can report the reason and
-        // the console can offer Resume; the token itself is already dead.
         sendJson(res, 401, {
           error: "UNAUTHENTICATED",
           reason: "octo_token_expired",
@@ -460,7 +661,7 @@ export async function handleRequest(
   }
 
   /* ------------------------------------------------------------------ */
-  /* Console world routes — principal token only, never the workspace key */
+  /* Console world & single-Octo workspace routes                        */
   /* ------------------------------------------------------------------ */
 
   const worldRoutes = [
@@ -472,6 +673,8 @@ export async function handleRequest(
     "/app-api/connector-status",
     "/app-api/plugin-installed",
     "/app-api/projects",
+    "/app-api/connectors",
+    "/app-api/connectors/routes",
   ];
   const isCreateWorkspace =
     path === "/app-api/workspaces" && req.method === "POST";
@@ -482,6 +685,15 @@ export async function handleRequest(
   const membersMatch = path.match(/^\/app-api\/workspaces\/([^/]+)\/members$/);
   const removeMemberMatch = path.match(
     /^\/app-api\/workspaces\/([^/]+)\/members\/([^/]+)$/,
+  );
+  const connectorDisconnectMatch = path.match(
+    /^\/app-api\/connectors\/([^/]+)\/disconnect$/,
+  );
+  const connectorSyncMatch = path.match(
+    /^\/app-api\/connectors\/([^/]+)\/sync$/,
+  );
+  const deleteRouteMatch = path.match(
+    /^\/app-api\/connectors\/routes\/([^/]+)$/,
   );
   const extraRoutes =
     path === "/app-api/profile" ||
@@ -500,6 +712,9 @@ export async function handleRequest(
     inviteMatch ||
     membersMatch ||
     removeMemberMatch ||
+    connectorDisconnectMatch ||
+    connectorSyncMatch ||
+    deleteRouteMatch ||
     extraRoutes
   ) {
     const body =
@@ -526,15 +741,99 @@ export async function handleRequest(
       sendJson(res, tenancy.status, tenancy.body);
       return;
     }
-    const { principal, role, workspace, workspaces, token } = tenancy;
+    const { principal, role, workspace, workspaces, octoWorkspaceId, token } =
+      tenancy;
     const requested = workspace.id;
     try {
-      if (isCreateWorkspace) {
-        if (!requireRole(role, "owner")) {
-          sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "owner" });
+      if (path === "/app-api/connectors" && req.method === "GET") {
+        sendJson(
+          res,
+          200,
+          await listUserConnectors(
+            config,
+            token,
+            octoWorkspaceId,
+            principal.id,
+            env,
+          ),
+        );
+        return;
+      }
+      if (path === "/app-api/connectors/routes" && req.method === "POST") {
+        const result = await createConnectorRoute(
+          config,
+          token,
+          octoWorkspaceId,
+          principal.id,
+          body,
+        );
+        sendJson(res, result.status, result.body);
+        return;
+      }
+      if (deleteRouteMatch && req.method === "DELETE") {
+        sendJson(
+          res,
+          200,
+          await deleteConnectorRoute(
+            config,
+            token,
+            octoWorkspaceId,
+            principal.id,
+            deleteRouteMatch[1] ?? "",
+          ),
+        );
+        return;
+      }
+      if (connectorSyncMatch && req.method === "POST") {
+        const provider = connectorSyncMatch[1] as ConnectorProviderId;
+        const result = await syncUserConnector(
+          config,
+          token,
+          octoWorkspaceId,
+          requested,
+          principal.id,
+          provider,
+          env,
+        );
+        if (!result.ok) {
+          sendJson(res, result.status, {
+            error: result.error,
+            detail: result.detail,
+          });
           return;
         }
-        const result = await createWorkspaceWithProvision(config, env, body);
+        sendJson(res, 200, result);
+        return;
+      }
+      if (connectorDisconnectMatch && req.method === "POST") {
+        const provider = connectorDisconnectMatch[1] as ConnectorProviderId;
+        sendJson(
+          res,
+          200,
+          await saveUserConnector(
+            config,
+            token,
+            octoWorkspaceId,
+            requested,
+            principal.id,
+            {
+              provider,
+              status: "needs_setup",
+              accessToken: null,
+              refreshToken: null,
+            },
+          ),
+        );
+        return;
+      }
+      if (isCreateWorkspace) {
+        const result = await createAppWorkspace(
+          config,
+          token,
+          octoWorkspaceId,
+          principal,
+          body,
+        );
         sendJson(res, result.status, result.body);
         return;
       }
@@ -543,7 +842,11 @@ export async function handleRequest(
           sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "admin" });
           return;
         }
-        sendJson(res, 200, await provisionWorkspace(config, token, requested));
+        sendJson(
+          res,
+          200,
+          await provisionWorkspace(config, token, octoWorkspaceId),
+        );
         return;
       }
       if (inviteMatch && req.method === "POST") {
@@ -554,7 +857,9 @@ export async function handleRequest(
         const result = await inviteWorkspaceMember(
           config,
           token,
+          octoWorkspaceId,
           requested,
+          principal.id,
           body,
         );
         sendJson(res, result.status, result.body);
@@ -562,7 +867,12 @@ export async function handleRequest(
       }
       if (membersMatch && req.method === "GET") {
         sendJson(res, 200, {
-          members: await listWorkspaceMembers(config, token, requested),
+          members: await listWorkspaceMembers(
+            config,
+            token,
+            octoWorkspaceId,
+            requested,
+          ),
         });
         return;
       }
@@ -575,9 +885,11 @@ export async function handleRequest(
         const result = await removeWorkspaceMember(
           config,
           token,
+          octoWorkspaceId,
           requested,
           targetEmail,
           principal.email,
+          principal.id,
         );
         sendJson(res, result.status, result.body);
         return;
@@ -686,7 +998,14 @@ export async function handleRequest(
         sendJson(
           res,
           200,
-          await readWorld(config, token, requested, principal, workspaces),
+          await readWorld(
+            config,
+            token,
+            requested,
+            principal,
+            workspaces,
+            octoWorkspaceId,
+          ),
         );
         return;
       }
@@ -715,7 +1034,10 @@ export async function handleRequest(
                   ? body.editedAction
                   : undefined,
             },
-            { canDecideOthers: requireRole(role, "operator") },
+            {
+              canDecideOthers: requireRole(role, "operator"),
+              octoContainerId: octoWorkspaceId,
+            },
           ),
         );
         return;
@@ -730,6 +1052,7 @@ export async function handleRequest(
             requested,
             principal.id,
             body.proposal as Record<string, unknown>,
+            octoWorkspaceId,
           ),
         );
         return;
@@ -744,6 +1067,7 @@ export async function handleRequest(
             requested,
             principal.id,
             body.entry as Record<string, unknown>,
+            octoWorkspaceId,
           ),
         );
         return;
@@ -767,6 +1091,8 @@ export async function handleRequest(
               status: body.status,
               ...(body.status === "paused" ? { currentTask: null } : {}),
             },
+            "shared",
+            octoWorkspaceId,
           ),
         );
         return;
@@ -792,6 +1118,8 @@ export async function handleRequest(
                 ? { lastSync: new Date().toISOString() }
                 : {}),
             },
+            "shared",
+            octoWorkspaceId,
           ),
         );
         return;
@@ -814,6 +1142,8 @@ export async function handleRequest(
             {
               installed: Boolean(body.installed),
             },
+            "shared",
+            octoWorkspaceId,
           ),
         );
         return;
@@ -825,8 +1155,6 @@ export async function handleRequest(
           return;
         }
         const id = randomUUID();
-        // Same doc shape applyDesign writes; 'shared' so the whole workspace
-        // sees the container (readOps only surfaces shared rows or own rows).
         const doc = {
           id,
           workspaceId: requested,
@@ -843,7 +1171,7 @@ export async function handleRequest(
         await octoSql(
           config,
           token,
-          requested,
+          octoWorkspaceId,
           `INSERT INTO ri_console.project (id, workspace_id, principal_id, visibility, doc)
            VALUES (${lit(id)}, ${lit(requested)}, ${lit(principal.id)}, 'shared', ${lit(JSON.stringify(doc))}::jsonb)
            ON CONFLICT (id) DO UPDATE SET doc = EXCLUDED.doc, updated_at = now()`,
@@ -858,7 +1186,7 @@ export async function handleRequest(
         const existing = await octoSql(
           config,
           token,
-          requested,
+          octoWorkspaceId,
           `SELECT id, principal_id FROM ri_console.project WHERE id = ${lit(projectId)} AND ${owns}`,
         );
         if (existing.length === 0) throw new Error("Unknown project");
@@ -872,12 +1200,10 @@ export async function handleRequest(
           });
           return;
         }
-        // Plan docs carry missionId, not projectId: remove them through their
-        // missions before the missions themselves disappear.
         await octoSql(
           config,
           token,
-          requested,
+          octoWorkspaceId,
           `DELETE FROM ri_console.plan
             WHERE ${owns}
               AND doc->>'missionId' IN (
@@ -888,19 +1214,19 @@ export async function handleRequest(
         await octoSql(
           config,
           token,
-          requested,
+          octoWorkspaceId,
           `DELETE FROM ri_console.mission WHERE ${owns} AND doc->>'projectId' = ${lit(projectId)}`,
         );
         await octoSql(
           config,
           token,
-          requested,
+          octoWorkspaceId,
           `DELETE FROM ri_console.objective WHERE ${owns} AND doc->>'projectId' = ${lit(projectId)}`,
         );
         await octoSql(
           config,
           token,
-          requested,
+          octoWorkspaceId,
           `DELETE FROM ri_console.project WHERE id = ${lit(projectId)} AND ${owns}`,
         );
         sendJson(res, 200, { id: projectId, deleted: true });
@@ -925,7 +1251,6 @@ export async function handleRequest(
         error instanceof OctoError &&
         (error.status === 401 || error.status === 403)
       ) {
-        // Keep the cookie for the resume flow; see GET /app-api/session.
         sendJson(res, 401, {
           error: "UNAUTHENTICATED",
           reason: "octo_token_expired",
@@ -945,8 +1270,6 @@ export async function handleRequest(
     }
   }
 
-  // Production: serve the built console at /console with SPA fallback, so the
-  // Cloudflare hostname serves app + API from this one process.
   const consoleDist = nodePath.resolve(process.cwd(), "../console/dist");
   if (
     req.method === "GET" &&
@@ -994,8 +1317,6 @@ export function createAppServer(env: Env) {
   return createServer((req, res) => {
     const id = requestId();
     handleRequest(req, res, env).catch((error: unknown) => {
-      // Log the failure class and request id, never the URL query or body:
-      // the callback URL carries the session token.
       console.error(
         `request ${id} failed:`,
         error instanceof Error ? error.name : "unknown",

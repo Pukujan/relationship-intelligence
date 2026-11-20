@@ -1,21 +1,18 @@
 /**
  * The Octo-backed world: reads and writes for the console's owner mode.
  *
- * Authority rules, from the project contract:
- *  - Every call here uses the signed-in principal's Octo session token, so
- *    Octo enforces that principal's memberships. The workspace key is never
- *    used in this path (it is reserved for admin bootstrap).
- *  - Canonical people/companies/claims come from the epistemic ledger via the
- *    graph projection. Operational records (agents, work, approvals, activity)
- *    live in the workspace SQL surface, schema ri_console.
- *  - Private by default: rows a principal creates carry their id and
- *    visibility 'private'; reads return shared rows plus the caller's own.
- *  - Nothing unsourced becomes canonical: ledger claims without a CITES edge
- *    surface as `unverified`, exactly as the loader wrote them.
+ * Single-Octo model (RI-0018) + Dual Ledger / Phoenix bridge (RI-0020):
+ *  - Every SQL/graph call targets the single backing `octoContainerId`
+ *    (defaulting to `workspaceId` for backward compatibility).
+ *  - Operational rows in `ri_console.*` are scoped by `workspace_id` (the
+ *    active App Workspace ID) and `visibility`/`principal_id`.
+ *  - Approval decisions also append an immutable row to `ri_console.ledger_event`
+ *    carrying a W3C `trace_id` exported to Phoenix when configured.
  */
 import { randomUUID } from "node:crypto";
 import type { OctoClientConfig } from "./octo.js";
 import { OctoError } from "./octo.js";
+import { appendLedgerEvent, endSpan, startSpan } from "./telemetry.js";
 
 export class ConflictError extends Error {
   constructor(message: string) {
@@ -145,13 +142,13 @@ async function octoPost(
 export async function octoSql(
   config: OctoClientConfig,
   token: string,
-  workspaceId: string,
+  octoContainerId: string,
   sql: string,
 ): Promise<Json[]> {
   const result = await octoPost(
     config,
     token,
-    `/api/workspaces/${workspaceId}/query`,
+    `/api/workspaces/${octoContainerId}/query`,
     { sql },
   );
   return (result.rows as Json[]) ?? [];
@@ -160,11 +157,11 @@ export async function octoSql(
 async function graph(
   config: OctoClientConfig,
   token: string,
-  workspaceId: string,
+  octoContainerId: string,
   query: string,
 ): Promise<Json[]> {
   const result = await octoPost(config, token, "/api/graph/query", {
-    workspaceId,
+    workspaceId: octoContainerId,
     query,
   });
   return (result.rows as Json[]) ?? [];
@@ -204,37 +201,37 @@ const hostOf = (locator: string) => {
 export async function readCanonical(
   config: OctoClientConfig,
   token: string,
-  workspaceId: string,
+  octoContainerId: string,
 ): Promise<{ people: WorldPerson[]; companies: WorldCompany[] }> {
   const [entities, claims, subjects, cites, beliefs] = await Promise.all([
     graph(
       config,
       token,
-      workspaceId,
+      octoContainerId,
       "MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.entityType AS kind",
     ),
     graph(
       config,
       token,
-      workspaceId,
+      octoContainerId,
       "MATCH (c:Claim) RETURN c.id AS id, c.statement AS statement, c.validFrom AS validFrom, c.supersededAt AS supersededAt, c.provenance AS provenance",
     ),
     graph(
       config,
       token,
-      workspaceId,
+      octoContainerId,
       "MATCH (c:Claim)-[:SUBJECT]->(e:Entity) RETURN c.id AS claimId, e.id AS entityId",
     ),
     graph(
       config,
       token,
-      workspaceId,
+      octoContainerId,
       "MATCH (c:Claim)-[:CITES]->(v:Evidence) RETURN c.id AS claimId, v.locator AS locator",
     ),
     graph(
       config,
       token,
-      workspaceId,
+      octoContainerId,
       "MATCH (b:Belief)-[:ABOUT]->(c:Claim) RETURN c.id AS claimId, b.confidence AS confidence",
     ),
   ]);
@@ -336,8 +333,6 @@ export async function readCanonical(
         timezone: "",
         strength,
         warmth: warmthOf(quietDays),
-        // Last sourced activity, not a fabricated contact date: the ledger
-        // records claims, not interactions.
         lastContact: lastContact || new Date(0).toISOString(),
         tags: [],
         summary: sourced?.text ?? mappedClaims[0]?.text ?? "",
@@ -358,15 +353,14 @@ async function readOps(
   token: string,
   workspaceId: string,
   principalId: string,
+  octoContainerId = workspaceId,
 ): Promise<Record<string, Json[]>> {
-  // A workspace without the console schema (e.g. a fresh personal workspace)
-  // reads as empty work, not an error. Canonical graph reads still apply.
   const present = new Set(
     (
       await octoSql(
         config,
         token,
-        workspaceId,
+        octoContainerId,
         "SELECT table_name FROM information_schema.tables WHERE table_schema = 'ri_console'",
       )
     ).map((row) => String(row.table_name)),
@@ -380,7 +374,7 @@ async function readOps(
     const rows = await octoSql(
       config,
       token,
-      workspaceId,
+      octoContainerId,
       `SELECT doc FROM ri_console.${table}
        WHERE workspace_id = ${lit(workspaceId)}
          AND (visibility = 'shared' OR principal_id = ${lit(principalId)})
@@ -399,11 +393,12 @@ async function insertDoc(
   collection: string,
   doc: Json,
   visibility: "private" | "shared" = "private",
+  octoContainerId = workspaceId,
 ): Promise<void> {
   await octoSql(
     config,
     token,
-    workspaceId,
+    octoContainerId,
     `INSERT INTO ri_console.${TABLES[collection]} (id, workspace_id, principal_id, visibility, doc)
      VALUES (${lit(doc.id)}, ${lit(workspaceId)}, ${lit(principalId)}, ${lit(visibility)}, ${lit(JSON.stringify(doc))}::jsonb)
      ON CONFLICT (id) DO UPDATE SET doc = EXCLUDED.doc, updated_at = now()`,
@@ -417,11 +412,12 @@ async function getDoc(
   principalId: string,
   collection: string,
   id: string,
+  octoContainerId = workspaceId,
 ): Promise<Json | null> {
   const rows = await octoSql(
     config,
     token,
-    workspaceId,
+    octoContainerId,
     `SELECT doc FROM ri_console.${TABLES[collection]}
      WHERE id = ${lit(id)} AND workspace_id = ${lit(workspaceId)}
        AND (visibility = 'shared' OR principal_id = ${lit(principalId)})`,
@@ -435,10 +431,11 @@ export async function readWorld(
   workspaceId: string,
   principal: { id: string; displayName: string },
   workspaces: { id: string; name: string }[],
+  octoContainerId = workspaceId,
 ): Promise<WorldShape> {
   const [canonical, ops] = await Promise.all([
-    readCanonical(config, token, workspaceId),
-    readOps(config, token, workspaceId, principal.id),
+    readCanonical(config, token, octoContainerId),
+    readOps(config, token, workspaceId, principal.id, octoContainerId),
   ]);
   const {
     projects = [],
@@ -485,7 +482,6 @@ export async function readWorld(
     activity,
     people: canonical.people,
     companies: canonical.companies,
-    // Events are canonical graph entities; none exist in this ledger yet.
     events: [],
     folders,
     files,
@@ -515,72 +511,108 @@ export interface DecisionInput {
 
 const now = () => new Date().toISOString();
 
-/** Mirror of the seed source's materialization, written as operational rows. */
 async function applyDesign(
   config: OctoClientConfig,
   token: string,
   workspaceId: string,
   principalId: string,
   design: Json,
+  octoContainerId = workspaceId,
 ): Promise<string> {
   const due = String(design.due ?? now());
   let projectId = typeof design.projectId === "string" ? design.projectId : "";
   if (!projectId) {
     projectId = randomUUID();
-    await insertDoc(config, token, workspaceId, principalId, "projects", {
-      id: projectId,
+    await insertDoc(
+      config,
+      token,
       workspaceId,
-      name: design.projectName ?? design.missionName,
-      kind: "initiative",
-      status: "active",
-      owner: principalId,
-      summary: design.missionSummary,
-      personIds: [],
-      companyIds: [],
-      eventIds: [],
-      startedAt: now(),
-      targetDate: due,
-    });
+      principalId,
+      "projects",
+      {
+        id: projectId,
+        workspaceId,
+        name: design.projectName ?? design.missionName,
+        kind: "initiative",
+        status: "active",
+        owner: principalId,
+        summary: design.missionSummary,
+        personIds: [],
+        companyIds: [],
+        eventIds: [],
+        startedAt: now(),
+        targetDate: due,
+      },
+      "private",
+      octoContainerId,
+    );
   }
   const objectiveId = randomUUID();
-  await insertDoc(config, token, workspaceId, principalId, "objectives", {
-    id: objectiveId,
-    projectId,
-    name: design.objectiveName,
-    targetLabel: design.objectiveTarget,
-    progress: 0,
-    status: "on_track",
-    dueDate: due,
-  });
+  await insertDoc(
+    config,
+    token,
+    workspaceId,
+    principalId,
+    "objectives",
+    {
+      id: objectiveId,
+      projectId,
+      name: design.objectiveName,
+      targetLabel: design.objectiveTarget,
+      progress: 0,
+      status: "on_track",
+      dueDate: due,
+    },
+    "private",
+    octoContainerId,
+  );
   const missionId = randomUUID();
-  await insertDoc(config, token, workspaceId, principalId, "missions", {
-    id: missionId,
-    objectiveId,
-    projectId,
-    name: design.missionName,
-    summary: design.missionSummary,
-    horizon: design.horizon ?? "this_week",
-    status: "queued",
-    agentIds: design.agentIds ?? [],
-    personIds: [],
-    due,
-  });
+  await insertDoc(
+    config,
+    token,
+    workspaceId,
+    principalId,
+    "missions",
+    {
+      id: missionId,
+      objectiveId,
+      projectId,
+      name: design.missionName,
+      summary: design.missionSummary,
+      horizon: design.horizon ?? "this_week",
+      status: "queued",
+      agentIds: design.agentIds ?? [],
+      personIds: [],
+      due,
+    },
+    "private",
+    octoContainerId,
+  );
   const steps = (design.planSteps as Json[]) ?? [];
-  await insertDoc(config, token, workspaceId, principalId, "plans", {
-    id: randomUUID(),
-    missionId,
-    agentId: (design.agentIds as string[])?.[0] ?? "research",
-    title: `Plan — ${String(design.missionName)}`,
-    summary: design.rationale,
-    steps: steps.map((step, index) => ({
-      id: `step-${index + 1}`,
-      label: step.label,
-      detail: step.detail ?? "",
-      status: "todo",
-      agentId: step.agentId,
-    })),
-    updatedAt: now(),
-  });
+  await insertDoc(
+    config,
+    token,
+    workspaceId,
+    principalId,
+    "plans",
+    {
+      id: randomUUID(),
+      missionId,
+      agentId: (design.agentIds as string[])?.[0] ?? "research",
+      title: `Plan — ${String(design.missionName)}`,
+      summary: design.rationale,
+      steps: steps.map((step, index) => ({
+        id: `step-${index + 1}`,
+        label: step.label,
+        detail: step.detail ?? "",
+        status: "todo",
+        agentId: step.agentId,
+      })),
+      updatedAt: now(),
+    },
+    "private",
+    octoContainerId,
+  );
   return `${String(design.missionName)} is queued with a ${steps.length}-step plan.`;
 }
 
@@ -591,12 +623,25 @@ export async function decideApproval(
   principal: { id: string; displayName: string },
   workspaces: { id: string; name: string }[],
   input: DecisionInput,
-  options: { canDecideOthers?: boolean } = {},
+  options: { canDecideOthers?: boolean; octoContainerId?: string } = {},
 ): Promise<Json> {
+  const containerId = options.octoContainerId ?? workspaceId;
+  const span = startSpan({
+    name: "approval.decide",
+    kind: "CHAIN",
+    workspaceId,
+    principalId: principal.id,
+    cadence: "interactive",
+    attributes: {
+      "ri.approval_id": input.approvalId,
+      "ri.decision": input.decision,
+    },
+  });
+
   const rows = await octoSql(
     config,
     token,
-    workspaceId,
+    containerId,
     `SELECT principal_id, doc FROM ri_console.approval
      WHERE id = ${lit(input.approvalId)} AND workspace_id = ${lit(workspaceId)}
        AND (visibility = 'shared' OR principal_id = ${lit(principal.id)})`,
@@ -621,6 +666,7 @@ export async function decideApproval(
   approval.status = input.decision;
   approval.decidedAt = now();
   approval.decisionNote = input.note;
+  approval.traceId = span.traceId;
   if (input.decision === "declined") {
     approval.declinePath = declinePath;
     if (declinePath === "snooze") {
@@ -632,7 +678,7 @@ export async function decideApproval(
   const updated = await octoSql(
     config,
     token,
-    workspaceId,
+    containerId,
     `UPDATE ri_console.approval
         SET doc = ${lit(JSON.stringify(approval))}::jsonb, updated_at = now()
       WHERE id = ${lit(input.approvalId)}
@@ -652,6 +698,7 @@ export async function decideApproval(
       workspaceId,
       principal.id,
       approval.design as Json,
+      containerId,
     );
   } else if (input.decision === "declined" && declinePath === "re_plan") {
     const replan: Json = {
@@ -674,6 +721,8 @@ export async function decideApproval(
       principal.id,
       "approvals",
       replan,
+      "private",
+      containerId,
     );
     outcome = "Queued one re-plan proposal.";
   } else if (input.decision === "declined" && declinePath === "snooze") {
@@ -689,18 +738,19 @@ export async function decideApproval(
     principal.id,
     "agents",
     String(approval.agentId),
+    containerId,
   );
   if (agent) {
     const pendingRows = await octoSql(
       config,
       token,
-      workspaceId,
+      containerId,
       `SELECT doc FROM ri_console.approval
        WHERE workspace_id = ${lit(workspaceId)}
          AND (visibility = 'shared' OR principal_id = ${lit(principal.id)})`,
     );
     const remaining = pendingRows
-      .map((row) => row.doc as Json)
+      .map((r) => r.doc as Json)
       .filter((a) => a.agentId === agent.id && a.status === "pending");
     if (remaining.length === 0 && agent.status === "needs_you") {
       agent.status = "running";
@@ -717,6 +767,7 @@ export async function decideApproval(
         "agents",
         agent,
         "shared",
+        containerId,
       );
     }
   }
@@ -737,6 +788,7 @@ export async function decideApproval(
     companyId: approval.companyId,
     eventId: approval.eventId,
     approvalId: approval.id,
+    traceId: span.traceId,
     outcome: input.decision === "approved" ? "ok" : "declined",
   };
   await insertDoc(
@@ -746,7 +798,25 @@ export async function decideApproval(
     principal.id,
     "activity",
     activity,
+    "private",
+    containerId,
   );
+
+  await appendLedgerEvent(config, token, containerId, {
+    workspaceId,
+    principalId: principal.id,
+    agentId: typeof approval.agentId === "string" ? approval.agentId : null,
+    traceId: span.traceId,
+    eventType: `approval.${input.decision}`,
+    entityKind: "approval",
+    entityId: input.approvalId,
+    payload: {
+      decision: input.decision,
+      declinePath: input.decision === "declined" ? declinePath : null,
+      outcome: outcome ?? "",
+    },
+  });
+  await endSpan(span, "OK");
 
   const world = await readWorld(
     config,
@@ -754,11 +824,13 @@ export async function decideApproval(
     workspaceId,
     principal,
     workspaces,
+    containerId,
   );
   return {
     approval,
     activity,
     agent: agent ?? { id: approval.agentId },
+    traceId: span.traceId,
     world,
   };
 }
@@ -769,6 +841,7 @@ export async function addProposal(
   workspaceId: string,
   principalId: string,
   proposal: Json,
+  octoContainerId = workspaceId,
 ): Promise<Json> {
   const approval: Json = {
     ...proposal,
@@ -783,6 +856,8 @@ export async function addProposal(
     principalId,
     "approvals",
     approval,
+    "private",
+    octoContainerId,
   );
   return approval;
 }
@@ -793,6 +868,7 @@ export async function logActivity(
   workspaceId: string,
   principalId: string,
   entry: Json,
+  octoContainerId = workspaceId,
 ): Promise<Json> {
   const activity: Json = { ...entry, id: randomUUID(), at: now() };
   await insertDoc(
@@ -802,6 +878,8 @@ export async function logActivity(
     principalId,
     "activity",
     activity,
+    "private",
+    octoContainerId,
   );
   return activity;
 }
@@ -815,6 +893,7 @@ export async function patchDoc(
   id: string,
   patch: Json,
   visibility: "private" | "shared" = "shared",
+  octoContainerId = workspaceId,
 ): Promise<Json> {
   const doc = await getDoc(
     config,
@@ -823,6 +902,7 @@ export async function patchDoc(
     principalId,
     collection,
     id,
+    octoContainerId,
   );
   if (!doc) throw new Error(`Unknown ${collection} row: ${id}`);
   const next = { ...doc, ...patch };
@@ -834,6 +914,7 @@ export async function patchDoc(
     collection,
     next,
     visibility,
+    octoContainerId,
   );
   return next;
 }

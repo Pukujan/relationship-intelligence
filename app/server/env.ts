@@ -7,6 +7,7 @@ import { z } from "zod";
 const EnvSchema = z.object({
   OCTO_API_URL: z.string().url(),
   OCTO_API_KEY: z.string().optional(),
+  OCTO_WORKSPACE_ID: z.string().optional(),
   // iron-session requires a password of at least 32 characters. Generated
   // once at deploy time; rotating it signs everyone out.
   SESSION_PASSWORD: z.string().min(32),
@@ -14,6 +15,12 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(8787),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+  ZOOM_CLIENT_ID: z.string().optional(),
+  ZOOM_CLIENT_SECRET: z.string().optional(),
+  PHOENIX_COLLECTOR_ENDPOINT: z.string().url().optional(),
+  PHOENIX_UI_URL: z.string().url().optional(),
+  PHOENIX_PROJECT_NAME: z.string().optional(),
+  PHOENIX_CAPTURE_CONTENT: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
