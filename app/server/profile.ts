@@ -32,7 +32,16 @@ export interface ProfileRouteContext {
   config: OctoClientConfig;
   /** The signed-in principal's Octo session token. Never the workspace key. */
   token: string;
+  /** The app workspace the rows belong to (`workspace_id`). */
   workspaceId: string;
+  /** The Octo container the SQL runs in. Every app workspace shares one. */
+  octoContainerId: string;
+  /**
+   * The request body, when the caller has already read it. A request stream
+   * can be read once: the adapter reads it to find the workspace, and a
+   * second read here never finished, so every POST and PATCH hung.
+   */
+  body?: Record<string, unknown>;
   principalId: string;
   principal: { id: string; displayName: string };
   workspaces: { id: string; name: string; role?: string }[];
@@ -150,7 +159,7 @@ async function tablesPresent(
   const rows = await octoSql(
     ctx.config,
     ctx.token,
-    ctx.workspaceId,
+    ctx.octoContainerId,
     "SELECT table_name FROM information_schema.tables WHERE table_schema = 'ri_console'",
   );
   const present = new Set(rows.map((row) => String(row.table_name)));
@@ -183,7 +192,7 @@ async function readProfile(ctx: ProfileRouteContext): Promise<Json> {
   const rows = await octoSql(
     ctx.config,
     ctx.token,
-    ctx.workspaceId,
+    ctx.octoContainerId,
     `SELECT doc FROM ri_console.profile
      WHERE workspace_id = ${lit(ctx.workspaceId)} AND principal_id = ${lit(ctx.principalId)}`,
   );
@@ -217,7 +226,7 @@ async function upsertProfile(
   await octoSql(
     ctx.config,
     ctx.token,
-    ctx.workspaceId,
+    ctx.octoContainerId,
     `INSERT INTO ri_console.profile (id, workspace_id, principal_id, doc, updated_at)
      VALUES (${lit(doc.id)}, ${lit(ctx.workspaceId)}, ${lit(ctx.principalId)},
              ${lit(JSON.stringify(doc))}::jsonb, ${lit(new Date().toISOString())})
@@ -409,7 +418,7 @@ async function readFiles(
       ? octoSql(
           ctx.config,
           ctx.token,
-          ctx.workspaceId,
+          ctx.octoContainerId,
           `SELECT doc FROM ri_console.folder
            WHERE workspace_id = ${lit(ctx.workspaceId)} AND ${filter}
            ORDER BY updated_at DESC`,
@@ -418,7 +427,7 @@ async function readFiles(
     octoSql(
       ctx.config,
       ctx.token,
-      ctx.workspaceId,
+      ctx.octoContainerId,
       `SELECT doc, principal_id, visibility FROM ri_console.file_doc
        WHERE workspace_id = ${lit(ctx.workspaceId)} AND ${filter}
        ORDER BY updated_at DESC`,
@@ -427,7 +436,7 @@ async function readFiles(
       ? octoSql(
           ctx.config,
           ctx.token,
-          ctx.workspaceId,
+          ctx.octoContainerId,
           `SELECT id, file_id, entity_kind, entity_id, principal_id
            FROM ri_console.file_link WHERE workspace_id = ${lit(ctx.workspaceId)}`,
         )
@@ -485,7 +494,7 @@ async function createFile(ctx: ProfileRouteContext, body: Json): Promise<Json> {
   await octoSql(
     ctx.config,
     ctx.token,
-    ctx.workspaceId,
+    ctx.octoContainerId,
     `INSERT INTO ri_console.file_doc (id, workspace_id, principal_id, visibility, doc)
      VALUES (${lit(id)}, ${lit(ctx.workspaceId)}, ${lit(ctx.principalId)},
              ${lit(input.visibility)}, ${lit(JSON.stringify(doc))}::jsonb)`,
@@ -518,7 +527,7 @@ async function linkFile(
   const rows = await octoSql(
     ctx.config,
     ctx.token,
-    ctx.workspaceId,
+    ctx.octoContainerId,
     `SELECT id FROM ri_console.file_doc
      WHERE id = ${lit(fileId)} AND workspace_id = ${lit(ctx.workspaceId)}
        AND (principal_id = ${lit(ctx.principalId)} OR visibility = 'shared')`,
@@ -527,7 +536,7 @@ async function linkFile(
   const existing = await octoSql(
     ctx.config,
     ctx.token,
-    ctx.workspaceId,
+    ctx.octoContainerId,
     `SELECT id, file_id, entity_kind, entity_id, principal_id
      FROM ri_console.file_link
      WHERE workspace_id = ${lit(ctx.workspaceId)} AND file_id = ${lit(fileId)}
@@ -550,7 +559,7 @@ async function linkFile(
   await octoSql(
     ctx.config,
     ctx.token,
-    ctx.workspaceId,
+    ctx.octoContainerId,
     `INSERT INTO ri_console.file_link (id, workspace_id, file_id, entity_kind, entity_id, principal_id)
      VALUES (${lit(id)}, ${lit(ctx.workspaceId)}, ${lit(fileId)},
              ${lit(input.entityKind)}, ${lit(input.entityId)}, ${lit(ctx.principalId)})`,
@@ -576,7 +585,7 @@ async function readNotes(ctx: ProfileRouteContext): Promise<Json[]> {
   const rows = await octoSql(
     ctx.config,
     ctx.token,
-    ctx.workspaceId,
+    ctx.octoContainerId,
     `SELECT doc FROM ri_console.note WHERE ${owns(ctx)} ORDER BY updated_at DESC`,
   );
   return rows.map((row) => row.doc as Json);
@@ -601,7 +610,7 @@ async function createNote(ctx: ProfileRouteContext, body: Json): Promise<Json> {
   await octoSql(
     ctx.config,
     ctx.token,
-    ctx.workspaceId,
+    ctx.octoContainerId,
     `INSERT INTO ri_console.note (id, workspace_id, principal_id, visibility, doc)
      VALUES (${lit(id)}, ${lit(ctx.workspaceId)}, ${lit(ctx.principalId)},
              ${lit(input.visibility)}, ${lit(JSON.stringify(doc))}::jsonb)`,
@@ -615,7 +624,7 @@ async function readRetros(ctx: ProfileRouteContext): Promise<Json[]> {
   const rows = await octoSql(
     ctx.config,
     ctx.token,
-    ctx.workspaceId,
+    ctx.octoContainerId,
     `SELECT doc FROM ri_console.retrospective WHERE ${owns(ctx)} ORDER BY updated_at DESC`,
   );
   return rows.map((row) => row.doc as Json);
@@ -653,7 +662,7 @@ export async function handleProfileRoutes(
   try {
     let body: Json = {};
     if (method === "POST" || method === "PATCH") {
-      body = await readJsonBody(req);
+      body = (ctx.body as Json | undefined) ?? (await readJsonBody(req));
     }
     // The caller may target any workspace they are a member of; anything
     // else falls back to the adapter-resolved workspace. Membership is
