@@ -6,19 +6,19 @@
 The issue-log shape and lifecycle are defined by the installed OIO ontology. For issue, pull-request, commit, and checkpoint prose, use the pinned CGM human-sounding-writing module: open with a concrete problem and observed result, explain identifiers on first use, distinguish evidence from inference, and state one next action. Link long logs rather than pasting them; never include private absolute paths, credentials, or session cookies. Pull requests use the reader-first template and `Closes #N` only when merge completes the issue; otherwise use `Refs #N`.
 <!-- pcm:issue-log-format:end -->
 
-## State
+## State (2026-11-20, `main` at `976478c`)
 
-The console is now the defined product surface. The goal, trust-layer operating model, and UX map are recorded in [CONSOLE.md](docs/CONSOLE.md) and [PROJECT.md](PROJECT.md), filed as [issue #18](https://github.com/Pukujan/relationship-intelligence/issues/18). An ABA-generated console prototype lives in `console/` (React + Vite + shadcn): the restructure pass passed its build gate and produced the grouped nav, the Project→Objective→Mission→Plan hierarchy, sign-in/guest, and connectors/MCP/plugins. It runs on seed data behind one swappable data layer; the copilot is still a designed simulation, not a live model.
+Four PRs are merged into `main` and live on `https://business.design-bakery.com/console/`:
+- **PR #44 & PR #45 (#37–#42 / RI-0012..RI-0017):** Single `resolveTenancy` choke, role gates (`owner > admin > operator > member`), atomic `409` double-decide idempotency, UX research memo (`docs/RESEARCH-UX.md`), Approval Do/Don't triage with `stop | re_plan | snooze` decline paths, Glance 3-move agenda (`I7` invariant preserved), and 1-hop "Who can introduce me" panel on `PersonProfile.tsx`.
+- **PR #46 (#48–#50 / RI-0018..RI-0020):** Refactored to the **single-Octo Slack-like model** (one `OCTO_WORKSPACE_ID` container; `ri_console.workspace`, `workspace_member`, `project_member`, `organization`, `app_user` — unlocking live `POST /app-api/workspaces` with zero `OCTO_ACCOUNT_KEY`). Added user-level connectors (`app/server/connectors.ts`, `app/server/sync.ts`, `Connectors.tsx`) with incremental Google OAuth (`gmail`, `gcal`, `gdrive`), Zoom OAuth 2.0, 11-provider catalog, Workspace/Project routing rules, and live read-only sync workers. Added append-only `ri_console.ledger_event` and zero-dep OTLP/OpenInference telemetry (`app/server/telemetry.ts`) with secret/PII scrubbing and `trace_id` propagation.
+- **PR #51 (#49 / RI-0019):** Added 4 starter agent templates (`GET /app-api/agent-templates`), custom workspace agent builder (`POST /app-api/agents`), Zone 3 Co-Design **Draft Plans → Lock** (`GET/POST /app-api/draft-plans`, `POST /app-api/draft-plans/:id/lock` with `409 ALREADY_LOCKED`), `POST /app-api/connectors/sync-all`, and updated `Agents.tsx`.
 
-Local collection execution is proven ([issue #15](https://github.com/Pukujan/relationship-intelligence/issues/15), [COLLECTION-EXECUTION.md](docs/COLLECTION-EXECUTION.md)): a real browser profile attached over CDP keeps a LinkedIn session across a restart, while a test build cannot. The app build script was fixed so CI actually runs it ([issue #14](https://github.com/Pukujan/relationship-intelligence/issues/14)). The earlier authenticated shell (Google sign-in via Octo, workspace list, sources screen) is merged in `app/`.
+All 20 issue log packets (`docs/issues/RI-000.md`–`RI-0020.md`) validate green; `28/28` Vitest tests, `pnpm typecheck`, Biome lint, `console` production build, and live hold-out tenancy suite (`7 pass, 0 red, 4 skip`) all pass.
 
 ## Next atomic action
 
-Build the intelligence layer on the console: a real orchestrator plus a research/design mode that proposes a mission name, objective, and plan held for approval, the deadline/iteration loop, and the signal layer. Then wire the swappable data layer to Octo (workspace `social-engineering`) and integrate the console into `app/` behind Octo sign-in. Migration note: the console prototype and preview screenshots are committed in this repo; the ABA install and run env live on the VPS (`octo-vps`), which is a machine reached over Tailscale/SSH for administration. Octo itself is not reached that way: the platform API is `https://octodb.design-bakery.com` (`OCTO_API_URL` in `.env`), authenticated with the workspace key in `.env` (`OCTO_API_KEY`). Traces, eval scores, RAG, graph, and SQL are all capabilities of that same API — see "Reaching Octo" in `AGENTS.md`.
-
-## TinyFish setup correction
-
-The CLI-generated setup URL led to a TinyFish dashboard 404. Current documentation directs manual session setup through [TinyProfiles](https://agent.tinyfish.ai/profiles). The existing profile `prof_69098d3aaeb042ea` still reports no signed-in sites. Do not treat it as an authenticated collector session.
+1. **Fix Komodo Docker static path:** Update `consoleDist` in `app/server/adapter.ts` to resolve relative to `import.meta.url` instead of `process.cwd()` (currently `WORKDIR /app` in `Dockerfile` makes `../console/dist` resolve to `/console/dist` instead of `/app/console/dist`), then deploy via Komodo on `octo-vps` (Tailscale) and switch `business.design-bakery.com` from the local Mac Cloudflare tunnel to the VPS container.
+2. **Activate live OAuth & traces:** Add `https://business.design-bakery.com/app-api/connectors/oauth/google/callback` to Google Cloud Console, add `ZOOM_CLIENT_ID`/`ZOOM_CLIENT_SECRET` for Zoom, and set `PHOENIX_COLLECTOR_ENDPOINT` (Arize Phoenix or Octo `/api/workspaces/<id>/otel/*`) to verify end-to-end live sync + trace waterfalls.
 
 ## Verification
 
@@ -26,6 +26,7 @@ The CLI-generated setup URL led to a TinyFish dashboard 404. Current documentati
 python .github/scripts/oio_installer.py --target "$PWD" --check
 python scripts/validate_planning.py
 .venv/bin/continuity validate --root "$PWD"
+cd app && pnpm typecheck && pnpm test && pnpm lint
 ```
 
 Stack: certified release train `3446a8024857afb84b7b51d044cefb400131fbf7`.
