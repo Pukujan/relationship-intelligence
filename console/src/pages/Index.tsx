@@ -144,7 +144,12 @@ const Index = () => {
             </span>
           </p>
           <h1 className="text-[26px] font-semibold leading-tight sm:text-[32px]">
-            {greeting()}, {session?.mode === "guest" ? "guest" : "Alex"}.
+            {greeting()},
+            {" "}
+            {session?.mode === "guest"
+              ? "guest"
+              : (session?.name ?? "").trim().split(/\s+/)[0] || "there"}
+            .
           </h1>
           <p className="max-w-xl text-sm leading-relaxed text-muted-foreground">
             {pending.length > 0 ? (
@@ -201,55 +206,57 @@ const Index = () => {
         </div>
       ) : null}
 
-      <div className="panel grid grid-cols-2 gap-px overflow-hidden bg-border/60 sm:grid-cols-4">
-        {[
-          {
-            label: "Approvals waiting",
-            value: pending.length,
-            hint: highRisk ? `${highRisk} high risk` : "nothing high risk",
-            tone: pending.length ? "warn" : undefined,
-            to: "/approvals",
-          },
-          {
-            label: "Missions today",
-            value: todayMissions.length,
-            hint: `${weekMissions.length} more this week`,
-            to: "/missions",
-          },
-          {
-            label: "Going cold",
-            value: cold.length,
-            hint: "14+ days quiet",
-            tone: cold.length ? "warn" : undefined,
-            to: "/people",
-          },
-          {
-            label: "Agents active",
-            value: summary.agentsActive,
-            hint: `${world.runs.length} runs in history`,
-            to: "/agents",
-          },
-        ].map((metric) => (
-          <Link
-            key={metric.label}
-            to={metric.to}
-            className="focus-ring bg-card p-3.5 transition-colors hover:bg-surface-1 sm:p-4"
-          >
-            <p className="eyebrow">{metric.label}</p>
-            <p className="num mt-1.5 text-[26px] font-semibold leading-none">
-              {metric.value}
-            </p>
-            <p
-              className={cn(
-                "mt-1 text-[11px] text-muted-foreground",
-                metric.tone === "warn" && "text-warn",
-              )}
+      {altitude !== "glance" ? (
+        <div className="panel grid grid-cols-2 gap-px overflow-hidden bg-border/60 sm:grid-cols-4">
+          {[
+            {
+              label: "Approvals waiting",
+              value: pending.length,
+              hint: highRisk ? `${highRisk} high risk` : "nothing high risk",
+              tone: pending.length ? "warn" : undefined,
+              to: "/approvals",
+            },
+            {
+              label: "Missions today",
+              value: todayMissions.length,
+              hint: `${weekMissions.length} more this week`,
+              to: "/missions",
+            },
+            {
+              label: "Going cold",
+              value: cold.length,
+              hint: "14+ days quiet",
+              tone: cold.length ? "warn" : undefined,
+              to: "/people",
+            },
+            {
+              label: "Agents active",
+              value: summary.agentsActive,
+              hint: `${world.runs.length} runs in history`,
+              to: "/agents",
+            },
+          ].map((metric) => (
+            <Link
+              key={metric.label}
+              to={metric.to}
+              className="focus-ring bg-card p-3.5 transition-colors hover:bg-surface-1 sm:p-4"
             >
-              {metric.hint}
-            </p>
-          </Link>
-        ))}
-      </div>
+              <p className="eyebrow">{metric.label}</p>
+              <p className="num mt-1.5 text-[26px] font-semibold leading-none">
+                {metric.value}
+              </p>
+              <p
+                className={cn(
+                  "mt-1 text-[11px] text-muted-foreground",
+                  metric.tone === "warn" && "text-warn",
+                )}
+              >
+                {metric.hint}
+              </p>
+            </Link>
+          ))}
+        </div>
+      ) : null}
 
       {altitude === "glance" ? (
         <section className="panel p-4" data-altitude="glance-agenda">

@@ -5,8 +5,11 @@ import {
   AudioLines,
   Bot,
   Building2,
+  CalendarClock,
   CalendarDays,
   CalendarRange,
+  ChevronDown,
+  ChevronRight,
   Command,
   FolderKanban,
   FolderOpen,
@@ -14,24 +17,20 @@ import {
   LifeBuoy,
   ListChecks,
   LogOut,
-  Megaphone,
   Menu,
   Mic,
-  Microscope,
   NotebookPen,
   Phone,
   Plug,
-  Plus,
   Puzzle,
   RotateCcw,
   Server,
   Sparkles,
   Sun,
   Target,
+  UserRound,
   Users,
   type LucideIcon,
-  UserRound,
-  CalendarClock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SessionChip } from "./SessionChip";
@@ -61,107 +60,51 @@ interface NavItem {
   action?: "add-agent";
 }
 
-const navGroups: { label: string; items: NavItem[] }[] = [
-  {
-    label: "Today",
-    items: [{ to: "/today", label: "Today", icon: Sun }],
-  },
-  {
-    label: "Inbox",
-    items: [
-      {
-        to: "/approvals",
-        label: "Approvals",
-        icon: Inbox,
-        badge: "approvals",
-      },
-    ],
-  },
+const dailyItems: NavItem[] = [
+  { to: "/today", label: "Today", icon: Sun },
+  { to: "/approvals", label: "Approvals", icon: Inbox, badge: "approvals" },
+  { to: "/copilot", label: "Copilot", icon: Sparkles },
+  { to: "/people", label: "People & graph", icon: Users, ownedParams: ["tab"] },
+  { to: "/voice", label: "Voice & call", icon: AudioLines },
+];
+
+const secondaryGroups: { label: string; items: NavItem[] }[] = [
   {
     label: "Work",
     items: [
       { to: "/projects", label: "Projects", icon: FolderKanban },
       { to: "/objectives", label: "Objectives", icon: Target },
-      { to: "/plans", label: "Plans", icon: ListChecks },
       { to: "/missions", label: "Missions", icon: CalendarRange },
-    ],
-  },
-  {
-    label: "Relationships",
-    items: [
-      { to: "/people", label: "People", icon: Users, ownedParams: ["tab"] },
+      { to: "/plans", label: "Plans", icon: ListChecks },
+      { to: "/calendar", label: "Calendar", icon: CalendarDays },
+      { to: "/events", label: "Events", icon: CalendarDays },
       {
-        to: "/people",
+        to: "/people?tab=companies",
         label: "Companies",
         icon: Building2,
         query: { tab: "companies" },
         ownedParams: ["tab"],
       },
-      { to: "/events", label: "Events", icon: CalendarDays },
     ],
   },
   {
-    label: "Calendar",
-    items: [{ to: "/calendar", label: "Calendar", icon: CalendarDays }],
-  },
-  {
-    label: "Agents",
+    label: "Agents & memory",
     items: [
-      { to: "/agents", label: "All agents", icon: Bot, ownedParams: ["domain"] },
-      {
-        to: "/agents",
-        label: "Sales",
-        icon: Megaphone,
-        query: { domain: "sales" },
-        ownedParams: ["domain"],
-        nested: true,
-      },
-      {
-        to: "/agents",
-        label: "Marketing",
-        icon: Sparkles,
-        query: { domain: "marketing" },
-        ownedParams: ["domain"],
-        nested: true,
-      },
-      {
-        to: "/agents",
-        label: "Research",
-        icon: Microscope,
-        query: { domain: "research" },
-        ownedParams: ["domain"],
-        nested: true,
-      },
-      {
-        to: "/agents",
-        label: "Add agent",
-        icon: Plus,
-        nested: true,
-        action: "add-agent",
-      },
-    ],
-  },
-  {
-    label: "Knowledge",
-    items: [
-      { to: "/knowledge/files", label: "Files & folders", icon: FolderOpen },
+      { to: "/agents", label: "Agents & templates", icon: Bot },
+      { to: "/schedules", label: "Schedules", icon: CalendarClock },
+      { to: "/activity", label: "Activity", icon: Activity },
+      { to: "/knowledge/files", label: "Files", icon: FolderOpen },
       { to: "/knowledge/notes", label: "Notes", icon: NotebookPen },
       { to: "/knowledge/retros", label: "Retrospectives", icon: RotateCcw },
     ],
   },
   {
-    label: "Integrations",
+    label: "Integrations & team",
     items: [
       { to: "/integrations/connectors", label: "Connectors", icon: Plug },
       { to: "/integrations/mcp", label: "MCP servers", icon: Server },
       { to: "/integrations/plugins", label: "Plugins", icon: Puzzle },
-    ],
-  },
-  {
-    label: "You",
-    items: [
       { to: "/profile", label: "Profile & team", icon: UserRound },
-      { to: "/schedules", label: "Scheduled research", icon: CalendarClock },
     ],
   },
 ];
@@ -185,82 +128,93 @@ const useItemActive = () => {
 
 const NavItems = ({ onNavigate }: { onNavigate?: () => void }) => {
   const { world, session } = useData();
-  const { call, openCopilot } = useOrchestrator();
+  const { call } = useOrchestrator();
   const isActive = useItemActive();
   const pendingCount = world ? pendingApprovals(world).length : 0;
+  const onSecondaryRoute = secondaryGroups.some((group) =>
+    group.items.some((item) => isActive(item)),
+  );
+  const [moreOpen, setMoreOpen] = useState(onSecondaryRoute);
+
+  useEffect(() => {
+    if (onSecondaryRoute) setMoreOpen(true);
+  }, [onSecondaryRoute]);
+
+  const renderLink = (item: NavItem) => {
+    const active = isActive(item);
+    const Icon = item.icon;
+    return (
+      <Link
+        key={`${item.to}-${item.label}`}
+        to={item.to}
+        onClick={onNavigate}
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "focus-ring group flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] font-medium transition-colors",
+          active
+            ? "bg-surface-2 text-foreground"
+            : "text-muted-foreground hover:bg-surface-1 hover:text-foreground",
+        )}
+      >
+        <Icon
+          className={cn(
+            "h-3.5 w-3.5 shrink-0",
+            active ? "text-primary" : "text-muted-foreground/80",
+          )}
+          strokeWidth={1.8}
+        />
+        <span className="flex-1 truncate">{item.label}</span>
+        {item.badge === "approvals" && pendingCount > 0 ? (
+          <span className="num rounded-full border border-warn/30 bg-warn/10 px-1.5 text-[10px] font-semibold leading-5 text-warn">
+            {pendingCount}
+          </span>
+        ) : null}
+        {item.to === "/voice" && call.state === "live" ? (
+          <span className="h-1.5 w-1.5 rounded-full bg-run animate-live-dot" />
+        ) : null}
+      </Link>
+    );
+  };
 
   return (
     <nav aria-label="Workspace" className="flex-1 space-y-4 overflow-y-auto pr-0.5">
-      {navGroups.map((group) => (
-        <div key={group.label} className="space-y-0.5">
-          <p className="eyebrow px-2 pb-1 text-[9.5px] tracking-[0.18em]">
-            {group.label}
-          </p>
-          {group.items.map((item) => {
-            const active = isActive(item);
-            const Icon = item.icon;
-            const content = (
-              <>
-                <Icon
-                  className={cn(
-                    "h-3.5 w-3.5 shrink-0",
-                    active ? "text-primary" : "text-muted-foreground/80",
-                    item.nested && "h-3 w-3",
-                  )}
-                  strokeWidth={1.8}
-                />
-                <span className="flex-1 truncate">{item.label}</span>
-                {item.badge === "approvals" && pendingCount > 0 ? (
-                  <span className="num rounded-full border border-warn/30 bg-warn/10 px-1.5 text-[10px] font-semibold leading-5 text-warn">
-                    {pendingCount}
-                  </span>
-                ) : null}
-                {item.to === "/voice" && call.state === "live" ? (
-                  <span className="h-1.5 w-1.5 rounded-full bg-run animate-live-dot" />
-                ) : null}
-              </>
-            );
+      <div className="space-y-0.5">
+        <p className="eyebrow px-2 pb-1 text-[9.5px] tracking-[0.18em]">
+          Daily
+        </p>
+        {dailyItems.map(renderLink)}
+      </div>
 
-            const classes = cn(
-              "focus-ring group flex items-center gap-2 rounded-lg py-1.5 pr-2 text-[12.5px] font-medium transition-colors",
-              item.nested ? "ml-3 pl-2.5" : "px-2",
-              active
-                ? "bg-surface-2 text-foreground"
-                : "text-muted-foreground hover:bg-surface-1 hover:text-foreground",
-            );
+      <div className="space-y-1 border-t border-border/50 pt-3">
+        <button
+          type="button"
+          aria-expanded={moreOpen}
+          onClick={() => setMoreOpen((prev) => !prev)}
+          className="focus-ring flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:bg-surface-1 hover:text-foreground"
+        >
+          {moreOpen ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
+          <span className="eyebrow flex-1 text-[9.5px] tracking-[0.18em]">
+            More views
+          </span>
+        </button>
+        {moreOpen ? (
+          <div className="space-y-3 pt-1">
+            {secondaryGroups.map((group) => (
+              <div key={group.label} className="space-y-0.5">
+                <p className="px-2 pb-0.5 text-[10px] font-medium text-muted-foreground/70">
+                  {group.label}
+                </p>
+                {group.items.map(renderLink)}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
 
-            if (item.action === "add-agent") {
-              return (
-                <button
-                  key={`${item.to}-${item.label}`}
-                  type="button"
-                  onClick={() => {
-                    onNavigate?.();
-                    openCopilot(
-                      "Add an ops agent that keeps vendor relationships warm",
-                    );
-                  }}
-                  className={cn(classes, "w-full text-left")}
-                >
-                  {content}
-                </button>
-              );
-            }
-
-            return (
-              <Link
-                key={`${item.to}-${item.label}`}
-                to={item.to}
-                onClick={onNavigate}
-                aria-current={active ? "page" : undefined}
-                className={classes}
-              >
-                {content}
-              </Link>
-            );
-          })}
-        </div>
-      ))}
       {session?.mode === "guest" ? (
         <p className="mx-2 rounded-lg border border-warn/25 bg-warn/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-warn/90">
           Demo workspace · decisions reset when you reload.
@@ -274,34 +228,14 @@ const SidebarFooter = () => {
   const { session, signOut } = useData();
   const { openCopilot } = useOrchestrator();
   const navigate = useNavigate();
-  const isActive = useItemActive();
-
-  const utility = [
-    { to: "/activity", label: "Activity timeline", icon: Activity },
-    { to: "/voice", label: "Voice & call", icon: AudioLines },
-  ];
+  const displayName =
+    session?.mode === "guest"
+      ? "Guest"
+      : session?.name?.trim() || session?.email || "Account";
 
   return (
     <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
       <div className="space-y-0.5">
-        {utility.map((item) => {
-          const active = isActive(item);
-          return (
-            <Link
-              key={item.to}
-              to={item.to}
-              className={cn(
-                "focus-ring flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11.5px] transition-colors",
-                active
-                  ? "bg-surface-2 text-foreground"
-                  : "text-muted-foreground hover:bg-surface-1 hover:text-foreground",
-              )}
-            >
-              <item.icon className="h-3.5 w-3.5" strokeWidth={1.8} />
-              {item.label}
-            </Link>
-          );
-        })}
         <button
           type="button"
           onClick={() => openCopilot("What can the team do for me today?")}
@@ -314,13 +248,10 @@ const SidebarFooter = () => {
       </div>
 
       <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-surface-1/60 px-2 py-1.5">
-        <PersonAvatar
-          name={session?.mode === "guest" ? "Guest" : "Alex Rivera"}
-          size="sm"
-        />
+        <PersonAvatar name={displayName} size="sm" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[11.5px] font-medium">
-            {session?.mode === "guest" ? "Guest session" : "Alex Rivera"}
+            {session?.mode === "guest" ? "Guest session" : displayName}
           </p>
           <p className="truncate text-[10px] text-muted-foreground">
             {session?.mode === "guest" ? "Demo · not signed in" : session?.email}
