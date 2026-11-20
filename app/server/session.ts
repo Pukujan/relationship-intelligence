@@ -35,6 +35,8 @@ export interface AppSessionData {
   email?: string;
   displayName?: string;
   authMode?: "google" | "key";
+  /** Advisory cached role from last Octo check; re-resolved on every request. */
+  role?: "owner" | "admin" | "operator" | "member";
   /**
    * Epoch ms of the last authenticated /app-api/* request. Slides the local
    * idle window; absent on cookies sealed before longevity landed, which are

@@ -26,7 +26,7 @@ import { createServer } from "node:http";
 import nodePath from "node:path";
 import { SessionResponseSchema } from "../shared/contracts.js";
 import { type Env, readEnv } from "./env.js";
-import { fetchPrincipal, fetchWorkspaces, OctoError } from "./octo.js";
+import { fetchPrincipal, OctoError } from "./octo.js";
 import { handleProfileRoutes } from "./profile.js";
 import { handleScheduleRoutes } from "./schedules.js";
 import {
@@ -44,8 +44,15 @@ import {
   patchConversation,
 } from "./sessions.js";
 import {
+  requireRole,
+  resolvePrincipalWorkspaces,
+  resolveTenancy,
+} from "./tenancy.js";
+import {
   addProposal,
+  ConflictError,
   decideApproval,
+  ForbiddenError,
   logActivity,
   octoSql,
   patchDoc,
@@ -381,18 +388,11 @@ export async function handleRequest(
     }
     try {
       const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 15_000 };
-      const bearer = session.octoToken ?? env.OCTO_API_KEY ?? "";
-      const principal = session.principalId
-        ? {
-            id: session.principalId,
-            email: session.email ?? "",
-            displayName: session.displayName ?? session.email ?? "",
-            avatarUrl: null,
-            isGuest: false,
-            isPlatformOwner: false,
-          }
-        : await fetchPrincipal(config, bearer);
-      const workspaces = await fetchWorkspaces(config, bearer);
+      const { principal, workspaces } = await resolvePrincipalWorkspaces(
+        config,
+        env,
+        session,
+      );
       session.lastSeenAt = Date.now();
       await session.save();
       const state = SessionResponseSchema.parse({
@@ -486,6 +486,7 @@ export async function handleRequest(
     "/app-api/plugin-installed",
     "/app-api/projects",
   ];
+  const inviteMatch = path.match(/^\/app-api\/workspaces\/([^/]+)\/invites$/);
   const extraRoutes =
     path === "/app-api/profile" ||
     path === "/app-api/team" ||
@@ -498,73 +499,53 @@ export async function handleRequest(
   if (
     worldRoutes.includes(path) ||
     path.startsWith("/app-api/sessions") ||
+    inviteMatch ||
     extraRoutes
   ) {
-    const session = await readSession(req, res, env);
-    // Our own Google flow seals a principalId with no Octo token; accept both.
-    if (!session.octoToken && !session.principalId) {
-      sendJson(res, 401, { error: "UNAUTHENTICATED" });
-      return;
-    }
-    if (isIdleExpired(session)) {
-      session.destroy();
-      sendJson(res, 401, { error: "UNAUTHENTICATED", reason: "idle_expired" });
-      return;
-    }
+    const body =
+      req.method === "POST" || req.method === "PATCH"
+        ? (JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>)
+        : {};
+    const requestedWorkspaceId = (inviteMatch?.[1] ??
+      url.searchParams.get("workspaceId") ??
+      (typeof body.workspaceId === "string" ? body.workspaceId : undefined)) as
+      | string
+      | undefined;
     const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 20_000 };
-    let principal: { id: string; displayName: string };
-    let workspaces: { id: string; name: string }[];
-    try {
-      const bearer = session.octoToken ?? env.OCTO_API_KEY ?? "";
-      if (session.principalId) {
-        principal = {
-          id: session.principalId,
-          displayName: session.displayName ?? session.email ?? "",
-        };
-      } else {
-        const me = await fetchPrincipal(config, bearer);
-        principal = { id: me.id, displayName: me.displayName ?? me.email };
-      }
-      workspaces = await fetchWorkspaces(config, bearer);
-      // Authenticated request: slide the idle window. Octo's absolute token
-      // TTL still applies — this never extends the token itself (Octo #93).
-      session.lastSeenAt = Date.now();
-      await session.save();
-    } catch (error) {
-      if (
-        error instanceof OctoError &&
-        (error.status === 401 || error.status === 403)
-      ) {
-        // Keep the cookie for the resume flow; see GET /app-api/session.
-        sendJson(res, 401, {
-          error: "UNAUTHENTICATED",
-          reason: "octo_token_expired",
-        });
+    const tenancy = await resolveTenancy(
+      req,
+      res,
+      env,
+      config,
+      requestedWorkspaceId,
+    );
+    if (!tenancy.ok) {
+      sendJson(res, tenancy.status, tenancy.body);
+      return;
+    }
+    const { principal, role, workspace, workspaces, token } = tenancy;
+    const requested = workspace.id;
+    if (inviteMatch && req.method === "POST") {
+      if (!requireRole(role, "admin")) {
+        sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "admin" });
         return;
       }
-      sendJson(res, 502, { error: "OCTO_UNAVAILABLE" });
-      return;
-    }
-    const body =
-      req.method === "POST"
-        ? (JSON.parse(await readBody(req)) as Record<string, unknown>)
-        : {};
-    const requested = (url.searchParams.get("workspaceId") ??
-      body.workspaceId ??
-      workspaces[0]?.id) as string;
-    if (!workspaces.some((workspace) => workspace.id === requested)) {
-      sendJson(res, 403, { error: "WORKSPACE_NOT_A_MEMBER" });
+      sendJson(res, 501, {
+        error: "INVITES_NOT_IMPLEMENTED",
+        detail: "Invite lifecycle lands in RI-0013 (#38).",
+      });
       return;
     }
     try {
       if (extraRoutes) {
         const ctx = {
           config,
-          token: session.octoToken ?? env.OCTO_API_KEY ?? "",
+          token,
           workspaceId: requested,
           principalId: principal.id,
           principal,
           workspaces,
+          role,
         };
         const handled = path.startsWith("/app-api/schedules")
           ? await handleScheduleRoutes(req, res, url, ctx)
@@ -575,12 +556,7 @@ export async function handleRequest(
         sendJson(
           res,
           200,
-          await listConversations(
-            config,
-            session.octoToken ?? env.OCTO_API_KEY ?? "",
-            requested,
-            principal.id,
-          ),
+          await listConversations(config, token, requested, principal.id),
         );
         return;
       }
@@ -588,17 +564,11 @@ export async function handleRequest(
         sendJson(
           res,
           200,
-          await createConversation(
-            config,
-            session.octoToken ?? env.OCTO_API_KEY ?? "",
-            requested,
-            principal.id,
-            {
-              title: String(body.title ?? "New research"),
-              scopeKind: String(body.scopeKind ?? "workspace"),
-              scopeId: typeof body.scopeId === "string" ? body.scopeId : null,
-            },
-          ),
+          await createConversation(config, token, requested, principal.id, {
+            title: String(body.title ?? "New research"),
+            scopeKind: String(body.scopeKind ?? "workspace"),
+            scopeId: typeof body.scopeId === "string" ? body.scopeId : null,
+          }),
         );
         return;
       }
@@ -614,7 +584,7 @@ export async function handleRequest(
             200,
             await getMessages(
               config,
-              session.octoToken ?? env.OCTO_API_KEY ?? "",
+              token,
               requested,
               principal.id,
               conversationId,
@@ -628,7 +598,7 @@ export async function handleRequest(
             200,
             await appendMessage(
               config,
-              session.octoToken ?? env.OCTO_API_KEY ?? "",
+              token,
               requested,
               principal.id,
               conversationId,
@@ -643,7 +613,7 @@ export async function handleRequest(
             200,
             await patchConversation(
               config,
-              session.octoToken ?? env.OCTO_API_KEY ?? "",
+              token,
               requested,
               principal.id,
               conversationId,
@@ -671,13 +641,7 @@ export async function handleRequest(
         sendJson(
           res,
           200,
-          await readWorld(
-            config,
-            session.octoToken ?? env.OCTO_API_KEY ?? "",
-            requested,
-            principal,
-            workspaces,
-          ),
+          await readWorld(config, token, requested, principal, workspaces),
         );
         return;
       }
@@ -687,7 +651,7 @@ export async function handleRequest(
           200,
           await decideApproval(
             config,
-            session.octoToken ?? env.OCTO_API_KEY ?? "",
+            token,
             requested,
             principal,
             workspaces,
@@ -700,6 +664,7 @@ export async function handleRequest(
                   ? body.editedAction
                   : undefined,
             },
+            { canDecideOthers: requireRole(role, "operator") },
           ),
         );
         return;
@@ -710,7 +675,7 @@ export async function handleRequest(
           200,
           await addProposal(
             config,
-            session.octoToken ?? env.OCTO_API_KEY ?? "",
+            token,
             requested,
             principal.id,
             body.proposal as Record<string, unknown>,
@@ -724,7 +689,7 @@ export async function handleRequest(
           200,
           await logActivity(
             config,
-            session.octoToken ?? env.OCTO_API_KEY ?? "",
+            token,
             requested,
             principal.id,
             body.entry as Record<string, unknown>,
@@ -733,12 +698,16 @@ export async function handleRequest(
         return;
       }
       if (path === "/app-api/agent-status" && req.method === "POST") {
+        if (!requireRole(role, "operator")) {
+          sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "operator" });
+          return;
+        }
         sendJson(
           res,
           200,
           await patchDoc(
             config,
-            session.octoToken ?? env.OCTO_API_KEY ?? "",
+            token,
             requested,
             principal.id,
             "agents",
@@ -752,12 +721,16 @@ export async function handleRequest(
         return;
       }
       if (path === "/app-api/connector-status" && req.method === "POST") {
+        if (!requireRole(role, "operator")) {
+          sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "operator" });
+          return;
+        }
         sendJson(
           res,
           200,
           await patchDoc(
             config,
-            session.octoToken ?? env.OCTO_API_KEY ?? "",
+            token,
             requested,
             principal.id,
             "connectors",
@@ -773,12 +746,16 @@ export async function handleRequest(
         return;
       }
       if (path === "/app-api/plugin-installed" && req.method === "POST") {
+        if (!requireRole(role, "operator")) {
+          sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "operator" });
+          return;
+        }
         sendJson(
           res,
           200,
           await patchDoc(
             config,
-            session.octoToken ?? env.OCTO_API_KEY ?? "",
+            token,
             requested,
             principal.id,
             "plugins",
@@ -814,7 +791,7 @@ export async function handleRequest(
         };
         await octoSql(
           config,
-          session.octoToken ?? env.OCTO_API_KEY ?? "",
+          token,
           requested,
           `INSERT INTO ri_console.project (id, workspace_id, principal_id, visibility, doc)
            VALUES (${lit(id)}, ${lit(requested)}, ${lit(principal.id)}, 'shared', ${lit(JSON.stringify(doc))}::jsonb)
@@ -826,15 +803,24 @@ export async function handleRequest(
       const projectMatch = path.match(/^\/app-api\/projects\/([^/]+)$/);
       if (projectMatch && req.method === "DELETE") {
         const projectId = projectMatch[1] ?? "";
-        const token = session.octoToken ?? env.OCTO_API_KEY ?? "";
         const owns = `workspace_id = ${lit(requested)} AND (principal_id = ${lit(principal.id)} OR visibility = 'shared')`;
         const existing = await octoSql(
           config,
           token,
           requested,
-          `SELECT id FROM ri_console.project WHERE id = ${lit(projectId)} AND ${owns}`,
+          `SELECT id, principal_id FROM ri_console.project WHERE id = ${lit(projectId)} AND ${owns}`,
         );
         if (existing.length === 0) throw new Error("Unknown project");
+        if (
+          !requireRole(role, "admin") &&
+          String(existing[0]?.principal_id ?? "") !== principal.id
+        ) {
+          sendJson(res, 403, {
+            error: "FORBIDDEN_ROLE",
+            detail: "Only admins or the project owner may delete a project.",
+          });
+          return;
+        }
         // Plan docs carry missionId, not projectId: remove them through their
         // missions before the missions themselves disappear.
         await octoSql(
@@ -870,6 +856,20 @@ export async function handleRequest(
         return;
       }
     } catch (error) {
+      if (error instanceof ConflictError) {
+        sendJson(res, 409, {
+          error: "ALREADY_DECIDED",
+          detail: error.message,
+        });
+        return;
+      }
+      if (error instanceof ForbiddenError) {
+        sendJson(res, 403, {
+          error: "FORBIDDEN_ROLE",
+          detail: error.message,
+        });
+        return;
+      }
       if (
         error instanceof OctoError &&
         (error.status === 401 || error.status === 403)
