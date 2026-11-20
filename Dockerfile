@@ -6,7 +6,7 @@ RUN corepack enable && corepack prepare pnpm@12.14.0 --activate
 COPY pnpm-lock.yaml package.json ./
 COPY console/pnpm-lock.yaml console/package.json console/
 COPY app/pnpm-lock.yaml app/package.json app/
-RUN pnpm install --dir console --frozen-lockfile
+RUN pnpm install --dir console --frozen-lockfile --config.strict-dep-builds=false
 COPY console/ console/
 RUN pnpm --dir console build
 
@@ -15,7 +15,7 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@12.14.0 --activate
 COPY pnpm-lock.yaml package.json ./
 COPY app/pnpm-lock.yaml app/package.json app/
-RUN pnpm install --dir app --frozen-lockfile
+RUN pnpm install --dir app --frozen-lockfile --config.strict-dep-builds=false
 COPY app/ app/
 COPY --from=build /app/console/dist console/dist
 ENV NODE_ENV=production PORT=8787
