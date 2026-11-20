@@ -239,10 +239,57 @@ export function retiredEntityIds(
   return retired;
 }
 
+export interface CanonicalScope {
+  workspaceId: string;
+  octoContainerId: string;
+  principalId: string;
+  isContainerOwner: boolean;
+}
+
+/**
+ * Fail-closed visibility filter for canonical graph claims (#73).
+ *
+ * - Workspace scope: claims without an explicit `provenance.workspaceId` belong
+ *   strictly to `octoContainerId` (never leaking into other app workspaces).
+ * - Principal scope: only `provenance.visibility === "shared"` is visible to
+ *   other workspace members. Private and legacy untagged claims (such as the
+ *   owner's imported private notes) are visible only to their author or, when
+ *   untagged, to the container workspace owner.
+ */
+export function isClaimVisibleToScope(
+  provenance: Record<string, unknown>,
+  scope: CanonicalScope,
+): boolean {
+  const claimWs =
+    typeof provenance.workspaceId === "string" && provenance.workspaceId
+      ? provenance.workspaceId
+      : scope.octoContainerId;
+  const sharedWs = Array.isArray(provenance.sharedWorkspaces)
+    ? provenance.sharedWorkspaces.map(String)
+    : [];
+  if (claimWs !== scope.workspaceId && !sharedWs.includes(scope.workspaceId)) {
+    return false;
+  }
+  if (provenance.visibility === "shared") {
+    return true;
+  }
+  const owner =
+    typeof provenance.principalId === "string" && provenance.principalId
+      ? provenance.principalId
+      : typeof provenance.ownerId === "string" && provenance.ownerId
+        ? provenance.ownerId
+        : null;
+  if (owner) {
+    return owner === scope.principalId;
+  }
+  return scope.isContainerOwner && scope.workspaceId === scope.octoContainerId;
+}
+
 export async function readCanonical(
   config: OctoClientConfig,
   token: string,
   octoContainerId: string,
+  scope?: CanonicalScope,
 ): Promise<{ people: WorldPerson[]; companies: WorldCompany[] }> {
   const [entities, claims, subjects, cites, beliefs] = await Promise.all([
     graph(
@@ -291,10 +338,110 @@ export async function readCanonical(
   }
 
   const retired = retiredEntityIds(claims, subjectOf);
+  const parsedClaimsByEntity = new Map<
+    string,
+    { claim: Json; provenance: Json }[]
+  >();
+  for (const claim of claims) {
+    if (claim.supersededAt) continue;
+    const entityId = subjectOf.get(String(claim.id));
+    if (!entityId || retired.has(entityId)) continue;
+    let provenance: Json = {};
+    try {
+      provenance = JSON.parse(String(claim.provenance ?? "{}")) as Json;
+    } catch {
+      provenance = {};
+    }
+    if (provenance.verb === "RETIRED") continue;
+    if (scope && !isClaimVisibleToScope(provenance, scope)) continue;
+    const list = parsedClaimsByEntity.get(entityId) ?? [];
+    list.push({ claim, provenance });
+    parsedClaimsByEntity.set(entityId, list);
+  }
+
   const orgs = entities.filter(
     (e) => String(e.kind).startsWith("org:") && !retired.has(String(e.id)),
   );
-  const companies: WorldCompany[] = orgs.map((e) => ({
+  const orgBySlug = new Map(orgs.map((e) => [String(e.kind), String(e.id)]));
+  const referencedCompanyIds = new Set<string>();
+
+  const people: WorldPerson[] = [];
+  for (const entity of entities) {
+    if (entity.kind !== "person") continue;
+    const personId = String(entity.id);
+    if (retired.has(personId)) continue;
+    const parsed = parsedClaimsByEntity.get(personId) ?? [];
+    if (scope && parsed.length === 0) continue;
+
+    const employment = parsed
+      .filter((p) => p.provenance.verb === "WORKS_AT")
+      .sort((a, b) =>
+        String(b.claim.validFrom).localeCompare(String(a.claim.validFrom)),
+      )[0];
+    const companyId = employment
+      ? (orgBySlug.get(`org:${String(employment.provenance.org)}`) ?? "")
+      : "";
+    if (companyId) referencedCompanyIds.add(companyId);
+    const strength = parsed
+      .filter((p) => p.provenance.verb === "MET")
+      .reduce((max, p) => Math.max(max, strengthOf(p.provenance.strength)), 0);
+    const lastContact = parsed.reduce((latest, { claim }) => {
+      const current = String(claim.validFrom ?? "");
+      return current.localeCompare(latest) > 0 ? current : latest;
+    }, "");
+    const quietDays = lastContact
+      ? Math.max(
+          0,
+          Math.round(
+            (Date.now() - new Date(lastContact).getTime()) / 86_400_000,
+          ),
+        )
+      : 999;
+    const mappedClaims = parsed.map(({ claim }) => {
+      const locator = locatorOf.get(String(claim.id));
+      return {
+        id: String(claim.id),
+        personId,
+        text: String(claim.statement),
+        source: {
+          label: locator ? hostOf(locator) : "Octo ledger",
+          kind: locator ? "web" : "note",
+          date: String(claim.validFrom ?? ""),
+        },
+        confidence: confidenceOf(confidenceOfClaim.get(String(claim.id))),
+        status: (locator ? "sourced" : "unverified") as
+          | "sourced"
+          | "unverified",
+      };
+    });
+    const sourced = mappedClaims.find((c) => c.status === "sourced");
+    people.push({
+      id: personId,
+      name: String(entity.name),
+      role: employment ? String(employment.provenance.title ?? "—") : "—",
+      companyId,
+      location: "",
+      timezone: "",
+      strength,
+      warmth: warmthOf(quietDays),
+      lastContact: lastContact || new Date(0).toISOString(),
+      tags: [],
+      summary: sourced?.text ?? mappedClaims[0]?.text ?? "",
+      email: "",
+      claims: mappedClaims,
+    });
+  }
+
+  const visibleOrgs = scope
+    ? orgs.filter((e) => {
+        const id = String(e.id);
+        return (
+          referencedCompanyIds.has(id) ||
+          (parsedClaimsByEntity.get(id)?.length ?? 0) > 0
+        );
+      })
+    : orgs;
+  const companies: WorldCompany[] = visibleOrgs.map((e) => ({
     id: String(e.id),
     name: String(e.name),
     domain: "",
@@ -304,85 +451,6 @@ export async function readCanonical(
     location: "—",
     notes: "",
   }));
-  const orgBySlug = new Map(orgs.map((e) => [String(e.kind), String(e.id)]));
-
-  const people: WorldPerson[] = entities
-    .filter((e) => e.kind === "person" && !retired.has(String(e.id)))
-    .map((entity) => {
-      const personId = String(entity.id);
-      const mine = claims.filter(
-        (c) => subjectOf.get(String(c.id)) === personId && !c.supersededAt,
-      );
-      const parsed = mine.map((c) => {
-        let provenance: Json = {};
-        try {
-          provenance = JSON.parse(String(c.provenance ?? "{}")) as Json;
-        } catch {
-          provenance = {};
-        }
-        return { claim: c, provenance };
-      });
-
-      const employment = parsed
-        .filter((p) => p.provenance.verb === "WORKS_AT")
-        .sort((a, b) =>
-          String(b.claim.validFrom).localeCompare(String(a.claim.validFrom)),
-        )[0];
-      const companyId = employment
-        ? (orgBySlug.get(`org:${String(employment.provenance.org)}`) ?? "")
-        : "";
-      const strength = parsed
-        .filter((p) => p.provenance.verb === "MET")
-        .reduce(
-          (max, p) => Math.max(max, strengthOf(p.provenance.strength)),
-          0,
-        );
-      const lastContact = mine.reduce((latest, c) => {
-        const current = String(c.validFrom ?? "");
-        return current.localeCompare(latest) > 0 ? current : latest;
-      }, "");
-      const quietDays = lastContact
-        ? Math.max(
-            0,
-            Math.round(
-              (Date.now() - new Date(lastContact).getTime()) / 86_400_000,
-            ),
-          )
-        : 999;
-      const mappedClaims = parsed.map(({ claim }) => {
-        const locator = locatorOf.get(String(claim.id));
-        return {
-          id: String(claim.id),
-          personId,
-          text: String(claim.statement),
-          source: {
-            label: locator ? hostOf(locator) : "Octo ledger",
-            kind: locator ? "web" : "note",
-            date: String(claim.validFrom ?? ""),
-          },
-          confidence: confidenceOf(confidenceOfClaim.get(String(claim.id))),
-          status: (locator ? "sourced" : "unverified") as
-            | "sourced"
-            | "unverified",
-        };
-      });
-      const sourced = mappedClaims.find((c) => c.status === "sourced");
-      return {
-        id: personId,
-        name: String(entity.name),
-        role: employment ? String(employment.provenance.title ?? "—") : "—",
-        companyId,
-        location: "",
-        timezone: "",
-        strength,
-        warmth: warmthOf(quietDays),
-        lastContact: lastContact || new Date(0).toISOString(),
-        tags: [],
-        summary: sourced?.text ?? mappedClaims[0]?.text ?? "",
-        email: "",
-        claims: mappedClaims,
-      };
-    });
 
   return { people, companies };
 }
@@ -475,9 +543,15 @@ export async function readWorld(
   principal: { id: string; displayName: string },
   workspaces: { id: string; name: string }[],
   octoContainerId = workspaceId,
+  role = "member",
 ): Promise<WorldShape> {
   const [canonical, ops] = await Promise.all([
-    readCanonical(config, token, octoContainerId),
+    readCanonical(config, token, octoContainerId, {
+      workspaceId,
+      octoContainerId,
+      principalId: principal.id,
+      isContainerOwner: role === "owner" && workspaceId === octoContainerId,
+    }),
     readOps(config, token, workspaceId, principal.id, octoContainerId),
   ]);
   const {
@@ -671,7 +745,11 @@ export async function decideApproval(
   principal: { id: string; displayName: string },
   workspaces: { id: string; name: string }[],
   input: DecisionInput,
-  options: { canDecideOthers?: boolean; octoContainerId?: string } = {},
+  options: {
+    canDecideOthers?: boolean;
+    octoContainerId?: string;
+    role?: string;
+  } = {},
 ): Promise<Json> {
   const containerId = options.octoContainerId ?? workspaceId;
   const span = startSpan({
@@ -873,6 +951,7 @@ export async function decideApproval(
     principal,
     workspaces,
     containerId,
+    options.role,
   );
   return {
     approval,
