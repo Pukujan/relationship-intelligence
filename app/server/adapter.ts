@@ -41,6 +41,7 @@ import {
   listConversations,
   patchConversation,
 } from "./sessions.js";
+import { syncUserConnector } from "./sync.js";
 import {
   requireRole,
   resolvePrincipalWorkspaces,
@@ -688,6 +689,9 @@ export async function handleRequest(
   const connectorDisconnectMatch = path.match(
     /^\/app-api\/connectors\/([^/]+)\/disconnect$/,
   );
+  const connectorSyncMatch = path.match(
+    /^\/app-api\/connectors\/([^/]+)\/sync$/,
+  );
   const deleteRouteMatch = path.match(
     /^\/app-api\/connectors\/routes\/([^/]+)$/,
   );
@@ -709,6 +713,7 @@ export async function handleRequest(
     membersMatch ||
     removeMemberMatch ||
     connectorDisconnectMatch ||
+    connectorSyncMatch ||
     deleteRouteMatch ||
     extraRoutes
   ) {
@@ -777,6 +782,27 @@ export async function handleRequest(
             deleteRouteMatch[1] ?? "",
           ),
         );
+        return;
+      }
+      if (connectorSyncMatch && req.method === "POST") {
+        const provider = connectorSyncMatch[1] as ConnectorProviderId;
+        const result = await syncUserConnector(
+          config,
+          token,
+          octoWorkspaceId,
+          requested,
+          principal.id,
+          provider,
+          env,
+        );
+        if (!result.ok) {
+          sendJson(res, result.status, {
+            error: result.error,
+            detail: result.detail,
+          });
+          return;
+        }
+        sendJson(res, 200, result);
         return;
       }
       if (connectorDisconnectMatch && req.method === "POST") {

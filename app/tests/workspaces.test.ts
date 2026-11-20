@@ -4,6 +4,7 @@ import {
   buildZoomConnectorAuthUrl,
 } from "../server/connectors.js";
 import type { Env } from "../server/env.js";
+import { matchConnectorRoute, syncUserConnector } from "../server/sync.js";
 import { endSpan, scrubAttributes, startSpan } from "../server/telemetry.js";
 import {
   createAppWorkspace,
@@ -205,7 +206,7 @@ describe("Phoenix OTLP telemetry & scrubber (RI-0020)", () => {
   });
 });
 
-describe("user connectors OAuth URLs (RI-0019)", () => {
+describe("user connectors OAuth URLs & sync workers (RI-0019)", () => {
   it("builds incremental Google OAuth URLs for gmail, gcal, and gdrive", () => {
     const gmailUrl = buildGoogleConnectorAuthUrl(baseEnv, "gmail", "st1");
     const gcalUrl = buildGoogleConnectorAuthUrl(baseEnv, "gcal", "st2");
@@ -219,5 +220,150 @@ describe("user connectors OAuth URLs (RI-0019)", () => {
     const zoomUrl = buildZoomConnectorAuthUrl(baseEnv, "zstate");
     expect(zoomUrl).toContain("https://zoom.us/oauth/authorize");
     expect(zoomUrl).toContain("state=zstate");
+  });
+
+  it("matches connector routing rules to workspace/project with fallback", () => {
+    const routes = [
+      {
+        id: "r1",
+        provider: "gmail",
+        matchExpr: "mta.info, SMART Grant",
+        targetWorkspaceId: "ws-design-bakery",
+        targetProjectId: "proj-mta",
+        cadence: "signal" as const,
+        createdAt: "",
+      },
+    ];
+    expect(
+      matchConnectorRoute(
+        routes,
+        "gmail",
+        "From lead@mta.info Re: SMART Grant",
+        "ws-personal",
+      ),
+    ).toEqual({
+      workspaceId: "ws-design-bakery",
+      projectId: "proj-mta",
+      cadence: "signal",
+    });
+    expect(
+      matchConnectorRoute(routes, "gmail", "Weekend catchup", "ws-personal")
+        .workspaceId,
+    ).toBe("ws-personal");
+  });
+
+  it("syncs Gmail messages idempotently with routing and ledger event", async () => {
+    const sqlLog: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/query")) {
+          const sql =
+            (JSON.parse(String(init?.body ?? "{}")) as { sql?: string }).sql ??
+            "";
+          sqlLog.push(sql);
+          if (sql.includes("information_schema.tables")) {
+            return new Response(
+              JSON.stringify({
+                rows: [
+                  { table_name: "workspace" },
+                  { table_name: "workspace_member" },
+                  { table_name: "ledger_event" },
+                  { table_name: "user_connector" },
+                  { table_name: "connector_route" },
+                ],
+              }),
+              { status: 200 },
+            );
+          }
+          if (sql.includes("FROM ri_console.user_connector")) {
+            return new Response(
+              JSON.stringify({
+                rows: [
+                  {
+                    status: "connected",
+                    access_token: "test-google-token",
+                    refresh_token: null,
+                    expires_at: null,
+                  },
+                ],
+              }),
+              { status: 200 },
+            );
+          }
+          if (sql.includes("FROM ri_console.connector_route")) {
+            return new Response(
+              JSON.stringify({
+                rows: [
+                  {
+                    id: "r1",
+                    provider: "gmail",
+                    match_expr: "mta.info",
+                    target_workspace_id: "ws-db",
+                    target_project_id: "proj-mta",
+                    cadence: "signal",
+                    created_at: "",
+                  },
+                ],
+              }),
+              { status: 200 },
+            );
+          }
+          return new Response(JSON.stringify({ rows: [] }), { status: 200 });
+        }
+        if (url.includes("gmail.googleapis.com/gmail/v1/users/me/messages?")) {
+          return new Response(
+            JSON.stringify({ messages: [{ id: "msg-101" }] }),
+            { status: 200 },
+          );
+        }
+        if (
+          url.includes(
+            "gmail.googleapis.com/gmail/v1/users/me/messages/msg-101",
+          )
+        ) {
+          return new Response(
+            JSON.stringify({
+              id: "msg-101",
+              snippet: "Next steps on the $2M SMART Grant",
+              payload: {
+                headers: [
+                  { name: "Subject", value: "MTA NaviLens Pilot" },
+                  { name: "From", value: "lead@mta.info" },
+                ],
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response("{}", { status: 404 });
+      }),
+    );
+    try {
+      const res = await syncUserConnector(
+        { baseUrl: baseEnv.OCTO_API_URL, timeoutMs: 5000 },
+        "octo_live_ws_ownerkey",
+        WS_ID,
+        WS_ID,
+        NEW_PID,
+        "gmail",
+        baseEnv,
+      );
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.syncedCount).toBe(1);
+        expect(res.routedWorkspaces).toEqual(["ws-db"]);
+        expect(res.items[0]?.id).toBe("sync-gmail-msg-101");
+      }
+      expect(
+        sqlLog.some((q) => q.includes("INSERT INTO ri_console.activity")),
+      ).toBe(true);
+      expect(
+        sqlLog.some((q) => q.includes("INSERT INTO ri_console.ledger_event")),
+      ).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

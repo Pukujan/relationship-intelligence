@@ -172,6 +172,28 @@ const Connectors = () => {
     }
   };
 
+  const syncNow = async (provider: string, name: string) => {
+    setPendingId(`sync:${provider}`);
+    try {
+      const r = await fetch(`/app-api/connectors/${encodeURIComponent(provider)}/sync`, {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      const data = (await r.json()) as { syncedCount?: number; detail?: string; error?: string };
+      if (!r.ok) {
+        toast.error(`${name} sync failed`, { description: data.detail ?? data.error ?? "Try again." });
+        return;
+      }
+      toast.success(`${name} synced`, {
+        description: `Imported ${data.syncedCount ?? 0} recent item(s) and applied your routing rules.`,
+      });
+      await loadUserConnectors();
+      void reload();
+    } finally {
+      setPendingId(null);
+    }
+  };
+
   const disconnectUserConnector = async (provider: string, name: string) => {
     setPendingId(provider);
     try {
@@ -277,16 +299,31 @@ const Connectors = () => {
                       {c.lastSync ? `Synced ${relativeTime(c.lastSync)}` : "Not connected yet"}
                     </span>
                     {c.status === "connected" ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 gap-1 rounded-md px-2 text-[11px]"
-                        disabled={isBusy}
-                        onClick={() => void disconnectUserConnector(c.provider, c.name)}
-                      >
-                        {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 text-run" />}
-                        Disconnect
-                      </Button>
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          size="sm"
+                          className="h-7 gap-1 rounded-md px-2 text-[11px]"
+                          disabled={pendingId === `sync:${c.provider}`}
+                          onClick={() => void syncNow(c.provider, c.name)}
+                        >
+                          {pendingId === `sync:${c.provider}` ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3 w-3" />
+                          )}
+                          Sync now
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1 rounded-md px-2 text-[11px]"
+                          disabled={isBusy}
+                          onClick={() => void disconnectUserConnector(c.provider, c.name)}
+                        >
+                          {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 text-run" />}
+                          Disconnect
+                        </Button>
+                      </div>
                     ) : c.connectUrl ? (
                       <Button
                         size="sm"
