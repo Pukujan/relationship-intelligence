@@ -17,6 +17,20 @@ import { randomUUID } from "node:crypto";
 import type { OctoClientConfig } from "./octo.js";
 import { OctoError } from "./octo.js";
 
+export class ConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConflictError";
+  }
+}
+
+export class ForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ForbiddenError";
+  }
+}
+
 type Json = Record<string, unknown>;
 
 export interface WorldPerson {
@@ -574,23 +588,48 @@ export async function decideApproval(
   principal: { id: string; displayName: string },
   workspaces: { id: string; name: string }[],
   input: DecisionInput,
+  options: { canDecideOthers?: boolean } = {},
 ): Promise<Json> {
-  const approval = await getDoc(
+  const rows = await octoSql(
     config,
     token,
     workspaceId,
-    principal.id,
-    "approvals",
-    input.approvalId,
+    `SELECT principal_id, doc FROM ri_console.approval
+     WHERE id = ${lit(input.approvalId)} AND workspace_id = ${lit(workspaceId)}
+       AND (visibility = 'shared' OR principal_id = ${lit(principal.id)})`,
   );
+  const row = rows[0];
+  const approval = (row?.doc as Json) ?? null;
   if (!approval) throw new Error("Unknown approval");
-  if (approval.status !== "pending")
-    throw new Error("That decision has already been made.");
+  if (
+    options.canDecideOthers === false &&
+    String(row?.principal_id ?? "") !== principal.id
+  ) {
+    throw new ForbiddenError("Members can only decide their own proposals.");
+  }
+  if (approval.status !== "pending") {
+    throw new ConflictError("That decision has already been made.");
+  }
 
   approval.status = input.decision;
   approval.decidedAt = now();
   approval.decisionNote = input.note;
   if (input.editedAction) approval.editedAction = input.editedAction;
+
+  const updated = await octoSql(
+    config,
+    token,
+    workspaceId,
+    `UPDATE ri_console.approval
+        SET doc = ${lit(JSON.stringify(approval))}::jsonb, updated_at = now()
+      WHERE id = ${lit(input.approvalId)}
+        AND workspace_id = ${lit(workspaceId)}
+        AND doc->>'status' = 'pending'
+     RETURNING id`,
+  );
+  if (updated.length === 0) {
+    throw new ConflictError("That decision has already been made.");
+  }
 
   let outcome: string | null = null;
   if (approval.design && input.decision === "approved") {
@@ -602,14 +641,6 @@ export async function decideApproval(
       approval.design as Json,
     );
   }
-  await insertDoc(
-    config,
-    token,
-    workspaceId,
-    principal.id,
-    "approvals",
-    approval,
-  );
 
   const agent = await getDoc(
     config,
