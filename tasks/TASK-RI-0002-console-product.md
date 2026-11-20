@@ -189,6 +189,29 @@ Blocked/uncertain:
 Next:
 - After the deploy, the owner tries Talk in Chrome on the live site, signed in; then decide between importing the owner's relationship data and the pre-meeting brief.
 
+### 2026-11-20 23:07:31 UTC — agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/5e6d2003-52c8-41a6-a97b-968f704e6c85","blocked":["People and facts are shared by the whole installation, so nobody should be invited until per-workspace privacy for people exists. The 43 imported events are in the ledger but the app does not read events from it yet. The retirement rule in the app is not deployed until this merges."],"changed":["none"],"completed":["The app answered from three sample people; the owner's real relationship records are now in its ledger (23 people, 4 organisations, 43 events, 141 claims) and the sample records are retired."],"decisions":["By the owner's choice on 2026-11-20: only events tied to the owner, everything about people including private notes as unverified, import before per-workspace privacy exists, and retire the samples. A statement is sourced only with a URL the source documented."],"evidence":["The loader's dry run validated the converted seed and --apply reported 141 new claims; a second plan check found all 141 already present, so a re-run writes nothing; read through a local adapter, the app's world lists 24 people and 4 companies with none of the samples, 37 claims sourced and 104 unverified. The app's 47 tests, typecheck, lint and build pass."],"evidence_class":"observed","next_action":"Merge and deploy, then the owner checks the People page on the live site; file per-workspace privacy for people as its own issue.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-20T23:07:31Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"3ce030ba3366c4a6cc46fee2e29e02ae50da4250999596d64cfb96a5fb056683","request_id":"3708d4b6a9864a63824715bd2c7b174d","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- The app answered from three sample people; the owner's real relationship records are now in its ledger (23 people, 4 organisations, 43 events, 141 claims) and the sample records are retired.
+
+Evidence:
+- The loader's dry run validated the converted seed and --apply reported 141 new claims; a second plan check found all 141 already present, so a re-run writes nothing; read through a local adapter, the app's world lists 24 people and 4 companies with none of the samples, 37 claims sourced and 104 unverified. The app's 47 tests, typecheck, lint and build pass.
+
+Decisions:
+- By the owner's choice on 2026-11-20: only events tied to the owner, everything about people including private notes as unverified, import before per-workspace privacy exists, and retire the samples. A statement is sourced only with a URL the source documented.
+
+Changed:
+- none
+
+Blocked/uncertain:
+- People and facts are shared by the whole installation, so nobody should be invited until per-workspace privacy for people exists. The 43 imported events are in the ledger but the app does not read events from it yet. The retirement rule in the app is not deployed until this merges.
+
+Next:
+- Merge and deploy, then the owner checks the People page on the live site; file per-workspace privacy for people as its own issue.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.

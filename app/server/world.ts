@@ -172,8 +172,19 @@ async function graph(
 /* Canonical graph -> console people/companies/claims                  */
 /* ------------------------------------------------------------------ */
 
-const strengthOf = (value: unknown) =>
-  value === "strong" ? 8 : value === "medium" ? 5 : value === "weak" ? 2 : 0;
+// "met-once" is one of the three strengths seed/load.py accepts. It was
+// missing here, so someone met in person scored 0, below a contact known
+// only by email ("weak").
+export const strengthOf = (value: unknown) =>
+  value === "strong"
+    ? 8
+    : value === "medium"
+      ? 5
+      : value === "met-once"
+        ? 3
+        : value === "weak"
+          ? 2
+          : 0;
 
 const warmthOf = (quietDays: number): WorldPerson["warmth"] =>
   quietDays <= 3
@@ -198,6 +209,35 @@ const hostOf = (locator: string) => {
     return locator.slice(0, 40);
   }
 };
+
+/**
+ * Entities that have been retired: at least one current claim says RETIRED
+ * and no other current claim remains. The ledger never deletes, so retiring a
+ * record (seed/retire_samples.py) supersedes its claims and adds a RETIRED
+ * one; this is what keeps a retired person or company off the screen.
+ */
+export function retiredEntityIds(
+  claims: Record<string, unknown>[],
+  subjectOf: Map<string, string>,
+): Set<string> {
+  const retired = new Set<string>();
+  const live = new Set<string>();
+  for (const claim of claims) {
+    if (claim.supersededAt) continue;
+    const entityId = subjectOf.get(String(claim.id));
+    if (!entityId) continue;
+    let verb: unknown;
+    try {
+      verb = (JSON.parse(String(claim.provenance ?? "{}")) as Json).verb;
+    } catch {
+      verb = undefined;
+    }
+    if (verb === "RETIRED") retired.add(entityId);
+    else live.add(entityId);
+  }
+  for (const id of live) retired.delete(id);
+  return retired;
+}
 
 export async function readCanonical(
   config: OctoClientConfig,
@@ -250,7 +290,10 @@ export async function readCanonical(
     confidenceOfClaim.set(id, Math.max(confidenceOfClaim.get(id) ?? 0, value));
   }
 
-  const orgs = entities.filter((e) => String(e.kind).startsWith("org:"));
+  const retired = retiredEntityIds(claims, subjectOf);
+  const orgs = entities.filter(
+    (e) => String(e.kind).startsWith("org:") && !retired.has(String(e.id)),
+  );
   const companies: WorldCompany[] = orgs.map((e) => ({
     id: String(e.id),
     name: String(e.name),
@@ -264,7 +307,7 @@ export async function readCanonical(
   const orgBySlug = new Map(orgs.map((e) => [String(e.kind), String(e.id)]));
 
   const people: WorldPerson[] = entities
-    .filter((e) => e.kind === "person")
+    .filter((e) => e.kind === "person" && !retired.has(String(e.id)))
     .map((entity) => {
       const personId = String(entity.id);
       const mine = claims.filter(
