@@ -1132,6 +1132,7 @@ export async function handleRequest(
             principal,
             workspaces,
             octoWorkspaceId,
+            role,
           ),
         );
         return;
@@ -1164,6 +1165,7 @@ export async function handleRequest(
             {
               canDecideOthers: requireRole(role, "operator"),
               octoContainerId: octoWorkspaceId,
+              role,
             },
           ),
         );

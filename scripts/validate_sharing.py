@@ -278,6 +278,18 @@ try:
         record("S13", "an Octo guest with its own workspace cannot reach the copilot",
                [403, 403], "could not mint a guest", False)
 
+    # S14 (#73): canonical people and private imported notes must stay scoped
+    # to their owning workspace and never leak into other workspaces.
+    w_people = {
+        k: len(call(jar[k], "GET", f"/app-api/world?workspaceId={W}")[1].get("people", []))
+        for k in ("owner", "a", "b")
+    }
+    w2_people = len(call(jar["other"], "GET", f"/app-api/world?workspaceId={W2}")[1].get("people", []))
+    got_people = {**w_people, "other": w2_people}
+    want_people = {"owner": 0, "a": 0, "b": 0, "other": 0}
+    record("S14", "imported private people do not leak into other workspaces (#73)",
+           want_people, got_people, got_people == want_people)
+
     # S11: removing a member takes effect on the very next request.
     s_rm, _ = call(jar["owner"], "DELETE", f"/app-api/workspaces/{W}/members/{by['b']['email']}")
     s_after, _ = call(jar["b"], "GET", f"/app-api/world?workspaceId={W}")
