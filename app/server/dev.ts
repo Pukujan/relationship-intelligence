@@ -3,8 +3,11 @@ import { readEnv } from "./env.js";
 import { startScheduler } from "./schedules.js";
 
 const env = readEnv();
-createAppServer(env).listen(env.PORT, "127.0.0.1", () => {
-  console.log(`adapter on http://127.0.0.1:${env.PORT}`);
+const host =
+  process.env.HOST ??
+  (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
+createAppServer(env).listen(env.PORT, host, () => {
+  console.log(`adapter on http://${host}:${env.PORT}`);
   // The scheduler is a platform worker: it uses the workspace key to mark due
   // principal-private schedules as queued runs. Execution is a later slice.
   const key = process.env.OCTO_API_KEY;
