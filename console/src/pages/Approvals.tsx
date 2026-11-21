@@ -39,7 +39,8 @@ import { Textarea } from "@/components/ui/textarea";
 import type { Approval, Decision } from "@/data/types";
 
 const Approvals = () => {
-  const { world, status, error, reload } = useData();
+  const { world, status, error, reload, activeProject, setActiveProject } =
+    useData();
   const { openCopilot } = useOrchestrator();
   const { act, pendingId } = useApprovalDecision();
   const [searchParams] = useSearchParams();
@@ -202,6 +203,28 @@ const Approvals = () => {
           </Button>
         }
       />
+
+      {activeProject ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-surface-1/50 px-3 py-2">
+          <Inbox className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <p className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-muted-foreground">
+            The inbox stays workspace-wide — every project's decisions land
+            here. Today and its counts follow the{" "}
+            <span className="font-medium text-foreground/85">
+              {activeProject.name}
+            </span>{" "}
+            scope.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 rounded-md px-2 text-[11px]"
+            onClick={() => setActiveProject("all")}
+          >
+            Clear scope
+          </Button>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-1.5">
         <button

@@ -113,7 +113,7 @@ const Index = () => {
   }
 
   const summary = daySummary(world);
-  const pending = pendingApprovals(world);
+  const pending = pendingApprovals(world, activeProjectId);
   const highRisk = pending.filter((approval) => approval.risk === "high").length;
   const inScope = (projectId: string) =>
     activeProjectId === "all" || projectId === activeProjectId;
@@ -124,8 +124,8 @@ const Index = () => {
     .filter((mission) => inScope(mission.projectId))
     .filter((mission) => !todayMissions.some((item) => item.id === mission.id))
     .slice(0, 4);
-  const cold = goingCold(world).slice(0, 4);
-  const signals = attentionSignals(world);
+  const cold = goingCold(world, activeProjectId).slice(0, 4);
+  const signals = attentionSignals(world, activeProjectId);
   const recent = world.activity
     .slice()
     .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
@@ -154,10 +154,15 @@ const Index = () => {
           <p className="max-w-xl text-sm leading-relaxed text-muted-foreground">
             {pending.length > 0 ? (
               <span className="text-foreground/90">
-                {pending.length} decisions are waiting on you
+                {pending.length} decision{pending.length === 1 ? " is" : "s are"}{" "}
+                waiting on you
               </span>
             ) : (
-              <span className="text-foreground/90">Your approval inbox is clear</span>
+              <span className="text-foreground/90">
+                {activeProject
+                  ? "No decisions are waiting in this scope"
+                  : "Your approval inbox is clear"}
+              </span>
             )}{" "}
             and {todayMissions.length} mission
             {todayMissions.length === 1 ? " is" : "s are"} due today.{" "}
@@ -290,8 +295,8 @@ const Index = () => {
               if (flat.length === 0) {
                 return (
                   <p className="py-3 text-[12px] text-muted-foreground">
-                    Nothing needs you right now. Ask the copilot to find the
-                    next move.
+                    Nothing needs you{activeProject ? " in this scope" : ""} right
+                    now. Ask the copilot to find the next move.
                   </p>
                 );
               }

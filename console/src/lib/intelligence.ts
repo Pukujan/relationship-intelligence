@@ -211,16 +211,26 @@ export interface SignalGroup {
  * One aggregated "needs attention" read of the world: what needs a decision,
  * what is overdue, what is stalled, and who is going cold. The Today page
  * renders it; the copilot prompt carries it; nothing drifts silently.
+ * With a projectId, every group narrows to that project's scope; omitted or
+ * "all" reads the whole workspace.
  */
-export const attentionSignals = (world: World): SignalGroup[] => {
-  const pending = pendingApprovals(world);
+export const attentionSignals = (
+  world: World,
+  projectId?: string,
+): SignalGroup[] => {
+  const inScope = (id: string) =>
+    !projectId || projectId === "all" || id === projectId;
+  const pending = pendingApprovals(world, projectId);
   const overdue = world.missions.filter(
-    (mission) => mission.status !== "done" && isPast(mission.due),
+    (mission) =>
+      mission.status !== "done" &&
+      isPast(mission.due) &&
+      inScope(mission.projectId),
   );
   const stalled = stalledMissions(world).filter(
-    (stall) => stall.reason !== "overdue",
+    (stall) => stall.reason !== "overdue" && inScope(stall.mission.projectId),
   );
-  const cold = goingCold(world).slice(0, 6);
+  const cold = goingCold(world, projectId).slice(0, 6);
 
   return [
     {
