@@ -24,7 +24,7 @@ services:
       - host.docker.internal:host-gateway
     ports:
       - 127.0.0.1:18098:8787
-    networks: [default, edge]
+    networks: [default, edge, octo]
     healthcheck:
       test:
         [
@@ -47,3 +47,9 @@ networks:
   edge:
     external: true
     name: ${EDGE_NETWORK:-study-os_edge}
+  # Octo's private network: server-side Octo calls (world reads, executor,
+  # vault proxy, Phoenix) stay on the Docker host instead of hairpinning
+  # through Cloudflare, which intermittently times out from this container.
+  octo:
+    external: true
+    name: ${OCTO_NETWORK:-octo_internal}
