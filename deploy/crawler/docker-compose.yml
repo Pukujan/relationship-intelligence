@@ -1,0 +1,102 @@
+# Slow LinkedIn crawler on octo-vps, leaving through a device at home (#118).
+#
+# All three containers share one network namespace owned by `tailscale`, which
+# joins the tailnet as `ri-crawler` and sends everything through the home exit
+# node. Only this stack's traffic takes that route; the VPS and its other
+# services keep their own. If the exit node is offline Tailscale drops the
+# traffic instead of falling back to the VPS address, and the browser and
+# runner don't start until the exit node is up (see the healthcheck).
+#
+#   docker compose --env-file /home/ubuntu/apps/relationship-intelligence-crawler.env \
+#     -f deploy/crawler/docker-compose.yml up -d --build
+#
+# The env file holds TS_AUTHKEY, CRAWLER_VIEW_PASSWORD and RI_CRAWL_TOKEN; each
+# container receives only the values it needs. See deploy/crawler/README.md.
+name: relationship-intelligence-crawler
+
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.104.4
+    container_name: ri-crawler-tailscale
+    hostname: ri-crawler
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?set TS_AUTHKEY in the crawler env file}
+      TS_HOSTNAME: ri-crawler
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      TS_EXTRA_ARGS: --exit-node=${CRAWLER_EXIT_NODE:-teresas-macbook-pro} --exit-node-allow-lan-access=false
+    cap_add: [NET_ADMIN, NET_RAW]
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    healthcheck:
+      # Healthy only while the home exit node is selected and online.
+      test:
+        - CMD-SHELL
+        - tailscale status --json | tr -d ' \n' | grep -q '"ExitNodeStatus":{[^}]*"Online":true'
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  browser:
+    image: lscr.io/linuxserver/chromium:version-f1bb645d
+    container_name: ri-crawler-browser
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+        restart: true
+    restart: unless-stopped
+    shm_size: 1gb
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: America/New_York
+      # Web view for the one-time LinkedIn sign-in, reachable only over the
+      # tailnet at http://ri-crawler:3000.
+      CUSTOM_USER: ${CRAWLER_VIEW_USER:-owner}
+      PASSWORD: ${CRAWLER_VIEW_PASSWORD:?set CRAWLER_VIEW_PASSWORD in the crawler env file}
+      # The debugging port stays on loopback inside the shared namespace, so
+      # only the runner can reach it.
+      CHROME_CLI: --remote-debugging-port=9222
+    volumes:
+      - browser-profile:/config
+    logging: *logging
+
+  runner:
+    build:
+      context: ../..
+      dockerfile: deploy/crawler/Dockerfile.runner
+    image: ri-crawler-runner:local
+    container_name: ri-crawler-runner
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+        restart: true
+      browser:
+        condition: service_started
+    restart: unless-stopped
+    environment:
+      RI_CRAWL_TOKEN: ${RI_CRAWL_TOKEN:?set RI_CRAWL_TOKEN to the app's CRAWLER_TOKEN}
+      RI_CRAWL_SERVER: ${RI_CRAWL_SERVER:-https://business.design-bakery.com}
+      RI_CDP_URL: http://127.0.0.1:9222
+      RI_CRAWL_INTERVAL_SECONDS: ${RI_CRAWL_INTERVAL_SECONDS:-3600}
+    volumes:
+      - crawl-evidence:/data
+    logging: *logging
+
+volumes:
+  tailscale-state:
+  browser-profile:
+  crawl-evidence:
