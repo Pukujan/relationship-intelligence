@@ -280,6 +280,8 @@ const VoiceRequestSchema = z.object({
   principalId: z.string().max(64).optional(),
   model: z.string().max(80).optional(),
   history: z.array(z.string().max(400)).max(8).optional(),
+  currentPath: z.string().max(200).optional(),
+  screenTargets: z.array(z.string().max(120)).max(30).optional(),
   // The approval being read aloud, when the person is on a call.
   approval: z
     .object({
@@ -294,27 +296,80 @@ const VoiceRequestSchema = z.object({
 
 const VOICE_INTENTS = ["answer", "approve", "decline", "skip", "end"] as const;
 
+const VoiceActionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("navigate"),
+    to: z.string().min(1).max(200),
+    label: z.string().max(120).optional(),
+  }),
+  z.object({
+    type: z.literal("click"),
+    target: z.string().min(1).max(120),
+    label: z.string().max(120).optional(),
+  }),
+  z.object({
+    type: z.literal("spotlight"),
+    target: z.string().min(1).max(120),
+    label: z.string().max(120).optional(),
+  }),
+]);
+
+const ALLOWED_ROUTE_PREFIXES = [
+  "/today",
+  "/approvals",
+  "/copilot",
+  "/people",
+  "/projects",
+  "/objectives",
+  "/missions",
+  "/plans",
+  "/calendar",
+  "/events",
+  "/agents",
+  "/schedules",
+  "/activity",
+  "/voice",
+  "/knowledge/files",
+  "/knowledge/notes",
+  "/knowledge/retros",
+  "/integrations/connectors",
+  "/integrations/mcp",
+  "/integrations/plugins",
+  "/profile",
+];
+
+function isSafeRoute(to: string): boolean {
+  if (!to.startsWith("/") || to.startsWith("//")) return false;
+  const [pathname] = to.split("?");
+  return ALLOWED_ROUTE_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
 const ModelVoiceSchema = z.object({
   say: z.string().min(1).max(1_500),
   // An intent the page does not know is treated as a plain answer.
   intent: z.enum(VOICE_INTENTS).catch("answer"),
+  actions: z.array(VoiceActionSchema).max(3).optional().default([]),
 });
 
 /** A spoken turn should come back fast or not at all. */
 const VOICE_TIMEOUT_MS = 20_000;
 
-const VOICE_SYSTEM = `You are the voice of "Mission Control", a relationship-intelligence assistant.
-The person is speaking to you and will HEAR your reply read aloud, so write for the ear:
-- One to three short sentences. Plain words. No lists, no markdown, no ids, no symbols.
-- Lead with the answer. Say names the way a person would.
-- Answer from the WORLD DIGEST only. If it does not say, say you don't have that yet. Never invent people, companies or facts.
-- If you are unsure what they asked, ask one short question back.
-If APPROVAL ON THE CALL is present, the person is deciding that approval. They may ask about it; answer briefly from what is given.
-You never decide for them. Set "intent" to what they asked for:
-- "approve" or "decline" ONLY when they clearly told you to approve or decline the approval on the call. The app will read it back and ask them to confirm.
-- "skip" when they want to move on without deciding, "end" when they want to stop or hang up.
-- "answer" for everything else, including any question.
-Return ONLY a JSON object: {"say": "what you will say aloud", "intent": "answer|approve|decline|skip|end"}`;
+const VOICE_SYSTEM = `You are the live voice assistant of "Mission Control", a relationship-intelligence console — talk naturally like a sharp, warm human chief of staff (Siri/Gemini style).
+The person is speaking to you and will HEAR your reply aloud, so write for the ear:
+- One or two short, natural sentences. Plain spoken English. No markdown, no bullet lists, no raw IDs, no symbols.
+- Lead directly with the answer or what you're opening for them.
+- Answer from the WORLD DIGEST only. If it does not say, say you don't have that yet. Never invent people, companies, or facts.
+- You can drive the app UI while you talk by returning up to 2 items in "actions":
+  - {"type":"navigate","to":"/approvals","label":"Opening Approvals"} — valid routes: /today, /approvals, /copilot, /people, /people/<id>, /people?tab=companies, /projects, /projects/<id>, /objectives, /missions, /missions/<id>, /plans, /calendar, /events, /agents, /agents/<id>, /schedules, /activity, /voice, /knowledge/files, /knowledge/notes, /knowledge/retros, /integrations/connectors, /integrations/mcp, /integrations/plugins, /profile.
+  - {"type":"click","target":"exact visible button/tab label from VISIBLE CONTROLS","label":"Clicking Companies"} — ONLY for safe navigation, tabs, filters, opening drawers, or refreshing. NEVER click Approve, Decline, Delete, Send, Publish, or Sign out.
+  - {"type":"spotlight","target":"section or card title","label":"Highlighting section"} — to point at something on the current screen.
+- When the user asks to "go to", "open", "show me", "pull up", "check", or "click" something, emit the matching action(s) so the cursor visibly navigates and clicks while you speak!
+- If APPROVAL ON THE CALL is present, the person is deciding that approval. You never decide for them. Set "intent":
+  - "approve" or "decline" ONLY when they clearly told you to approve or decline the approval on the call.
+  - "skip" to move on, "end" to stop/hang up, "answer" for everything else.
+Return ONLY JSON: {"say": "what you will say aloud", "intent": "answer|approve|decline|skip|end", "actions": []}`;
 
 /* ------------------------------------------------------------------ */
 /* Handlers                                                            */
@@ -332,12 +387,19 @@ async function handleVoice(body: unknown) {
     const approval = request.approval
       ? `\n\nAPPROVAL ON THE CALL:\n${JSON.stringify(request.approval)}`
       : "";
+    const screen = request.currentPath
+      ? `\n\nCURRENT SCREEN: ${request.currentPath}${
+          request.screenTargets?.length
+            ? `\nVISIBLE CONTROLS: ${request.screenTargets.join(" | ")}`
+            : ""
+        }`
+      : "";
     // No web or retrieval lookup here: both add seconds of silence. A spoken
     // turn answers from the digest; deeper lookups belong to a later slice.
     const routed = await askWithFailover(
       resolveRoute(request.model, "voice"),
       VOICE_SYSTEM,
-      `THE PERSON SAID:\n${request.heard}${approval}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${historyBlock(request.history)}`,
+      `THE PERSON SAID:\n${request.heard}${screen}${approval}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${historyBlock(request.history)}`,
       "off",
       VOICE_TIMEOUT_MS,
       undefined,
@@ -349,16 +411,21 @@ async function handleVoice(body: unknown) {
       !request.approval && (reply.intent === "approve" || reply.intent === "decline" || reply.intent === "skip")
         ? "answer"
         : reply.intent;
+    const actions = (reply.actions ?? [])
+      .filter((action) => (action.type === "navigate" ? isSafeRoute(action.to) : true))
+      .slice(0, 2);
     endSpan(span, true, {
       latency_ms: Date.now() - started,
       provider: routed.provider,
       model: routed.model,
       failovers: routed.failovers,
       intent,
+      actions: actions.length,
     });
     return {
       say: clip(reply.say, 600),
       intent,
+      actions,
       source: "live-model",
       provider: routed.provider,
       model: routed.model,

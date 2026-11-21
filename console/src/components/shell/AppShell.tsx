@@ -47,6 +47,8 @@ import {
 } from "@/components/ui/sheet";
 import { PersonAvatar } from "@/components/common";
 import { ContainerSwitcher } from "./ContainerSwitcher";
+import { CopilotDock } from "@/components/copilot/CopilotDock";
+import { AgentCursorOverlay } from "@/components/copilot/AgentCursorOverlay";
 
 interface NavItem {
   to: string;
@@ -444,7 +446,6 @@ const TopBar = () => {
             className="h-9 gap-1.5 rounded-lg px-2.5 text-[12px]"
             onClick={() => {
               if (call.state === "idle" || call.state === "ended") startCall();
-              navigate("/voice");
             }}
           >
             <Phone className="h-3.5 w-3.5" />
@@ -490,5 +491,7 @@ export const AppShell = () => (
         </div>
       </main>
     </div>
+    <AgentCursorOverlay />
+    <CopilotDock />
   </div>
 );
