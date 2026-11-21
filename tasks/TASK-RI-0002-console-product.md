@@ -350,6 +350,29 @@ Blocked/uncertain:
 Next:
 - Wait for PR #107's checks; auto-merge is on.
 
+### 2026-11-21 18:17:46 UTC — agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1","blocked":[],"changed":["deploy/crawler/docker-compose.yml, Dockerfile.runner, run-hourly.sh and README.md (all new)"],"completed":["The LinkedIn crawler needed the owner's Mac awake. A VPS stack in deploy/crawler now runs it there, sending its traffic through the home device teresas-macbook-pro so LinkedIn sees the home address."],"decisions":["no new decisions"],"evidence":["Compose file parses with three services sharing the tailscale container's network, browser and runner gated on the exit node being online; the hourly wrapper passes a shell syntax check. Not yet run: Docker isn't installed on this Mac and SSH to octo-vps is refused."],"evidence_class":"observed","next_action":"Owner turns on the exit node on teresas-macbook-pro, creates the Tailscale auth key and env file on the VPS, starts the stack, and confirms the crawler's address is the home address.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T18:17:46Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"6c33ad29732bc8adba73bea3ef935e31b94f30e13ac00438901845e166a8fab7","request_id":"f176ba40cf8a4d679fca315b55652803","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- The LinkedIn crawler needed the owner's Mac awake. A VPS stack in deploy/crawler now runs it there, sending its traffic through the home device teresas-macbook-pro so LinkedIn sees the home address.
+
+Evidence:
+- Compose file parses with three services sharing the tailscale container's network, browser and runner gated on the exit node being online; the hourly wrapper passes a shell syntax check. Not yet run: Docker isn't installed on this Mac and SSH to octo-vps is refused.
+
+Decisions:
+- no new decisions
+
+Changed:
+- deploy/crawler/docker-compose.yml, Dockerfile.runner, run-hourly.sh and README.md (all new)
+
+Blocked/uncertain:
+- none
+
+Next:
+- Owner turns on the exit node on teresas-macbook-pro, creates the Tailscale auth key and env file on the VPS, starts the stack, and confirms the crawler's address is the home address.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
