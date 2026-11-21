@@ -26,9 +26,13 @@ Everything below is over the line, regardless of how available the data is:
   The moment the graph is used to find a vulnerable moment, this project is doing
   social engineering in the harmful sense, and the word "social engineering" in the
   folder name stops being a metaphor.
-- **Do not scrape past a rate limit or a ToS.** LinkedIn's User Agreement forbids
-  scraping. Getting a 429 and routing around it is the point at which "public data"
-  stops being your defence.
+- **Crawl slowly; stop when blocked.** A slow, human-paced crawler over publicly
+  viewable pages is allowed — the owner chose this on 2026-11-20: a slow crawler,
+  not consent-gated collection. LinkedIn's User Agreement still forbids automated
+  access; the owner accepts that contractual risk for this private tool. The pace
+  is the rule: human-speed visits, back off on a 429, login wall, or block, and
+  never route around one. Routing around a block is the point at which "public
+  data" stops being your defence.
 - **Do not fabricate a connection.** A `MET` edge based on "we were both at the same
   conference" is worth saying as exactly that. Dressing it up as a relationship is
   how warm intros turn into burned bridges.
@@ -42,9 +46,9 @@ Everything below is over the line, regardless of how available the data is:
 | Conference talk pages, speaker bios | Yes | Usually self-submitted |
 | Podcast transcripts | Yes | Quote them accurately |
 | Company "about" / team pages | Yes | Role + org only |
-| LinkedIn profile | Careful | Free to read as a human; scraping violates the User Agreement. Record the URL, take the facts manually, don't bulk-harvest |
+| LinkedIn profile | Slow crawl OK | Public profile facts via a slow, human-paced crawler (owner decision 2026-11-20). Cite the profile URL as evidence; back off on rate limits or login walls. No per-visit consent gate |
 | Private Slack/Discord | No | Off-limits regardless of access |
-| Anything behind a login you have | No | Access is not permission |
+| Private data behind a login | No | Access is not permission. The owner's own signed-in session may drive the slow public-profile crawl above — nothing else |
 | Data brokers / leaked sets | No | Delete on sight |
 
 ## 4. The quote rule
