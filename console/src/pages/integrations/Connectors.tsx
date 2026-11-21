@@ -184,6 +184,7 @@ const Connectors = () => {
       const data = (await r.json()) as { syncedCount?: number; detail?: string; error?: string };
       if (!r.ok) {
         toast.error(`${name} sync failed`, { description: data.detail ?? data.error ?? "Try again." });
+        await loadUserConnectors();
         return;
       }
       toast.success(`${name} synced`, {
@@ -327,6 +328,16 @@ const Connectors = () => {
                           {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 text-run" />}
                           Disconnect
                         </Button>
+                        {c.authKind === "local_runner" ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 gap-1 rounded-md px-2 text-[11px]"
+                            onClick={() => setSetupFor(c)}
+                          >
+                            Set up
+                          </Button>
+                        ) : null}
                       </div>
                     ) : c.connectUrl ? (
                       <Button
