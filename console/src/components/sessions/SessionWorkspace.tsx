@@ -8,6 +8,7 @@ import { useData } from "@/data/store";
 import { buildWorldDigest, type WorldDigest } from "@/lib/digest";
 import { streamTurn } from "@/lib/sessionClient";
 import { isTurnLive, turnMachine } from "@/machines/turnMachine";
+import { resolveThreadEntry, type ThreadNavState, type ThreadScope } from "@/lib/threadEntry";
 import type { Conversation, SessionMessage } from "@/data/sessionTypes";
 import { PartRenderer } from "./PartRenderer";
 import { Button } from "@/components/ui/button";
@@ -65,9 +66,15 @@ const scopedDigest = (digest: WorldDigest, conversation: Conversation | null): W
 const SessionWorkspace = () => {
   const { world, session, sessions, createSession, patchSession, appendMessage, loadMessages, refreshSessions } = useData();
   const location = useLocation();
-  const seed = (location.state as { seed?: string } | null)?.seed ?? "";
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [draft, setDraft] = useState(false);
+  // A seeded arrival opens a fresh draft thread with its scope pinned; only an
+  // unseeded arrival resumes the newest open thread (resolveThreadEntry). Read
+  // once, then consume the history state so back/forward or a remount cannot
+  // re-seed a conversation that already started.
+  const navRef = useRef((location.state as ThreadNavState) ?? null);
+  const entry = useRef(resolveThreadEntry(navRef.current, [])).current;
+  const seed = entry.seed;
+  const [activeId, setActiveId] = useState<string | null>(entry.activeId);
+  const [draft, setDraft] = useState(entry.draft);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   // One XState actor replaces the streaming/phases/liveParts/liveMeta useState
   // cluster. The machine coordinates turn state; the SSE fetch is still driven
@@ -77,7 +84,7 @@ const SessionWorkspace = () => {
   const phases = turn.context.phases;
   const liveParts = turn.context.parts;
   const liveMeta = { provider: turn.context.provider ?? undefined, model: turn.context.model ?? undefined };
-  const [text, setText] = useState(seed);
+  const [text, setText] = useState(entry.seed);
   const [model, setModel] = useState("auto");
   const [reasoning, setReasoning] = useState("off");
   const [modelOptions, setModelOptions] = useState<{ provider: string; models: string[] }[]>([]);
@@ -85,9 +92,13 @@ const SessionWorkspace = () => {
   const [railQuery, setRailQuery] = useState("");
   const [threadLimit, setThreadLimit] = useState(THREAD_PAGE_SIZE);
   const [contextOpen, setContextOpen] = useState(true);
-  const [newScope, setNewScope] = useState<{ kind: string; id: string | null }>({ kind: "workspace", id: null });
+  const [newScope, setNewScope] = useState<ThreadScope>(entry.scope);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (navRef.current) window.history.replaceState(null, "");
+  }, []);
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
   const openSessions = sessions.filter((s) => !s.archivedAt);
@@ -123,8 +134,8 @@ const SessionWorkspace = () => {
   }, [sessions, patchSession]);
 
   useEffect(() => {
-    if (!activeId && !draft && openSessions.length) setActiveId(openSessions[0].id);
-  }, [activeId, draft, openSessions]);
+    if (!activeId && !draft && !seed && openSessions.length) setActiveId(openSessions[0].id);
+  }, [activeId, draft, openSessions, seed]);
 
   useEffect(() => {
     if (!activeId) {
@@ -353,6 +364,7 @@ const SessionWorkspace = () => {
               <option value="workspace:">scope: workspace</option>
               {(world?.projects ?? []).map((project) => <option key={project.id} value={`project:${project.id}`}>project: {project.name}</option>)}
               {(world?.people ?? []).slice(0, 12).map((person) => <option key={person.id} value={`person:${person.id}`}>person: {person.name}</option>)}
+              {(world?.missions ?? []).slice(0, 12).map((mission) => <option key={mission.id} value={`mission:${mission.id}`}>mission: {mission.name}</option>)}
             </select>
           )}
           <button type="button" aria-label="Toggle context panel" onClick={() => setContextOpen((v) => !v)} className="text-muted-foreground hover:text-foreground">
