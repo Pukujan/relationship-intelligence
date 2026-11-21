@@ -373,6 +373,29 @@ Blocked/uncertain:
 Next:
 - Owner turns on the exit node on teresas-macbook-pro, creates the Tailscale auth key and env file on the VPS, starts the stack, and confirms the crawler's address is the home address.
 
+### 2026-11-21 18:29:54 UTC — agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1","blocked":[],"changed":["app/server/dm.ts and adapter route, console profile event log, collector/src/dms.ts and dmParse.ts, deploy/crawler wiring"],"completed":["DMs never reached the app. A private DM pipeline now exists, with LinkedIn as its first source: ingest route, contact matching by LinkedIn link only, daily private event-log entries, and a reader that runs in the VPS crawler stack."],"decisions":["no new decisions"],"evidence":["App: types, biome, Vitest (10 new DM tests) and build pass. Console: typecheck without the app's packages, eslint, machine tests (1 new) and build pass. Collector: types and 18 tests pass (13 new parser tests). The LinkedIn page reader itself has not run against live LinkedIn."],"evidence_class":"observed","next_action":"Owner sets DM_INGEST_TOKEN and RI_DM_TOKEN once the crawler stack runs; then build the Telegram slice.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T18:29:54Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"77937b7a3d95b820ddb2ce7cd4322ecec51764733df17a4c8fbdf1663658deac","request_id":"fcf7677e83044e6c8a19d37f73025995","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- DMs never reached the app. A private DM pipeline now exists, with LinkedIn as its first source: ingest route, contact matching by LinkedIn link only, daily private event-log entries, and a reader that runs in the VPS crawler stack.
+
+Evidence:
+- App: types, biome, Vitest (10 new DM tests) and build pass. Console: typecheck without the app's packages, eslint, machine tests (1 new) and build pass. Collector: types and 18 tests pass (13 new parser tests). The LinkedIn page reader itself has not run against live LinkedIn.
+
+Decisions:
+- no new decisions
+
+Changed:
+- app/server/dm.ts and adapter route, console profile event log, collector/src/dms.ts and dmParse.ts, deploy/crawler wiring
+
+Blocked/uncertain:
+- none
+
+Next:
+- Owner sets DM_INGEST_TOKEN and RI_DM_TOKEN once the crawler stack runs; then build the Telegram slice.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.

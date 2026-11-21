@@ -2,6 +2,8 @@
 # It never launches a browser: it attaches over CDP to the Chromium container
 # that shares its network, so no browser is downloaded here.
 FROM node:24-alpine
+# Time zone data, so DM times read from the browser resolve in the same zone.
+RUN apk add --no-cache tzdata
 RUN corepack enable && corepack prepare pnpm@12.14.0 --activate
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     PATCHRIGHT_SKIP_BROWSER_DOWNLOAD=1

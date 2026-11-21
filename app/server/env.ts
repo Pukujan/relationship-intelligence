@@ -38,6 +38,8 @@ const EnvSchema = z.object({
   // Shared bearer for the local slow-crawler runner (RI-0023). Unset disables
   // the crawler endpoints entirely.
   CRAWLER_TOKEN: z.string().optional(),
+  // Bearer for the DM import runners (#120). Unset disables DM ingest.
+  DM_INGEST_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

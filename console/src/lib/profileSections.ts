@@ -194,6 +194,26 @@ export const buildProfile = (input: {
       continue;
     }
 
+    if (verb === "MESSAGED") {
+      // One day of a DM thread (#120): "Messaged X on LinkedIn: 3 messages
+      // (2 from them, 1 from you). Last, X: "..."". Private to the owner.
+      const channel = claim.text.match(/ on ([A-Za-z]+): /)?.[1] ?? "DM";
+      const count = claim.text.match(/: (\d+) messages?/)?.[1];
+      const last = claim.text.match(/Last, ([^:]+): "(.*)"$/s);
+      eventLog.push({
+        id: claim.id,
+        kind: "log",
+        title: `${channel} messages`,
+        ...(last ? { detail: `${last[1]}: ${last[2]}` } : {}),
+        meta: [count ? `${count} message${count === "1" ? "" : "s"}` : "", "private"]
+          .filter(Boolean)
+          .join(" · "),
+        ...(date ? { date } : {}),
+        unverified: false,
+      });
+      continue;
+    }
+
     if (verb === "UNVERIFIED" || !isSourced(claim)) {
       const { tag, body } = parseNote(claim.text);
       const lowerTag = (tag ?? "").toLowerCase();
@@ -383,8 +403,9 @@ export const buildProfile = (input: {
     posts: posts.sort(byNewest),
     eventLog: eventLog.sort(byNewest),
     notes: notes.sort(byNewest),
+    // Messages are private history, not public facts: keep them out of Sources.
     sources: claims
-      .filter(isSourced)
+      .filter((claim) => isSourced(claim) && (claim.verb ?? "").toUpperCase() !== "MESSAGED")
       .map((claim) => ({ claim, id: claim.id, date: dateOf(claim) }))
       .sort(byNewest)
       .map(({ claim }) => claim),
