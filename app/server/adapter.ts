@@ -33,6 +33,7 @@ import {
   saveUserConnector,
 } from "./connectors.js";
 import { handleRagQuery, proxyCopilot } from "./copilotProxy.js";
+import { crawlerAuthorized, crawlerIngest, crawlerQueue } from "./crawler.js";
 import { type Env, readEnv } from "./env.js";
 import { deliverApprovedSend } from "./gmailSend.js";
 import { fetchPrincipal, OctoError } from "./octo.js";
@@ -126,6 +127,55 @@ export async function handleRequest(
 
   if (path === "/app-api/health") {
     sendJson(res, 200, { status: "ok" });
+    return;
+  }
+
+  // Slow LinkedIn crawler (RI-0023): gated by a shared bearer, not signed-in
+  // sessions. The local runner runs on the owner's Mac, not in the browser.
+  if (path.startsWith("/app-api/crawler/")) {
+    if (!crawlerAuthorized(req, env.CRAWLER_TOKEN)) {
+      sendJson(res, 401, { error: "UNAUTHORIZED" });
+      return;
+    }
+    const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 20_000 };
+    // The crawler is a service-level worker: it uses the workspace Octo key,
+    // the same way the scheduler does, not a signed-in session token.
+    const octoToken = process.env.OCTO_API_KEY ?? "";
+    const container = process.env.OCTO_WORKSPACE_ID ?? "";
+    const workspace = process.env.OCTO_WORKSPACE_ID ?? "";
+    try {
+      if (path === "/app-api/crawler/queue" && req.method === "GET") {
+        const limit = Math.max(
+          1,
+          Math.min(50, Number(url.searchParams.get("limit") ?? 20)),
+        );
+        sendJson(
+          res,
+          200,
+          await crawlerQueue(config, octoToken, container, workspace, limit),
+        );
+        return;
+      }
+      if (path === "/app-api/crawler/ingest" && req.method === "POST") {
+        const raw = JSON.parse((await readBody(req)) || "{}") as unknown;
+        const result = await crawlerIngest(
+          config,
+          octoToken,
+          container,
+          workspace,
+          raw,
+        );
+        sendJson(res, result.status, result.body);
+        return;
+      }
+    } catch (error) {
+      sendJson(res, 502, {
+        error: "CRAWLER_FAILED",
+        detail: error instanceof Error ? error.message : "unknown",
+      });
+      return;
+    }
+    sendJson(res, 404, { error: "not_found" });
     return;
   }
 
