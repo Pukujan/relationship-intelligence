@@ -231,3 +231,5 @@ export const SupersedesRelationSchema = ClaimRelationSchema.extend({
   relation: z.literal("SUPERSEDES"),
 });
 export type SupersedesRelation = z.infer<typeof SupersedesRelationSchema>;
+
+export * from "./workflowContracts.js";

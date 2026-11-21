@@ -30,6 +30,7 @@ import {
   Target,
   UserRound,
   Users,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -78,6 +79,7 @@ const secondaryGroups: { label: string; items: NavItem[] }[] = [
       { to: "/objectives", label: "Objectives", icon: Target },
       { to: "/milestones", label: "Milestones", icon: CalendarRange },
       { to: "/plans", label: "Plans", icon: ListChecks },
+      { to: "/workflows", label: "Workflows", icon: Workflow },
       { to: "/calendar", label: "Calendar", icon: CalendarDays },
       { to: "/events", label: "Events", icon: CalendarDays },
       {

@@ -35,7 +35,10 @@ export type CopilotLinkKind =
   | "mission"
   | "objective"
   | "timeline"
-  | "inbox";
+  | "inbox"
+  | "workflow"
+  | "connector"
+  | "schedule";
 
 export interface CopilotLink {
   label: string;
@@ -818,6 +821,77 @@ const scheduleAnswer = (world: World, prompt: string): CopilotAnswer => {
   };
 };
 
+/** Service agent: attaching outside APIs (TinyFish web agent, generic REST,
+ * Slack, GitHub, LLMs, webhooks). Guides the human to the attach flow; keys
+ * stay server-side and nothing is connected without the human pasting them. */
+const apiServiceAnswer = (world: World, prompt: string): CopilotAnswer => {
+  const text = prompt.toLowerCase();
+  const provider = hasAny(text, ["tinyfish", "tiny fish"])
+    ? "tinyfish"
+    : hasAny(text, ["slack"])
+      ? "slack"
+      : hasAny(text, ["github"])
+        ? "github"
+        : hasAny(text, ["webhook", "zapier", "make.com"])
+          ? "webhook"
+          : hasAny(text, ["llm", "openai", "ollama", "model"])
+            ? "llm"
+            : "rest";
+  const guide: Record<string, { name: string; cred: string; use: string }> = {
+    tinyfish: { name: "TinyFish web agent", cred: "your X-API-Key from agent.tinyfish.ai → API Keys", use: "goal-based web runs, clean page fetch and web search" },
+    slack: { name: "Slack", cred: "an incoming-webhook URL (hooks.slack.com/services/…)", use: "posting workflow alerts into a channel" },
+    github: { name: "GitHub", cred: "a personal access token (read scopes are enough)", use: "repo, issue and activity metrics" },
+    webhook: { name: "an outbound webhook", cred: "the receiving URL", use: "pushing workflow results to your own backend or Zapier/Make" },
+    llm: { name: "an LLM endpoint", cred: "a base URL, model and API key (OpenAI-compatible)", use: "AI steps inside workflows" },
+    rest: { name: "a generic REST API", cred: "the base URL and an auth header (e.g. Authorization: Bearer …)", use: "any outside service with a REST API" },
+  };
+  const g = guide[provider] ?? guide.rest;
+  return {
+    intentId: "attach-service",
+    intentLabel: `Service agent · ${g.name}`,
+    agents: [],
+    steps: [
+      { label: `Get the credential`, detail: g.cred },
+      { label: "Attach it on the Connectors page", detail: "API services → Attach service; the key is stored server-side, never in the browser" },
+      { label: "Test the connection", detail: provider === "tinyfish" ? "the test reads your wallet balance — no run cost" : "a lightweight probe verifies auth" },
+      { label: "Use it in a workflow", detail: `add an API-service node for ${g.use}` },
+    ],
+    summary: `I can help attach ${g.name}. You'll need ${g.cred}. Open Connectors → API services → Attach service, paste it, and press Test — I'll never store the key in the browser or connect anything without you. Once it's connected you can call it from a workflow node (${g.use}). Want me to open the Connectors page?`,
+    links: [
+      { label: "Connectors · API services", href: "/integrations/connectors", kind: "connector" },
+      { label: "Workflows canvas", href: "/workflows", kind: "workflow" },
+    ],
+    approvalIds: [],
+  };
+};
+
+/** Workflow helper: composing visual automations on the canvas. */
+const workflowAnswer = (world: World, prompt: string): CopilotAnswer => {
+  const text = prompt.toLowerCase();
+  const url = prompt.match(/https?:\/\/[^\s"']+/)?.[0];
+  const tinyfish = hasAny(text, ["tinyfish", "scrape", "pricing", "competitor", "extract", "watch"]);
+  return {
+    intentId: "build-workflow",
+    intentLabel: "Workflow helper · visual automation",
+    agents: [],
+    steps: [
+      { label: "Pick a trigger", detail: "manual, or a schedule (daily / weekly / once)" },
+      { label: "Add steps", detail: "API-service calls (TinyFish / REST), a copilot analysis step, or create a scheduled research job" },
+      { label: "Branch and finish", detail: "a condition splits true / false; a log or schedule node records the outcome" },
+      { label: "Run and inspect", detail: "press Run to watch each node's status and output" },
+    ],
+    summary: tinyfish && url
+      ? `Let's build that on the canvas: a trigger → a TinyFish API-service node pointed at ${url} with your goal → a condition → a review step. Attach your TinyFish key first (Connectors → API services), then open the Workflows canvas and I'll help you wire it. Nothing runs until you press Run.`
+      : "I can help you build a visual workflow: wire a trigger to API-service calls (TinyFish or any REST API), a copilot analysis step, conditions and scheduled jobs on the canvas. Open the Workflows page to start, or tell me the URL and goal and I'll lay out the nodes. Nothing runs until you press Run.",
+    links: [
+      { label: "Workflows canvas", href: "/workflows", kind: "workflow" },
+      { label: "Connectors · API services", href: "/integrations/connectors", kind: "connector" },
+      { label: "Schedules", href: "/schedules", kind: "schedule" },
+    ],
+    approvalIds: [],
+  };
+};
+
 export const planRequest = (prompt: string, world: World): CopilotAnswer => {
   const text = prompt.toLowerCase().trim();
 
@@ -856,6 +930,42 @@ export const planRequest = (prompt: string, world: World): CopilotAnswer => {
     ])
   ) {
     return scheduleAnswer(world, prompt);
+  }
+  if (
+    hasAny(text, [
+      "tinyfish",
+      "attach",
+      "api service",
+      "outside api",
+      "external api",
+      "rest api",
+      "webhook",
+      "integrate",
+      "service agent",
+      "connect an api",
+      "add an api",
+      "outside service",
+      "external service",
+      "connect slack",
+      "connect github",
+      "connect tinyfish",
+    ])
+  ) {
+    return apiServiceAnswer(world, prompt);
+  }
+  if (
+    hasAny(text, [
+      "workflow",
+      "automation",
+      "automate",
+      "canvas",
+      "n8n",
+      "visual flow",
+      "build a flow",
+      "wire ",
+    ])
+  ) {
+    return workflowAnswer(world, prompt);
   }
   if (
     hasAny(text, [
@@ -920,3 +1030,12 @@ export const planRequest = (prompt: string, world: World): CopilotAnswer => {
   }
   return followUpAnswer(world);
 };
+
+export const copilotSuggestions = [
+  "What's due today across the team?",
+  "Connect TinyFish so I can watch competitor pricing",
+  "Build a workflow that fetches a URL every week",
+  "Plan a scheduled research brief with me",
+  "Attach a REST API for an outside service",
+  "What's waiting on my approval?",
+];

@@ -39,6 +39,7 @@ import {
   type UserConnectorView,
 } from "../../../../app/shared/connectorContracts";
 import { RunnerSetupDialog } from "@/components/integrations/RunnerSetupDialog";
+import { ApiServicesSection } from "@/components/integrations/ApiServicesSection";
 
 type UserConnectorItem = UserConnectorView;
 
@@ -495,6 +496,8 @@ const Connectors = () => {
           </p>
         )}
       </section>
+
+      <ApiServicesSection />
 
       {world.connectors.length > 0 ? (
         <section className="space-y-2.5">
