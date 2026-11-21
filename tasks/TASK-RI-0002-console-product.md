@@ -212,6 +212,29 @@ Blocked/uncertain:
 Next:
 - Merge and deploy, then the owner checks the People page on the live site; file per-workspace privacy for people as its own issue.
 
+### 2026-11-21 01:42:08 UTC — agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1","blocked":[],"changed":["console/src/pages/PersonProfile.tsx, console/src/lib/profileSections.ts (new), app/server/world.ts and app/shared/contracts.ts pass claim verb, attribute and basis through"],"completed":["Contact pages read like a LinkedIn profile (#93): banner, avatar, headline and LinkedIn link, then About, Activity, Experience, Education, an event log, the owner's notes and sources. Only sourced claims feed the profile sections; unverified notes stay flagged as notes."],"decisions":["no new decisions"],"evidence":["All 24 live contacts render every core section with an event log and no unverified note inside a profile section, checked in a local browser against the real ledger read through this branch's world read. Phone width has no sideways scroll. Console typecheck, lint (0 errors), machine tests (7 new profile tests), orphan check and build pass; app types, biome, 71 Vitest tests and build pass."],"evidence_class":"observed","next_action":"Open the pull request for #93 and let CI run; after merge, check a contact page on the deployed console.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T01:42:08Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"fe817bb03a00184344f474168ad63091be8f95884a808c36a3947d11534006bb","request_id":"3d4700b9737649eb9b89214ca1390d60","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- Contact pages read like a LinkedIn profile (#93): banner, avatar, headline and LinkedIn link, then About, Activity, Experience, Education, an event log, the owner's notes and sources. Only sourced claims feed the profile sections; unverified notes stay flagged as notes.
+
+Evidence:
+- All 24 live contacts render every core section with an event log and no unverified note inside a profile section, checked in a local browser against the real ledger read through this branch's world read. Phone width has no sideways scroll. Console typecheck, lint (0 errors), machine tests (7 new profile tests), orphan check and build pass; app types, biome, 71 Vitest tests and build pass.
+
+Decisions:
+- no new decisions
+
+Changed:
+- console/src/pages/PersonProfile.tsx, console/src/lib/profileSections.ts (new), app/server/world.ts and app/shared/contracts.ts pass claim verb, attribute and basis through
+
+Blocked/uncertain:
+- none
+
+Next:
+- Open the pull request for #93 and let CI run; after merge, check a contact page on the deployed console.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
