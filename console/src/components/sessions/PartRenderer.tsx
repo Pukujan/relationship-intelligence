@@ -7,7 +7,7 @@ import { useData } from "@/data/store";
 import { agentById } from "@/data/derive";
 import { designAsProposal } from "@/lib/intelligence";
 import { sanitizeMermaidSource, type Part } from "@/data/sessionTypes";
-import type { MissionDesign } from "@/data/types";
+import type { MilestoneDesign } from "@/data/types";
 import { Sparkline } from "@/components/Sparkline";
 import { SessionActions } from "./SessionActions";
 import type { CopilotAction } from "@/lib/actions";
@@ -224,7 +224,7 @@ const ProposalPart = ({ part }: { part: Extract<Part, { kind: "proposal" }> }) =
   const { world, addProposal } = useData();
   const [heldId, setHeldId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const design = part.design as MissionDesign;
+  const design = part.design as MilestoneDesign;
   const hold = async () => {
     if (!world) return;
     setBusy(true);
@@ -240,7 +240,7 @@ const ProposalPart = ({ part }: { part: Extract<Part, { kind: "proposal" }> }) =
   };
   return (
     <div className="rounded-xl border border-primary/25 bg-primary/5 p-3">
-      <p className="eyebrow">Proposed mission — held for you</p>
+      <p className="eyebrow">Proposed milestone — held for you</p>
       <p className="mt-1 text-[13px] font-medium">{design.missionName}</p>
       <p className="mt-0.5 text-[12px] text-muted-foreground">{design.missionSummary}</p>
       <div className="mt-2 flex items-start gap-2 rounded-lg border border-border/60 bg-surface-1 px-2.5 py-2">

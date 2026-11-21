@@ -17,7 +17,7 @@ const NotFound = () => {
           That surface doesn't exist
         </h1>
         <p className="mt-2 text-[12.5px] leading-relaxed text-muted-foreground">
-          The route is gone, but the graph is intact. Head back to Mission
+          The route is gone, but the graph is intact. Head back to Milestone
           Control or ask the copilot where to go next.
         </p>
         <div className="mt-4 flex flex-wrap items-center justify-center gap-2">

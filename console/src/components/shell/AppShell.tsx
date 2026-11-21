@@ -74,7 +74,7 @@ const secondaryGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { to: "/projects", label: "Projects", icon: FolderKanban },
       { to: "/objectives", label: "Objectives", icon: Target },
-      { to: "/missions", label: "Missions", icon: CalendarRange },
+      { to: "/milestones", label: "Milestones", icon: CalendarRange },
       { to: "/plans", label: "Plans", icon: ListChecks },
       { to: "/calendar", label: "Calendar", icon: CalendarDays },
       { to: "/events", label: "Events", icon: CalendarDays },
@@ -342,7 +342,7 @@ const routeTitles: Record<string, string> = {
   "/approvals": "Approval inbox",
   "/projects": "Projects",
   "/objectives": "Objectives",
-  "/missions": "Missions",
+  "/milestones": "Milestones",
   "/plans": "Plans",
   "/calendar": "Calendar",
   "/agents": "Agents",
@@ -378,7 +378,7 @@ const TopBar = () => {
 
   const title = useMemo(() => {
     if (location.pathname.startsWith("/projects/")) return "Project";
-    if (location.pathname.startsWith("/missions/")) return "Mission";
+    if (location.pathname.startsWith("/milestones/")) return "Milestone";
     if (location.pathname.startsWith("/agents/")) return "Agent detail";
     if (location.pathname.startsWith("/people/")) return "Person profile";
     return routeTitles[location.pathname] ?? "Mission Control";

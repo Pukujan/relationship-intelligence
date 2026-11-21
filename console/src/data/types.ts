@@ -13,6 +13,7 @@ export type ApprovalKind =
   | "publish"
   | "invite"
   | "commit"
+  /** Persisted wire value; the console labels this a Milestone. */
   | "mission"
   | "replan";
 export type ApprovalStatus = "pending" | "approved" | "declined";
@@ -59,13 +60,15 @@ export interface AgentTask {
   due?: string;
   progress?: number;
   note?: string;
-  missionId?: string;
+  /** Persisted Octo doc key is `missionId`; mapped at the world boundary. */
+  milestoneId?: string;
 }
 
 export interface Agent {
   id: string;
   name: string;
   role: string;
+  /** The agent's enduring purpose — why it exists, not a task. */
   mission: string;
   icon: AgentIcon;
   tone: AgentTone;
@@ -114,19 +117,19 @@ export interface Approval {
   declinePath?: DeclinePath;
   editedAction?: string;
   /**
-   * When present, approving this row creates or adjusts work: `mission`
-   * materializes objective + mission + plan; `replan` applies the adjustment
-   * to the referenced mission. The proposal is data, so an Octo-backed
+   * When present, approving this row creates or adjusts work: `milestone`
+   * materializes objective + milestone + plan; `replan` applies the adjustment
+   * to the referenced milestone. The proposal is data, so an Octo-backed
    * source can persist it verbatim.
    */
-  design?: MissionDesign;
+  design?: MilestoneDesign;
 }
 
 /* ------------------------------------------------------------------ */
 /* Proposals (intelligence layer)                                      */
 /* ------------------------------------------------------------------ */
 
-export type MissionAutonomy = "draft" | "approve" | "full";
+export type MilestoneAutonomy = "draft" | "approve" | "full";
 
 export interface DesignStep {
   label: string;
@@ -136,29 +139,33 @@ export interface DesignStep {
 
 /**
  * A proposal the human can approve to create or adjust work. `mission`
- * designs create objective + mission + plan on approval; `replan` designs
- * adjust an existing mission. It rides on an Approval so the inbox, the
- * decision log, and (later) Octo see one shape.
+ * designs (the persisted wire kind; the console calls the unit a milestone)
+ * create objective + milestone + plan on approval; `replan` designs adjust
+ * an existing milestone. It rides on an Approval so the inbox, the decision
+ * log, and Octo see one shape. Wire keys keep their persisted `mission*`
+ * spelling; the domain language is milestone.
  */
-export interface MissionDesign {
+export interface MilestoneDesign {
   kind: "mission" | "replan";
   missionName: string;
   missionSummary: string;
   /** Existing project to attach to; when absent, a new project is created. */
   projectId?: string;
   projectName?: string;
+  /** Enduring purpose for a newly created project — its mission, not a task. */
+  projectMission?: string;
   objectiveName: string;
   objectiveTarget: string;
   objectiveId?: string;
-  horizon: MissionHorizon;
+  horizon: MilestoneHorizon;
   due: string;
   agentIds: string[];
-  autonomy: MissionAutonomy;
+  autonomy: MilestoneAutonomy;
   planSteps: DesignStep[];
   rationale: string;
   unverified: string[];
-  /** For replan designs: the mission being adjusted and how. */
-  missionId?: string;
+  /** For replan designs: the milestone being adjusted and how. */
+  milestoneId?: string;
   adjustment?: "extend" | "replan" | "escalate";
 }
 
@@ -170,7 +177,7 @@ export interface NewProposal {
   reason: string;
   evidence: EvidenceRef[];
   risk: Risk;
-  design: MissionDesign;
+  design: MilestoneDesign;
   personId?: string;
   companyId?: string;
   eventId?: string;
@@ -254,8 +261,8 @@ export interface RelationshipEvent {
 export type ProjectKind = "deal" | "event" | "initiative";
 export type ProjectStatus = "active" | "at_risk" | "planned" | "on_hold";
 export type ObjectiveStatus = "on_track" | "at_risk" | "met" | "paused";
-export type MissionHorizon = "today" | "this_week";
-export type MissionStatus = "queued" | "running" | "blocked" | "done";
+export type MilestoneHorizon = "today" | "this_week";
+export type MilestoneStatus = "queued" | "running" | "blocked" | "done";
 export type StepStatus = "todo" | "doing" | "done";
 
 export interface Organization {
@@ -275,9 +282,9 @@ export interface Workspace {
 }
 
 /**
- * A container for a piece of work (a deal, an event, an initiative).
- * Projects *reference* people, companies and events from the graph — they
- * never own or duplicate them.
+ * A container for a piece of work (a deal, an event, an initiative), carrying
+ * a mission: the enduring reason it exists. Projects *reference* people,
+ * companies and events from the graph — they never own or duplicate them.
  */
 export interface Project {
   id: string;
@@ -287,6 +294,12 @@ export interface Project {
   status: ProjectStatus;
   owner: string;
   summary: string;
+  /**
+   * The project's mission: why it exists. Never time-boxed, never "done" —
+   * objectives and milestones are the bounded work that serves it. Absent on
+   * older Octo rows until someone writes one.
+   */
+  mission?: string;
   personIds: string[];
   companyIds: string[];
   eventIds: string[];
@@ -294,7 +307,7 @@ export interface Project {
   targetDate?: string;
 }
 
-/** A measurable outcome inside a project. */
+/** A bounded, measurable goal inside a project — a target and a deadline, serving the project's mission. */
 export interface Objective {
   id: string;
   projectId: string;
@@ -305,15 +318,15 @@ export interface Objective {
   dueDate?: string;
 }
 
-/** A time-boxed unit of work an agent executes to advance an objective. */
-export interface Mission {
+/** A bounded, time-boxed unit of work an agent executes to advance an objective. Today or this week — never open-ended. */
+export interface Milestone {
   id: string;
   objectiveId: string;
   projectId: string;
   name: string;
   summary: string;
-  horizon: MissionHorizon;
-  status: MissionStatus;
+  horizon: MilestoneHorizon;
+  status: MilestoneStatus;
   agentIds: string[];
   personIds: string[];
   eventId?: string;
@@ -328,10 +341,11 @@ export interface PlanStep {
   agentId?: string;
 }
 
-/** The agent's strategy for a mission. */
+/** The agent's strategy for a milestone. */
 export interface Plan {
   id: string;
-  missionId: string;
+  /** Persisted Octo doc key is `missionId`; world.ts maps it at the boundary. */
+  milestoneId: string;
   agentId: string;
   title: string;
   summary: string;
@@ -482,7 +496,7 @@ export interface World {
   workspaces: Workspace[];
   projects: Project[];
   objectives: Objective[];
-  missions: Mission[];
+  milestones: Milestone[];
   plans: Plan[];
   agents: Agent[];
   tasks: AgentTask[];

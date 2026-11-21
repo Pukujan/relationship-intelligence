@@ -1,5 +1,5 @@
 import { buildWorldDigest } from "@/lib/digest";
-import type { MissionDesign } from "@/data/types";
+import type { MilestoneDesign } from "@/data/types";
 import type { World } from "@/data/types";
 import { planRequest, type CopilotAnswer } from "@/lib/orchestrator";
 
@@ -26,7 +26,7 @@ export interface CopilotOptions {
 }
 
 export interface LiveDesign {
-  design: MissionDesign;
+  design: MilestoneDesign;
   source: AnswerSource;
   provider?: string;
   model?: string;
@@ -99,7 +99,7 @@ export const askDesign = async (
   principalId?: string,
   options?: CopilotOptions,
 ): Promise<LiveDesign> => {
-  const design = await post<MissionDesign & { provider?: string; model?: string }>("/api/design", {
+  const design = await post<MilestoneDesign & { provider?: string; model?: string }>("/api/design", {
     goal,
     digest: buildWorldDigest(world),
     principalId,

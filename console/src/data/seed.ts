@@ -10,7 +10,7 @@ import type {
   FileDoc,
   Folder,
   McpServer,
-  Mission,
+  Milestone,
   Note,
   Objective,
   Organization,
@@ -1081,7 +1081,7 @@ const tasks: AgentTask[] = [
     priority: "high",
     note: "Waiting on your approval",
     due: inDays(1, 12),
-    missionId: "m1",
+    milestoneId: "m1",
   },
   {
     id: "t2",
@@ -1090,7 +1090,7 @@ const tasks: AgentTask[] = [
     status: "queued",
     priority: "high",
     due: inDays(2, 10),
-    missionId: "m6",
+    milestoneId: "m6",
   },
   {
     id: "t3",
@@ -1100,7 +1100,7 @@ const tasks: AgentTask[] = [
     priority: "normal",
     progress: 35,
     due: inDays(3, 12),
-    missionId: "m2",
+    milestoneId: "m2",
   },
   {
     id: "t4",
@@ -1132,7 +1132,7 @@ const tasks: AgentTask[] = [
     priority: "normal",
     progress: 55,
     due: inDays(4, 12),
-    missionId: "m5",
+    milestoneId: "m5",
   },
   {
     id: "t8",
@@ -1157,7 +1157,7 @@ const tasks: AgentTask[] = [
     priority: "high",
     progress: 44,
     due: inDays(2, 12),
-    missionId: "m3",
+    milestoneId: "m3",
   },
   {
     id: "t11",
@@ -1180,7 +1180,7 @@ const tasks: AgentTask[] = [
     status: "blocked",
     priority: "normal",
     note: "Needs CRM access",
-    missionId: "m9",
+    milestoneId: "m9",
   },
   {
     id: "t14",
@@ -1196,7 +1196,7 @@ const tasks: AgentTask[] = [
     status: "queued",
     priority: "high",
     due: inDays(2, 12),
-    missionId: "m4",
+    milestoneId: "m4",
   },
   {
     id: "t16",
@@ -1206,7 +1206,7 @@ const tasks: AgentTask[] = [
     priority: "normal",
     progress: 30,
     due: inDays(6, 12),
-    missionId: "m7",
+    milestoneId: "m7",
   },
   {
     id: "t17",
@@ -1215,7 +1215,7 @@ const tasks: AgentTask[] = [
     status: "queued",
     priority: "normal",
     due: inDays(1, 15),
-    missionId: "m3",
+    milestoneId: "m3",
   },
   {
     id: "t18",
@@ -1224,7 +1224,7 @@ const tasks: AgentTask[] = [
     status: "queued",
     priority: "normal",
     due: inDays(2, 10),
-    missionId: "m8",
+    milestoneId: "m8",
   },
 ];
 
@@ -1869,6 +1869,8 @@ const projects: Project[] = [
     owner: "Alex Rivera",
     summary:
       "Save the Halcyon Health renewal before the Q4 window closes. Tobias went quiet after the pricing thread, so the plan reopens with the team-growth story and a named buying committee.",
+    mission:
+      "Make Halcyon Health a durable, expanding customer — not a yearly renewal scramble.",
     personIds: ["p4", "p8", "p11", "p17"],
     companyIds: ["c2"],
     eventIds: ["e2"],
@@ -1884,6 +1886,8 @@ const projects: Project[] = [
     owner: "Alex Rivera",
     summary:
       "Turn the Loomcraft design-partner beta into a public story: five committed partners, one community night, and a recap that names the work without naming customers carelessly.",
+    mission:
+      "Establish Loomcraft as the community's proof that design partners ship real work together.",
     personIds: ["p2", "p6", "p15"],
     companyIds: ["c4"],
     eventIds: ["e3"],
@@ -1899,6 +1903,8 @@ const projects: Project[] = [
     owner: "Alex Rivera",
     summary:
       "Expand Atlas Freight from one team to three. Sofia is the technical champion, Marcus owns the integration surface, and Samuel Adeyemi is the only exec sponsor — silent for 58 days.",
+    mission:
+      "Make Atlas Freight a whole-company platform, not one team's tool.",
     personIds: ["p5", "p10", "p16"],
     companyIds: ["c5"],
     eventIds: ["e4"],
@@ -1964,7 +1970,7 @@ const objectives: Objective[] = [
   },
 ];
 
-const missions: Mission[] = [
+const milestones: Milestone[] = [
   {
     id: "m1",
     objectiveId: "o1",
@@ -2092,7 +2098,7 @@ const missions: Mission[] = [
 const plans: Plan[] = [
   {
     id: "pl1",
-    missionId: "m1",
+    milestoneId: "m1",
     agentId: "sales",
     title: "Reopen with value, not price",
     summary:
@@ -2131,7 +2137,7 @@ const plans: Plan[] = [
   },
   {
     id: "pl2",
-    missionId: "m2",
+    milestoneId: "m2",
     agentId: "sales",
     title: "Dinner brief: one page per attendee",
     summary:
@@ -2170,7 +2176,7 @@ const plans: Plan[] = [
   },
   {
     id: "pl3",
-    missionId: "m3",
+    milestoneId: "m3",
     agentId: "research",
     title: "Close the last three committee roles",
     summary:
@@ -2209,7 +2215,7 @@ const plans: Plan[] = [
   },
   {
     id: "pl4",
-    missionId: "m4",
+    milestoneId: "m4",
     agentId: "marketing",
     title: "Five named invites, five personal lines",
     summary:
@@ -2241,7 +2247,7 @@ const plans: Plan[] = [
   },
   {
     id: "pl5",
-    missionId: "m5",
+    milestoneId: "m5",
     agentId: "marketing",
     title: "Recap that names the work, not the customer",
     summary:
@@ -2273,7 +2279,7 @@ const plans: Plan[] = [
   },
   {
     id: "pl6",
-    missionId: "m6",
+    milestoneId: "m6",
     agentId: "sales",
     title: "One question, ten minutes",
     summary:
@@ -2305,7 +2311,7 @@ const plans: Plan[] = [
   },
   {
     id: "pl7",
-    missionId: "m7",
+    milestoneId: "m7",
     agentId: "sales",
     title: "A deck Sofia can forward",
     summary:
@@ -2666,7 +2672,7 @@ const mcpServers: McpServer[] = [
     tools: [
       {
         name: "workspace_query",
-        description: "SQL against the workspace: projects, missions, approvals, activity.",
+        description: "SQL against the workspace: projects, milestones, approvals, activity.",
       },
       {
         name: "epistemic_claims",
@@ -2714,7 +2720,7 @@ const mcpServers: McpServer[] = [
       },
       {
         name: "create_issue",
-        description: "Open an issue from an approved mission step.",
+        description: "Open an issue from an approved milestone step.",
       },
     ],
   },
@@ -2815,7 +2821,7 @@ export const seedWorld: World = {
   workspaces,
   projects,
   objectives,
-  missions,
+  milestones,
   plans,
   agents,
   tasks,

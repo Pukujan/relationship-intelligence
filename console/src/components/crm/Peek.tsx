@@ -6,13 +6,13 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
 import {
   agentById,
-  missionStatusMeta,
-  missionsForProject,
+  milestoneStatusMeta,
+  milestonesForProject,
   objectiveById,
   objectivesForProject,
   pendingApprovals,
   personById,
-  planForMission,
+  planForMilestone,
   planProgress,
   projectById,
   projectProgress,
@@ -23,7 +23,7 @@ import {
 import { stallFor } from "@/lib/intelligence";
 import type { World } from "@/data/types";
 import { EvidenceRow, PersonAvatar } from "@/components/common";
-import { MissionRow, Pill, ProgressBar } from "@/components/work";
+import { MilestoneRow, Pill, ProgressBar } from "@/components/work";
 import {
   Accordion,
   AccordionContent,
@@ -162,10 +162,10 @@ const buildModel = (
     const project = projectById(world, target.id);
     if (!project) return null;
     const objectives = objectivesForProject(world, project.id);
-    const missions = missionsForProject(world, project.id);
+    const milestones = milestonesForProject(world, project.id);
     const progress = projectProgress(world, project.id);
     const rollup = rollupForProject(world, project.id);
-    const open = missions.filter((mission) => mission.status !== "done");
+    const open = milestones.filter((milestone) => milestone.status !== "done");
     return {
       name: project.name,
       eyebrow: `${project.kind} · ${project.owner}`,
@@ -175,7 +175,7 @@ const buildModel = (
       rollup,
       kpis: [
         { label: "Progress", value: `${progress}%` },
-        { label: "Open missions", value: `${open.length}` },
+        { label: "Open milestones", value: `${open.length}` },
         { label: "People", value: `${project.personIds.length}` },
       ],
       primary: (
@@ -217,16 +217,16 @@ const buildModel = (
           ),
         },
         {
-          id: "missions",
-          label: "Missions",
-          count: missions.length,
+          id: "milestones",
+          label: "Milestones",
+          count: milestones.length,
           content: (
             <div className="space-y-1.5">
-              {missions.map((mission) => (
-                <MissionRow key={mission.id} world={world} mission={mission} showChain={false} />
+              {milestones.map((milestone) => (
+                <MilestoneRow key={milestone.id} world={world} milestone={milestone} showChain={false} />
               ))}
-              {!missions.length ? (
-                <p className="text-[11px] text-muted-foreground">No missions yet.</p>
+              {!milestones.length ? (
+                <p className="text-[11px] text-muted-foreground">No milestones yet.</p>
               ) : null}
             </div>
           ),
@@ -241,13 +241,13 @@ const buildModel = (
           id: "evidence",
           label: "Evidence",
           count: pendingApprovals(world).filter((approval) =>
-            missions.some((mission) => mission.agentIds.includes(approval.agentId)),
+            milestones.some((milestone) => milestone.agentIds.includes(approval.agentId)),
           ).length,
           content: (
             <div className="space-y-3">
               <ApprovalEvidence
                 world={world}
-                agentIds={[...new Set(missions.flatMap((mission) => mission.agentIds))]}
+                agentIds={[...new Set(milestones.flatMap((milestone) => milestone.agentIds))]}
               />
               <ActivityEvidence world={world} personIds={project.personIds} />
             </div>
@@ -261,8 +261,8 @@ const buildModel = (
     const objective = objectiveById(world, target.id);
     if (!objective) return null;
     const project = projectById(world, objective.projectId);
-    const missions = world.missions.filter((mission) => mission.objectiveId === objective.id);
-    const personIds = [...new Set(missions.flatMap((mission) => mission.personIds))];
+    const milestones = world.milestones.filter((milestone) => milestone.objectiveId === objective.id);
+    const personIds = [...new Set(milestones.flatMap((milestone) => milestone.personIds))];
     const rollup = rollupForObjective(world, objective.id);
     return {
       name: objective.name,
@@ -271,7 +271,7 @@ const buildModel = (
       rollup,
       kpis: [
         { label: "Progress", value: `${objective.progress}%` },
-        { label: "Missions", value: `${missions.length}` },
+        { label: "Milestones", value: `${milestones.length}` },
         { label: "Due", value: objective.dueDate ? shortDate(objective.dueDate) : "—" },
       ],
       primary: (
@@ -288,16 +288,16 @@ const buildModel = (
       },
       sections: [
         {
-          id: "missions",
-          label: "Missions",
-          count: missions.length,
+          id: "milestones",
+          label: "Milestones",
+          count: milestones.length,
           content: (
             <div className="space-y-1.5">
-              {missions.map((mission) => (
-                <MissionRow key={mission.id} world={world} mission={mission} showChain={false} />
+              {milestones.map((milestone) => (
+                <MilestoneRow key={milestone.id} world={world} milestone={milestone} showChain={false} />
               ))}
-              {!missions.length ? (
-                <p className="text-[11px] text-muted-foreground">No missions planned yet.</p>
+              {!milestones.length ? (
+                <p className="text-[11px] text-muted-foreground">No milestones planned yet.</p>
               ) : null}
             </div>
           ),
@@ -319,35 +319,35 @@ const buildModel = (
   }
 
   if (target.kind === "mission") {
-    const mission = world.missions.find((item) => item.id === target.id);
-    if (!mission) return null;
-    const project = projectById(world, mission.projectId);
-    const objective = objectiveById(world, mission.objectiveId);
-    const plan = planForMission(world, mission.id);
-    const stall = stallFor(world, mission);
-    const rollup = rollupFor(world, [mission], mission.personIds);
-    const meta = missionStatusMeta[mission.status];
+    const milestone = world.milestones.find((item) => item.id === target.id);
+    if (!milestone) return null;
+    const project = projectById(world, milestone.projectId);
+    const objective = objectiveById(world, milestone.objectiveId);
+    const plan = planForMilestone(world, milestone.id);
+    const stall = stallFor(world, milestone);
+    const rollup = rollupFor(world, [milestone], milestone.personIds);
+    const meta = milestoneStatusMeta[milestone.status];
     return {
-      name: mission.name,
+      name: milestone.name,
       eyebrow: `${project?.name ?? "project"} › ${objective?.name ?? "objective"}`,
-      verdict: stall ? stall.detail : `${meta.label} · due ${shortDate(mission.due)}.`,
+      verdict: stall ? stall.detail : `${meta.label} · due ${shortDate(milestone.due)}.`,
       rollup,
       kpis: [
         { label: "Plan", value: plan ? `${planProgress(plan)}%` : "—" },
         { label: "Steps done", value: plan ? `${plan.steps.filter((step) => step.status === "done").length}/${plan.steps.length}` : "—" },
-        { label: "Due", value: shortDate(mission.due) },
+        { label: "Due", value: shortDate(milestone.due) },
       ],
       primary: (
         <Button size="sm" className="h-8 gap-1.5 rounded-md px-3 text-[11.5px]" asChild>
-          <Link to={`/missions/${mission.id}`}>
-            Open mission
+          <Link to={`/milestones/${milestone.id}`}>
+            Open milestone
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </Button>
       ),
       research: {
-        seed: `Research the mission “${mission.name}”: what is the plan, what is blocking it, and what is the fastest way to land it?`,
-        scope: { kind: "mission", id: mission.id },
+        seed: `Research the milestone “${milestone.name}”: what is the plan, what is blocking it, and what is the fastest way to land it?`,
+        scope: { kind: "mission", id: milestone.id },
       },
       sections: [
         {
@@ -375,19 +375,19 @@ const buildModel = (
         {
           id: "people",
           label: "People",
-          count: mission.personIds.length,
-          content: <PeopleList world={world} personIds={mission.personIds} />,
+          count: milestone.personIds.length,
+          content: <PeopleList world={world} personIds={milestone.personIds} />,
         },
         {
           id: "evidence",
           label: "Evidence",
           count: pendingApprovals(world).filter((approval) =>
-            mission.agentIds.includes(approval.agentId),
+            milestone.agentIds.includes(approval.agentId),
           ).length,
           content: (
             <div className="space-y-3">
-              <ApprovalEvidence world={world} agentIds={mission.agentIds} />
-              <ActivityEvidence world={world} personIds={mission.personIds} />
+              <ApprovalEvidence world={world} agentIds={milestone.agentIds} />
+              <ActivityEvidence world={world} personIds={milestone.personIds} />
             </div>
           ),
         },
@@ -523,7 +523,7 @@ export const Peek = ({
     ? buildModel(world, target, (projectId, name) => {
         setActiveProject(projectId);
         toast.success(`Scoped to ${name}`, {
-          description: "Objectives, missions, plans, and the calendar now follow this project.",
+          description: "Objectives, milestones, plans, and the calendar now follow this project.",
         });
         onOpenChange(false);
       })

@@ -4,22 +4,22 @@ import {
   agentById,
   agentStats,
   companyById,
-  missionsDueToday,
+  milestonesDueToday,
   objectiveById,
   pendingApprovals,
   pendingApprovalsForAgent,
   personById,
-  planForMission,
+  planForMilestone,
   planProgress,
   projectById,
   relativeTime,
-  tasksForMission,
+  tasksForMilestone,
   upcomingEvents,
 } from "@/data/derive";
 import type {
   Agent,
   Approval,
-  Mission,
+  Milestone,
   Person,
   Project,
   World,
@@ -112,20 +112,20 @@ const findProjectMentioned = (prompt: string, world: World) => {
   );
 };
 
-const findMissionMentioned = (prompt: string, world: World) => {
+const findMilestoneMentioned = (prompt: string, world: World) => {
   const text = prompt.toLowerCase();
-  return world.missions.find((mission) =>
-    text.includes(mission.name.toLowerCase()),
+  return world.milestones.find((milestone) =>
+    text.includes(milestone.name.toLowerCase()),
   );
 };
 
-const missionLink = (mission: Mission, world: World): CopilotLink => {
-  const project = projectById(world, mission.projectId);
+const milestoneLink = (milestone: Milestone, world: World): CopilotLink => {
+  const project = projectById(world, milestone.projectId);
   return {
-    label: mission.name,
-    href: `/missions/${mission.id}`,
+    label: milestone.name,
+    href: `/milestones/${milestone.id}`,
     kind: "mission",
-    meta: `${project?.name ?? "Mission"} · ${mission.status.replace("_", " ")}`,
+    meta: `${project?.name ?? "Milestone"} · ${milestone.status.replace("_", " ")}`,
   };
 };
 
@@ -145,11 +145,11 @@ const projectAnswer = (world: World, project: Project): CopilotAnswer => {
   const objectives = world.objectives.filter(
     (objective) => objective.projectId === project.id,
   );
-  const missions = world.missions
-    .filter((mission) => mission.projectId === project.id)
+  const milestones = world.milestones
+    .filter((milestone) => milestone.projectId === project.id)
     .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
-  const today = missions.filter((mission) => isToday(new Date(mission.due)));
-  const blocked = missions.filter((mission) => mission.status === "blocked");
+  const today = milestones.filter((milestone) => isToday(new Date(milestone.due)));
+  const blocked = milestones.filter((milestone) => milestone.status === "blocked");
   const people = project.personIds
     .map((id) => personById(world, id))
     .filter((person): person is Person => Boolean(person));
@@ -161,7 +161,7 @@ const projectAnswer = (world: World, project: Project): CopilotAnswer => {
       )
     : 0;
   const agents = Array.from(
-    new Set(missions.flatMap((mission) => mission.agentIds)),
+    new Set(milestones.flatMap((milestone) => milestone.agentIds)),
   );
 
   return {
@@ -174,8 +174,8 @@ const projectAnswer = (world: World, project: Project): CopilotAnswer => {
         detail: `${objectives.length} objectives · ${progress}% overall`,
       },
       {
-        label: "Checking which missions land today",
-        detail: `${today.length} due today · ${missions.length} in flight`,
+        label: "Checking which milestones land today",
+        detail: `${today.length} due today · ${milestones.length} in flight`,
       },
       {
         label: "Listing anything waiting on you",
@@ -186,7 +186,7 @@ const projectAnswer = (world: World, project: Project): CopilotAnswer => {
       project.status === "at_risk" ? "at risk" : project.status
     } at ${progress}% across ${objectives.length} objective${
       objectives.length === 1 ? "" : "s"
-    }. ${today.length} mission${today.length === 1 ? "" : "s"} land today${
+    }. ${today.length} milestone${today.length === 1 ? "" : "s"} land today${
       blocked.length
         ? `, and ${blocked.length} ${blocked.length === 1 ? "is" : "are"} waiting on your approval`
         : " and nothing is blocked"
@@ -199,7 +199,7 @@ const projectAnswer = (world: World, project: Project): CopilotAnswer => {
         kind: "objective" as const,
         meta: `${objective.progress}% · ${objective.status.replace("_", " ")}`,
       })),
-      ...today.slice(0, 2).map((mission) => missionLink(mission, world)),
+      ...today.slice(0, 2).map((milestone) => milestoneLink(milestone, world)),
       ...people.slice(0, 2).map(personLink),
     ],
     approvalIds: pendingApprovals(world)
@@ -210,22 +210,22 @@ const projectAnswer = (world: World, project: Project): CopilotAnswer => {
   };
 };
 
-const missionAnswer = (world: World, mission: Mission): CopilotAnswer => {
-  const project = projectById(world, mission.projectId);
-  const objective = objectiveById(world, mission.objectiveId);
-  const plan = planForMission(world, mission.id);
-  const tasks = tasksForMission(world, mission.id);
-  const people = mission.personIds
+const milestoneAnswer = (world: World, milestone: Milestone): CopilotAnswer => {
+  const project = projectById(world, milestone.projectId);
+  const objective = objectiveById(world, milestone.objectiveId);
+  const plan = planForMilestone(world, milestone.id);
+  const tasks = tasksForMilestone(world, milestone.id);
+  const people = milestone.personIds
     .map((id) => personById(world, id))
     .filter((person): person is Person => Boolean(person));
   const approvals = pendingApprovals(world).filter((approval) =>
-    mission.agentIds.includes(approval.agentId),
+    milestone.agentIds.includes(approval.agentId),
   );
 
   return {
-    intentId: "mission-status",
-    intentLabel: `Mission · ${mission.name}`,
-    agents: mission.agentIds,
+    intentId: "milestone-status",
+    intentLabel: `Milestone · ${milestone.name}`,
+    agents: milestone.agentIds,
     steps: plan
       ? plan.steps.map((step) => ({
           label: step.label,
@@ -233,26 +233,26 @@ const missionAnswer = (world: World, mission: Mission): CopilotAnswer => {
           detail: step.status === "done" ? "done" : step.status === "doing" ? "in progress" : "queued",
         }))
       : [
-          { label: "Reading the mission brief", detail: mission.summary },
+          { label: "Reading the milestone brief", detail: milestone.summary },
           { label: "Checking for a plan", detail: "No plan drafted yet" },
         ],
-    summary: `${mission.name} is ${mission.status.replace("_", " ")} under ${
+    summary: `${milestone.name} is ${milestone.status.replace("_", " ")} under ${
       project?.name ?? "its project"
-    }${objective ? ` › ${objective.name}` : ""}, due ${relativeTime(mission.due)}. ${
+    }${objective ? ` › ${objective.name}` : ""}, due ${relativeTime(milestone.due)}. ${
       plan
         ? `The plan is ${planProgress(plan)}% through ${plan.steps.length} steps and ${
             tasks.length
           } task${tasks.length === 1 ? "" : "s"} are attached.`
-        : "No plan has been drafted yet, so the mission is still queued."
+        : "No plan has been drafted yet, so the milestone is still queued."
     }${
       approvals.length
-        ? ` ${approvals.length} approval${approvals.length === 1 ? "" : "s"} from this mission ${
+        ? ` ${approvals.length} approval${approvals.length === 1 ? "" : "s"} from this milestone ${
             approvals.length === 1 ? "is" : "are"
           } waiting on you.`
         : ""
     }`,
     links: [
-      missionLink(mission, world),
+      milestoneLink(milestone, world),
       ...(project ? [projectLink(project, world)] : []),
       ...(objective
         ? [
@@ -271,17 +271,17 @@ const missionAnswer = (world: World, mission: Mission): CopilotAnswer => {
 };
 
 const todayWorkAnswer = (world: World): CopilotAnswer => {
-  const today = missionsDueToday(world);
+  const today = milestonesDueToday(world);
   const pending = pendingApprovals(world);
-  const blocked = today.filter((mission) => mission.status === "blocked");
+  const blocked = today.filter((milestone) => milestone.status === "blocked");
   return {
     intentId: "today-work",
-    intentLabel: "Today's missions",
-    agents: Array.from(new Set(today.flatMap((mission) => mission.agentIds))),
+    intentLabel: "Today's milestones",
+    agents: Array.from(new Set(today.flatMap((milestone) => milestone.agentIds))),
     steps: [
       {
-        label: "Reading the mission board for today",
-        detail: `${today.length} missions land today`,
+        label: "Reading the milestone board for today",
+        detail: `${today.length} milestones land today`,
       },
       {
         label: "Cross-checking the approval queue",
@@ -293,19 +293,19 @@ const todayWorkAnswer = (world: World): CopilotAnswer => {
       },
     ],
     summary: today.length
-      ? `${today.length} mission${today.length === 1 ? "" : "s"} land today: ${today
+      ? `${today.length} milestone${today.length === 1 ? "" : "s"} land today: ${today
           .slice(0, 3)
           .map(
-            (mission) =>
-              `${mission.name} (${mission.status.replace("_", " ")}, ${relativeTime(
-                mission.due,
+            (milestone) =>
+              `${milestone.name} (${milestone.status.replace("_", " ")}, ${relativeTime(
+                milestone.due,
               )})`,
           )
           .join("; ")}. ${blocked.length} of them cannot move until you decide.`
-      : "Nothing is due today. The next missions are already queued for this week.",
+      : "Nothing is due today. The next milestones are already queued for this week.",
     links: [
-      ...today.slice(0, 4).map((mission) => missionLink(mission, world)),
-      { label: "Open the mission board", href: "/missions", kind: "mission" },
+      ...today.slice(0, 4).map((milestone) => milestoneLink(milestone, world)),
+      { label: "Open the milestone board", href: "/milestones", kind: "mission" },
     ],
     approvalIds: pending.slice(0, 2).map((approval) => approval.id),
   };
@@ -704,7 +704,7 @@ const statusAnswer = (world: World): CopilotAnswer => {
 
 const addAgentAnswer = (world: World): CopilotAnswer => ({
   intentId: "add-agent",
-  intentLabel: "New agent · mission brief",
+  intentLabel: "New agent · milestone brief",
   agents: [],
   steps: [
     { label: "Reading the request", detail: "Role, scope, autonomy" },
@@ -713,14 +713,14 @@ const addAgentAnswer = (world: World): CopilotAnswer => ({
       detail: "No duplicate queues",
     },
     {
-      label: "Drafting the mission brief and approval rules",
+      label: "Drafting the milestone brief and approval rules",
       detail: "Held for your review",
     },
   ],
   summary:
-    "A new agent starts from a mission, not a toggle. Here is the brief I would propose for an ops agent. Nothing runs until you accept it, and Mira, Cove, and Atlas keep their current queues in the meantime.",
+    "A new agent starts from a milestone, not a toggle. Here is the brief I would propose for an ops agent. Nothing runs until you accept it, and Mira, Cove, and Atlas keep their current queues in the meantime.",
   draft:
-    "Mission — Keep vendor, candidate, and recruiter relationships warm.\nScope — Ops relationships only. No customer outreach, no pricing.\nKPIs — Reply gap under 7 days · 3 check-ins a week · 0 unapproved sends.\nAutonomy — Draft only. Every outbound message waits for your approval.\nFirst run — Map the vendors with no contact in 30 days and draft two check-ins.",
+    "Milestone — Keep vendor, candidate, and recruiter relationships warm.\nScope — Ops relationships only. No customer outreach, no pricing.\nKPIs — Reply gap under 7 days · 3 check-ins a week · 0 unapproved sends.\nAutonomy — Draft only. Every outbound message waits for your approval.\nFirst run — Map the vendors with no contact in 30 days and draft two check-ins.",
   links: world.agents.map((agent) => ({
     label: `${agent.name} · ${agent.role}`,
     href: `/agents/${agent.id}`,
@@ -802,20 +802,20 @@ export const planRequest = (prompt: string, world: World): CopilotAnswer => {
   if (
     hasAny(text, [
       "due today",
-      "today's missions",
-      "todays missions",
+      "today's milestones",
+      "todays milestones",
       "what's due",
       "whats due",
-      "my missions",
-      "mission board",
-      "this week's missions",
+      "my milestones",
+      "milestone board",
+      "this week's milestones",
     ])
   ) {
     return todayWorkAnswer(world);
   }
-  const mentionedMission = findMissionMentioned(prompt, world);
-  if (mentionedMission) {
-    return missionAnswer(world, mentionedMission);
+  const mentionedMilestone = findMilestoneMentioned(prompt, world);
+  if (mentionedMilestone) {
+    return milestoneAnswer(world, mentionedMilestone);
   }
   const mentionedProject = findProjectMentioned(prompt, world);
   if (mentionedProject) {

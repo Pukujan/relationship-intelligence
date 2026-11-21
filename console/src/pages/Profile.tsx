@@ -522,15 +522,15 @@ const LinkChips = ({ file, world }: { file: ProfileFile; world: World | null }) 
             </Link>
           );
         }
-        const mission = world.missions.find((item) => item.id === chip.id);
-        if (!mission) return null;
+        const milestone = world.milestones.find((item) => item.id === chip.id);
+        if (!milestone) return null;
         return (
           <Link
             key={key}
-            to={`/missions/${mission.id}`}
+            to={`/milestones/${milestone.id}`}
             className="focus-ring inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
           >
-            {mission.name}
+            {milestone.name}
           </Link>
         );
       })}
@@ -674,7 +674,7 @@ const LinkFileDialog = ({
     if (entityKind === "event") {
       return world.events.map((item) => ({ id: item.id, label: item.name }));
     }
-    return world.missions.map((item) => ({ id: item.id, label: item.name }));
+    return world.milestones.map((item) => ({ id: item.id, label: item.name }));
   }, [world, entityKind]);
 
   const submit = async () => {
@@ -699,7 +699,7 @@ const LinkFileDialog = ({
           <DialogTitle>Link file to an entity</DialogTitle>
           <DialogDescription>
             Links reference the canonical graph — the person, company, project,
-            event, or mission stays where it lives.
+            event, or milestone stays where it lives.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -718,7 +718,7 @@ const LinkFileDialog = ({
               <option value="company">Company</option>
               <option value="project">Project</option>
               <option value="event">Event</option>
-              <option value="mission">Mission</option>
+              <option value="mission">Milestone</option>
             </select>
           </div>
           <div className="space-y-1.5">

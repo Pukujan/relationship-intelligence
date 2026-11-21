@@ -41,7 +41,7 @@ const McpServers = () => {
       <PageHeader
         eyebrow="Integrations"
         title="MCP servers"
-        description="Model Context Protocol servers expose tools to the agents. Octo MCP is the workspace's own record — projects, missions, claims, and the graph."
+        description="Model Context Protocol servers expose tools to the agents. Octo MCP is the workspace's own record — projects, milestones, claims, and the graph."
       />
 
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-surface-1/40 px-3.5 py-2.5 text-[11px] text-muted-foreground">

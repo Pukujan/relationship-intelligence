@@ -3,7 +3,7 @@ import { assign, setup } from "xstate";
 /**
  * RI-0010 work machines (XState v5) — canonical definitions.
  *
- * These are the pure, transport-agnostic state definitions for mission
+ * These are the pure, transport-agnostic state definitions for milestone
  * lifecycle and approval decisions. Server-side adoption lands in a later
  * slice; for now these machines + their tests (console/scripts/test-machines.mjs)
  * are the canonical contract the console renders against and the server will
@@ -11,32 +11,32 @@ import { assign, setup } from "xstate";
  * Node tests, and (eventually) inside the adapter without divergence.
  *
  * Trust / privacy: an approval can only be decided by a human (DECIDE guard),
- * and a mission may only be re-planned once it is stalled or blocked — never
+ * and a milestone may only be re-planned once it is stalled or blocked — never
  * while it is healthily running. Nothing here sends or writes on its own.
  */
 
 /* ------------------------------------------------------------------ */
-/* Mission lifecycle                                                   */
+/* Milestone lifecycle                                                   */
 /* ------------------------------------------------------------------ */
 
-/** Default quiet window before a running mission is considered stalled. */
-export const MISSION_QUIET_WINDOW_MS = 15 * 60 * 1000;
+/** Default quiet window before a running milestone is considered stalled. */
+export const MILESTONE_QUIET_WINDOW_MS = 15 * 60 * 1000;
 
-export interface MissionInput {
-  missionId: string;
+export interface MilestoneInput {
+  milestoneId: string;
   /** Override the quiet window (tests use a short one). */
   quietWindowMs?: number;
 }
 
-export interface MissionContext {
-  missionId: string;
+export interface MilestoneContext {
+  milestoneId: string;
   quietWindowMs: number;
   replans: number;
   lastProgressAt: string | null;
   blockReason: string | null;
 }
 
-export type MissionEvent =
+export type MilestoneEvent =
   | { type: "START" }
   | { type: "PROGRESS" }
   | { type: "BLOCK"; reason?: string }
@@ -44,8 +44,8 @@ export type MissionEvent =
   | { type: "REPLAN" }
   | { type: "COMPLETE" };
 
-export const missionMachine = setup({
-  types: {} as { context: MissionContext; events: MissionEvent; input: MissionInput },
+export const milestoneMachine = setup({
+  types: {} as { context: MilestoneContext; events: MilestoneEvent; input: MilestoneInput },
   delays: {
     // The quiet window is data, so tests can shrink it without fake timers.
     quietWindow: ({ context }) => context.quietWindowMs,
@@ -54,16 +54,16 @@ export const missionMachine = setup({
     touchProgress: assign({ lastProgressAt: () => new Date().toISOString() }),
     countReplan: assign(({ context }) => ({ replans: context.replans + 1, blockReason: null })),
     recordBlock: assign(({ event }) => ({
-      blockReason: (event as Extract<MissionEvent, { type: "BLOCK" }>).reason ?? null,
+      blockReason: (event as Extract<MilestoneEvent, { type: "BLOCK" }>).reason ?? null,
     })),
     clearBlock: assign({ blockReason: null }),
   },
 }).createMachine({
-  id: "mission",
+  id: "milestone",
   initial: "queued",
   context: ({ input }) => ({
-    missionId: input?.missionId ?? "",
-    quietWindowMs: input?.quietWindowMs ?? MISSION_QUIET_WINDOW_MS,
+    milestoneId: input?.milestoneId ?? "",
+    quietWindowMs: input?.quietWindowMs ?? MILESTONE_QUIET_WINDOW_MS,
     replans: 0,
     lastProgressAt: null,
     blockReason: null,
@@ -84,8 +84,8 @@ export const missionMachine = setup({
         PROGRESS: { target: "running", reenter: true, actions: "touchProgress" },
         BLOCK: { target: "blocked", actions: "recordBlock" },
         COMPLETE: "done",
-        // REPLAN is deliberately absent here: a healthy running mission is
-        // never re-planned. Only stalled/blocked missions may be re-planned.
+        // REPLAN is deliberately absent here: a healthy running milestone is
+        // never re-planned. Only stalled/blocked milestones may be re-planned.
       },
     },
 

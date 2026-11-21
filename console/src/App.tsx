@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { DataProvider, useData } from "@/data/store";
 import { OrchestratorProvider } from "@/components/copilot/OrchestratorProvider";
 import { AppShell } from "@/components/shell/AppShell";
@@ -21,8 +21,8 @@ import CalendarPage from "./pages/Calendar";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import Objectives from "./pages/Objectives";
-import Missions from "./pages/Missions";
-import MissionDetail from "./pages/MissionDetail";
+import Milestones from "./pages/Milestones";
+import MilestoneDetail from "./pages/MilestoneDetail";
 import Plans from "./pages/Plans";
 import Files from "./pages/knowledge/Files";
 import Notes from "./pages/knowledge/Notes";
@@ -42,6 +42,12 @@ const RequireSession = ({ children }: { children: ReactNode }) => {
   if (bootstrapping) return null;
   if (!session) return <Navigate to="/signin" replace />;
   return <>{children}</>;
+};
+
+/** Bookmarks from before the milestone rename keep working. */
+const LegacyMilestoneRedirect = () => {
+  const { missionId } = useParams();
+  return <Navigate to={`/milestones/${missionId ?? ""}`} replace />;
 };
 
 const App = () => (
@@ -78,8 +84,10 @@ const App = () => (
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/projects/:projectId" element={<ProjectDetail />} />
                 <Route path="/objectives" element={<Objectives />} />
-                <Route path="/missions" element={<Missions />} />
-                <Route path="/missions/:missionId" element={<MissionDetail />} />
+                <Route path="/milestones" element={<Milestones />} />
+                <Route path="/milestones/:milestoneId" element={<MilestoneDetail />} />
+                <Route path="/missions" element={<Navigate to="/milestones" replace />} />
+                <Route path="/missions/:missionId" element={<LegacyMilestoneRedirect />} />
                 <Route path="/plans" element={<Plans />} />
                 <Route path="/knowledge/files" element={<Files />} />
                 <Route path="/knowledge/notes" element={<Notes />} />
