@@ -216,6 +216,12 @@ export interface Claim {
   source: ClaimSource;
   confidence: Confidence;
   status: ClaimStatus;
+  /** Ledger verb (FACT, WORKS_AT, MET, UNVERIFIED, ...) when read from Octo. */
+  verb?: string;
+  /** FACT attribute such as public_education or linkedin_url. */
+  attribute?: string;
+  /** How the owner knows the person, on MET claims. */
+  basis?: string;
 }
 
 export interface Person {

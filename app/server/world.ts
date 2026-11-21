@@ -76,6 +76,12 @@ export interface WorldPerson {
     contentHash?: string;
     /** Typed claim status from provenance, when present. */
     claimStatus?: "SOURCED" | "UNVERIFIED";
+    /** Ledger verb (FACT, WORKS_AT, MET, UNVERIFIED, ...), for profile sections. */
+    verb?: string;
+    /** FACT attribute (public_education, linkedin_url, ...), when present. */
+    attribute?: string;
+    /** How the owner knows the person, on MET claims. */
+    basis?: string;
   }[];
 }
 
@@ -746,6 +752,15 @@ export async function readCanonical(
         ...(evidence?.contentHash ? { contentHash: evidence.contentHash } : {}),
         ...(entry.provenance.status
           ? { claimStatus: entry.provenance.status }
+          : {}),
+        ...(entry.provenance.verb
+          ? { verb: String(entry.provenance.verb) }
+          : {}),
+        ...(entry.provenance.attribute
+          ? { attribute: String(entry.provenance.attribute) }
+          : {}),
+        ...(entry.provenance.basis
+          ? { basis: String(entry.provenance.basis) }
           : {}),
       };
     });

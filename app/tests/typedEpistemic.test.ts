@@ -236,6 +236,52 @@ describe("typed claim status and evidence in readCanonical", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("passes each claim's verb, attribute and how-we-met basis through for the profile page", async () => {
+    const rows = [
+      {
+        id: "c-src",
+        statement: "A Person, public education: NYU",
+        validFrom: "2026-01-01",
+        supersededAt: null,
+        provenance: JSON.stringify({
+          verb: "FACT",
+          attribute: "public_education",
+          status: "SOURCED",
+        }),
+      },
+      {
+        id: "c-met",
+        statement: "A Person knows The Owner (met-once)",
+        validFrom: "2026-03-01",
+        supersededAt: null,
+        provenance: JSON.stringify({
+          verb: "MET",
+          strength: "met-once",
+          basis: "Met at GIS Day after the panel",
+        }),
+      },
+    ];
+    vi.stubGlobal("fetch", mockGraph(rows));
+    try {
+      const view = await readCanonical(
+        { baseUrl: "https://octo.example.test", timeoutMs: 5000 },
+        "tok",
+        CONTAINER,
+        ownerScope,
+      );
+      const claims = view.people[0]?.claims ?? [];
+      const fact = claims.find((c) => c.id === "c-src");
+      const met = claims.find((c) => c.id === "c-met");
+      expect(fact?.verb).toBe("FACT");
+      expect(fact?.attribute).toBe("public_education");
+      expect(met?.verb).toBe("MET");
+      expect(met?.basis).toBe("Met at GIS Day after the panel");
+      expect(met?.attribute).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("bitemporal claims-as-of", () => {
