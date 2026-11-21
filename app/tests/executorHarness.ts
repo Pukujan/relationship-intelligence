@@ -13,6 +13,10 @@ export interface MockState {
   gmailStatus: number;
   copilotAnswer: unknown;
   copilotCalls: number;
+  /** Runs while the model call is in flight, e.g. the owner pressing Pause. */
+  onCopilotCall?: () => void;
+  /** Runs before each SQL statement is applied, to land a change mid-run. */
+  onStatement?: (sql: string) => void;
   failStatements: { match: string; times: number }[];
   statements: string[];
   scheduleRuns: Record<string, unknown>[];
@@ -75,6 +79,14 @@ export const putDoc = (
 
 const unescapeSql = (value: string) => value.replace(/''/g, "'");
 
+/**
+ * The one merge guard this mock can evaluate: an agent is paused when its
+ * stored `paused` is JSON true or its status is "paused" (#101). Written out
+ * here, not imported, so a change to the runner's SQL fails loudly instead of
+ * being trusted.
+ */
+const PAUSED_GUARD = `(doc->'paused' = 'true'::jsonb OR doc->>'status' = 'paused')`;
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -86,6 +98,7 @@ export const installMock = (state: MockState) => {
     const u = String(url);
     if (u.includes("/api/agent-run")) {
       state.copilotCalls++;
+      state.onCopilotCall?.();
       if (state.copilotAnswer instanceof Error) throw state.copilotAnswer;
       const staged = state.copilotAnswer as { __status?: number };
       if (staged && typeof staged.__status === "number") {
@@ -118,6 +131,7 @@ export const installMock = (state: MockState) => {
     if (u.includes("/query")) {
       const { sql } = JSON.parse(String(init?.body ?? "{}")) as { sql: string };
       state.statements.push(sql);
+      state.onStatement?.(sql);
       for (const f of state.failStatements) {
         if (f.times > 0 && sql.includes(f.match)) {
           f.times--;
@@ -149,6 +163,28 @@ export const installMock = (state: MockState) => {
           visibility,
           doc: JSON.parse(unescapeSql(docRaw ?? "")),
         });
+        return json({ rows: [] });
+      }
+      // The runner's merge (#101): bookkeeping always, live fields only when
+      // the stored row is not paused, judged by PAUSED_GUARD above.
+      const mergeDoc = sql.match(
+        /UPDATE ri_console\.(\w+)\s+SET doc = doc \|\| '((?:[^']|'')*)'::jsonb \|\| CASE WHEN (.*?) THEN '\{\}'::jsonb ELSE '((?:[^']|'')*)'::jsonb END,\s*updated_at = now\(\)\s*WHERE id = '([^']*)' AND workspace_id = '([^']*)'/s,
+      );
+      if (mergeDoc) {
+        const [, tableName, bookRaw, guard, liveRaw, id, ws] = mergeDoc;
+        if (guard !== PAUSED_GUARD) {
+          throw new Error(`mock cannot evaluate merge guard: ${guard}`);
+        }
+        const row = table(state, tableName ?? "").get(id ?? "");
+        if (row && row.workspace_id === ws) {
+          const doc = row.doc as Record<string, unknown>;
+          const paused = doc.paused === true || doc.status === "paused";
+          row.doc = {
+            ...doc,
+            ...JSON.parse(unescapeSql(bookRaw ?? "{}")),
+            ...(paused ? {} : JSON.parse(unescapeSql(liveRaw ?? "{}"))),
+          };
+        }
         return json({ rows: [] });
       }
       const updateDoc = sql.match(

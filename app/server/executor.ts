@@ -21,7 +21,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { completeAgentDoc } from "./agentShape.js";
+import { completeAgentDoc, isAgentPaused } from "./agentShape.js";
 import { createDraftPlan } from "./agents.js";
 import { copilotTarget } from "./copilotProxy.js";
 import type { OctoClientConfig } from "./octo.js";
@@ -77,6 +77,35 @@ const writeDoc = (
      ON CONFLICT (id) DO UPDATE SET doc = EXCLUDED.doc, updated_at = now()`,
   );
 
+/**
+ * `isAgentPaused` written in SQL, over the stored row's `doc` (#101). Kept
+ * next to `mergeAgent`, its only user, so the two tests cannot drift apart.
+ */
+export const PAUSED_SQL = `(doc->'paused' = 'true'::jsonb OR doc->>'status' = 'paused')`;
+
+/**
+ * Merge the fields the runner owns into one agent row (#101).
+ *
+ * The runner used to write back the whole row it had read earlier, which
+ * erased a pause the owner made in between. This merges in only `bookkeeping`
+ * (when it last ran, when it runs next) and, unless the stored row is paused
+ * at the moment of the write, `live` (its status and current task). It never
+ * creates a row: the runner must not invent an agent nobody hired.
+ */
+const mergeAgent = (
+  ctx: ExecutorCtx,
+  agentId: string,
+  bookkeeping: Json,
+  live: Json = {},
+) =>
+  sql(
+    ctx,
+    `UPDATE ri_console.agent
+     SET doc = doc || ${lit(JSON.stringify(bookkeeping))}::jsonb || CASE WHEN ${PAUSED_SQL} THEN '{}'::jsonb ELSE ${lit(JSON.stringify(live))}::jsonb END,
+         updated_at = now()
+     WHERE id = ${lit(agentId)} AND workspace_id = ${lit(ctx.workspaceId)}`,
+  );
+
 /* ------------------------------------------------------------------ */
 /* Cadence enqueue                                                     */
 /* ------------------------------------------------------------------ */
@@ -94,7 +123,7 @@ export function dueSlot(
   world: Pick<WorldShape, "events" | "activity">,
   now: Date,
 ): DueSlot | null {
-  if (agent.paused === true) return null;
+  if (isAgentPaused(agent)) return null;
   const cadence =
     agent.cadence === "pre_event" || agent.cadence === "signal"
       ? agent.cadence
@@ -176,12 +205,10 @@ export async function enqueueAgentRuns(
        VALUES (${lit(runId)}, ${lit(ctx.workspaceId)}, ${lit(principalId)}, 'shared', ${lit(JSON.stringify(doc))}::jsonb)
        ON CONFLICT (id) DO NOTHING`,
     );
-    const updated = {
-      ...agent,
+    await mergeAgent(ctx, agentId, {
       nextRunAt: due.nextRunAt,
       ...(due.lastSignalId ? { lastSignalId: due.lastSignalId } : {}),
-    };
-    await writeDoc(ctx, "agent", updated, principalId);
+    });
     enqueued++;
   }
   return enqueued;
@@ -539,7 +566,8 @@ const agentStatusAfter = (
 
 export interface RunOutcome {
   runId: string;
-  outcome: "success" | "partial" | "escalated" | "failed";
+  /** `skipped`: the agent was paused, so the run saved nothing (#101). */
+  outcome: "success" | "partial" | "escalated" | "failed" | "skipped";
   traceId: string;
   counts: ApplyCounts;
 }
@@ -589,6 +617,14 @@ export async function executeRun(
     ...baseAgent,
     ...((runDoc.agentOverride as Json) ?? {}),
   } as Record<string, unknown>);
+  /** Read the agent row again: a pause can land at any time (#101). */
+  const pausedNow = async () => {
+    const rows = await sql(
+      ctx,
+      `SELECT doc FROM ri_console.agent WHERE id = ${lit(agentId)} AND workspace_id = ${lit(ctx.workspaceId)}`,
+    );
+    return isAgentPaused(rows[0]?.doc as Json | undefined);
+  };
   const principalId = String(
     runDoc.principalId ?? agent.principalId ?? "scheduler",
   );
@@ -645,25 +681,30 @@ export async function executeRun(
     };
     try {
       await writeDoc(ctx, "agent_run", receipt, principalId);
-      const status =
-        outcome === "failed"
-          ? "idle"
-          : agentStatusAfter(agentId, world, counts.approvals);
-      await writeDoc(
-        ctx,
-        "agent",
-        {
-          ...agent,
-          status,
-          lastRunAt: finishedAt,
-          currentTask: null,
-        },
-        principalId,
-      );
+      // A skipped run did no work, so the agent row keeps its last run time
+      // and the status the owner gave it.
+      if (outcome !== "skipped") {
+        const status =
+          outcome === "failed"
+            ? "idle"
+            : agentStatusAfter(agentId, world, counts.approvals);
+        await mergeAgent(
+          ctx,
+          agentId,
+          { lastRunAt: finishedAt },
+          { status, currentTask: null },
+        );
+      }
       if (String(runDoc.trigger) === "schedule" && runDoc.scheduleRunId) {
+        const scheduleStatus =
+          outcome === "failed"
+            ? "failed"
+            : outcome === "skipped"
+              ? "skipped"
+              : "done";
         await sql(
           ctx,
-          `UPDATE ri_console.schedule_run SET status = ${lit(outcome === "failed" ? "failed" : "done")} WHERE id = ${lit(runDoc.scheduleRunId)}`,
+          `UPDATE ri_console.schedule_run SET status = ${lit(scheduleStatus)} WHERE id = ${lit(runDoc.scheduleRunId)}`,
         );
       }
     } catch {
@@ -688,6 +729,17 @@ export async function executeRun(
     return { runId, outcome, traceId: span.traceId, counts };
   };
 
+  const agentName = String(agent.name ?? agentId);
+  // A paused agent never runs (#101). The tick claims queued runs that may
+  // predate the pause, so check here, before any work, and close the run.
+  if (isAgentPaused(baseAgent) || isAgentPaused(agent)) {
+    return await finish(
+      "skipped",
+      `Skipped: ${agentName} is paused, so this run did nothing.`,
+      emptyCounts,
+    );
+  }
+
   try {
     await writeDoc(
       ctx,
@@ -695,11 +747,11 @@ export async function executeRun(
       { ...runDoc, status: "running", startedAt },
       principalId,
     );
-    await writeDoc(
+    await mergeAgent(
       ctx,
-      "agent",
+      agentId,
+      {},
       {
-        ...agent,
         status: "running",
         currentTask: {
           title: String(runDoc.title ?? "Scheduled run"),
@@ -707,12 +759,11 @@ export async function executeRun(
           progress: 0,
         },
       },
-      principalId,
     );
     const digest = buildDigest(world);
     const answer = await callCopilot({
       agentId,
-      agentName: String(agent.name ?? agentId),
+      agentName,
       instructions: clipText(
         agent.instructions ?? agent.mission ?? "Do useful, sourced work.",
         4_000,
@@ -725,6 +776,16 @@ export async function executeRun(
       runId,
       principalId,
     });
+    // The model call can take up to 90 seconds. If the owner paused the
+    // agent meanwhile, nothing the run found is saved.
+    if (await pausedNow()) {
+      return await finish(
+        "skipped",
+        `Skipped: ${agentName} was paused while this run worked, so nothing it found was saved.`,
+        emptyCounts,
+        { provider: answer.provider, model: answer.model },
+      );
+    }
     const counts = await applyAgentAnswer(
       ctx,
       agent,
