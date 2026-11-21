@@ -304,6 +304,29 @@ Blocked/uncertain:
 Next:
 - Pull request 102 merges itself once CI is green; after it deploys, Pause on the Agents page should hold through the runner's next tick.
 
+### 2026-11-21 15:34:16 UTC — agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1","blocked":[],"changed":["Merge of main into feat/ri-0021-connectors-real; app/shared/contracts.ts keeps only workflow and API-service types; lint and type fixes in app/server/workflows.ts and app/server/apiServices.ts"],"completed":["The visual workflow canvas branch (draft PR #107) was 19 commits behind main and conflicted with the connector work merged in #110. It now merges main, imports connector types from the merged contract, and passes every local gate."],"decisions":["no new decisions"],"evidence":["App types, biome, 178 Vitest tests and build pass; console typecheck, eslint (no errors), machine tests, orphan check and build pass. The Workflows page renders in a local browser on the merged branch."],"evidence_class":"observed","next_action":"Mark PR #107 ready, let CI run, and merge it with auto-merge.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T15:34:16Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"5959907ed6846ab9552da1f53d35db759c8258a5d5bffac4c7e309efecb731d4","request_id":"7c2514dae36848449484009d8b9e5100","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- The visual workflow canvas branch (draft PR #107) was 19 commits behind main and conflicted with the connector work merged in #110. It now merges main, imports connector types from the merged contract, and passes every local gate.
+
+Evidence:
+- App types, biome, 178 Vitest tests and build pass; console typecheck, eslint (no errors), machine tests, orphan check and build pass. The Workflows page renders in a local browser on the merged branch.
+
+Decisions:
+- no new decisions
+
+Changed:
+- Merge of main into feat/ri-0021-connectors-real; app/shared/contracts.ts keeps only workflow and API-service types; lint and type fixes in app/server/workflows.ts and app/server/apiServices.ts
+
+Blocked/uncertain:
+- none
+
+Next:
+- Mark PR #107 ready, let CI run, and merge it with auto-merge.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
