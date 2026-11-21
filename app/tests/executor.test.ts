@@ -8,6 +8,7 @@ import {
   type AgentRunAnswer,
   applyAgentAnswer,
   buildDigest,
+  dueSlot,
   enqueueAgentRuns,
   executeDueRuns,
   executeRun,
@@ -638,5 +639,28 @@ describe("A7 a paused agent never runs and a run never unpauses it (#101)", () =
     expect(agentStatusPatch("idle")).toEqual({ status: "idle", paused: false });
     expect(agentStatusPatch("asleep")).toBeNull();
     expect(agentStatusPatch(undefined)).toBeNull();
+  });
+});
+
+describe("Regression: invalid clock reading (metamorphic counterexample)", () => {
+  // fast-check shrunk MR-E1 to [new Date(NaN), " "]: dueSlot threw
+  // RangeError on toISOString. An invalid tick must be a silent no-op.
+  it("dueSlot returns null and executeDueRuns does nothing", async () => {
+    const state = createMock();
+    installMock(state);
+    putDoc(state, "agent", {
+      id: "a1",
+      name: " ",
+      cadence: "daily",
+      principalId: "p1",
+    });
+    const invalid = new Date(NaN);
+    expect(
+      dueSlot({ id: "a1", cadence: "daily" }, makeWorld(), invalid),
+    ).toBeNull();
+    const outcomes = await executeDueRuns(CTX, invalid);
+    expect(outcomes).toEqual([]);
+    expect(state.statements).toHaveLength(0);
+    expect(state.copilotCalls).toBe(0);
   });
 });
