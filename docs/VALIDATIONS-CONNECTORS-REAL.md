@@ -30,3 +30,13 @@ Google #49 flow unchanged; add real Slack/Calendly/Discord/Zoom creds when appro
 Locked pre-implementation at `~/.cache/acs/scratch/ri-0021-eval/HOLDOUT.md` (chmod 600, outside all implementer workspaces). SHA256 recorded below after locking. Fresh blind agent post-fix; evaluation inspects tool calls, not only the report; holdout writes nothing to the repo.
 
 SHA256(HOLDOUT.md): 3e2482b458487f7853cbc205ea4e876649705c7ab91fb2803926b9c4c69a9b26
+
+## Results (2026-11-20, branch pr/ri-0021-connectors)
+
+- Public deterministic + metamorphic: app `pnpm test` 69/69 (9 files), including MR-K1..K7 and I1-I8 boundary tests against the in-memory Octo fake; `pnpm typecheck` clean; Biome clean for slice files.
+- Daemon: collector `pnpm test` 5/5 (pairing single-use, 0600/0700 modes, derived-only payloads, Riley secret/Host/Origin gates, Wispr export validation); `tsc --noEmit` clean.
+- Real user flows: Playwright 6/6 against live Octo + stub IdP (E2E-OAuth connect/sync/disconnect x4 providers; MR-K6 state replay; force401 -> expired; E2E-Runner pair/consent/push/offline/revoke with the real daemon CLI; E2E-UI secret hygiene; E2E-isolation cross-principal).
+- Retrofits verified: disconnect clears tokens (unit), OAuth state single-use consumed last (e2e replay), principal-scoped activity ids + legacy migration (unit + e2e), route membership checks (unit), sync 401 -> expired (e2e).
+- Hidden holdout: H1-H6 PASS (2026-11-20) via independent probe suite /tmp/ri-holdout/probe.mts against the live PR-worktree server + live Octo + stub IdP + real daemon CLI. Evidence: H1 no token/hash in list/setup/heartbeat/config, code only in pair, deviceToken only in claim; H2 revByB=404, inA=403, inB=200, A rows unchanged; H3 grant/revoke/regrant gate with zero rows while revoked; H4 replay=400, expired=400; H5 ingest payloads cookie-free, modes 600/700, Riley 403/403/200; H6 offline+connected then zoom expired while linkedin stays offline.
+- Independence caveat (disclosed): subagent infrastructure repeatedly died this session, so the holdout was executed as a scripted probe suite by the lead, who also authored the holdout and the implementation. Criteria were locked (sha256 above) before implementation and were not shown to any implementer subagent. A compact fresh-agent subset check (isolation + consent) was launched post-fix; its verdict is appended below when returned.
+- Live smoke with real provider credentials: PENDING owner credentials (Zoom/Discord approvals noted in SDD R14).
