@@ -15,6 +15,7 @@ import { createServer } from "node:http";
 import nodePath from "node:path";
 import { fileURLToPath } from "node:url";
 import { SessionResponseSchema } from "../shared/contracts.js";
+import { agentStatusPatch } from "./agentShape.js";
 import {
   AGENT_TEMPLATES,
   createCustomAgent,
@@ -1229,6 +1230,13 @@ export async function handleRequest(
           sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "operator" });
           return;
         }
+        // `paused` is what the runner obeys (#101); the status mirrors it
+        // for the screen.
+        const statusPatch = agentStatusPatch(body.status);
+        if (!statusPatch) {
+          sendJson(res, 400, { error: "INVALID_STATUS" });
+          return;
+        }
         sendJson(
           res,
           200,
@@ -1239,10 +1247,7 @@ export async function handleRequest(
             principal.id,
             "agents",
             String(body.agentId),
-            {
-              status: body.status,
-              ...(body.status === "paused" ? { currentTask: null } : {}),
-            },
+            statusPatch,
             "shared",
             octoWorkspaceId,
           ),

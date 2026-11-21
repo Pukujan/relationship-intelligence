@@ -152,15 +152,16 @@ export const agentStats = (world: World, agentId: string): AgentStats => {
   const tasks = tasksForAgent(world, agentId);
   const runs = runsForAgent(world, agentId);
   const successes = runs.filter((run) => run.outcome === "success").length;
+  // A run skipped while the agent was paused did no work, so it does not
+  // count for or against the success rate.
+  const worked = runs.filter((run) => run.outcome !== "skipped").length;
   return {
     running: tasks.filter((task) => task.status === "running").length,
     queued: tasks.filter((task) => task.status === "queued").length,
     blocked: tasks.filter((task) => task.status === "blocked").length,
     done: tasks.filter((task) => task.status === "done").length,
     pending: pendingApprovalsForAgent(world, agentId).length,
-    successRate: runs.length
-      ? Math.round((successes / runs.length) * 100)
-      : 0,
+    successRate: worked ? Math.round((successes / worked) * 100) : 0,
   };
 };
 
@@ -253,6 +254,10 @@ export const outcomeTone: Record<
   failed: {
     label: "Failed",
     className: "text-destructive border-destructive/30 bg-destructive/10",
+  },
+  skipped: {
+    label: "Skipped, paused",
+    className: "text-muted-foreground border-border/70 bg-muted/40",
   },
 };
 

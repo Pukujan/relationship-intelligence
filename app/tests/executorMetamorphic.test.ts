@@ -298,3 +298,47 @@ describe("MR-E5 replaying a finished run creates no duplicate effects", () => {
     );
   });
 });
+
+describe("MR-E6 pausing by status or by flag gives the same result: nothing runs (#101)", () => {
+  it("holds for arbitrary agents and model answers", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 12 }),
+        fc.constantFrom("daily", "pre_event", "signal", undefined),
+        fc.constantFrom("prep", "suggest", "co_design"),
+        answerArb,
+        async (name, cadence, zone, answer) => {
+          const outcomes: string[] = [];
+          for (const pause of [{ status: "paused" }, { paused: true }]) {
+            const state = createMock();
+            state.copilotAnswer = answer;
+            installMock(state);
+            putDoc(state, "agent", {
+              id: "a1",
+              name,
+              cadence,
+              autonomyZone: zone,
+              principalId: "p1",
+              ...pause,
+            });
+            expect(await enqueueAgentRuns(CTX, world, new Date())).toBe(0);
+            const runDoc = {
+              id: "run:a1:slot",
+              agentId: "a1",
+              status: "queued",
+              trigger: "daily",
+            };
+            putDoc(state, "agent_run", runDoc);
+            const result = await executeRun(CTX, runDoc, world);
+            expect(state.copilotCalls).toBe(0);
+            expect(writeSet(state)).toEqual([]);
+            outcomes.push(result.outcome);
+            vi.unstubAllGlobals();
+          }
+          expect(outcomes).toEqual(["skipped", "skipped"]);
+        },
+      ),
+      { numRuns: 25 },
+    );
+  });
+});

@@ -5,7 +5,13 @@ export type AgentIcon = "sales" | "marketing" | "research";
 export type TaskStatus = "queued" | "running" | "done" | "blocked";
 export type TaskPriority = "low" | "normal" | "high";
 
-export type RunOutcome = "success" | "partial" | "escalated" | "failed";
+/** `skipped`: the agent was paused, so the run did nothing (#101). */
+export type RunOutcome =
+  | "success"
+  | "partial"
+  | "escalated"
+  | "failed"
+  | "skipped";
 
 export type ApprovalKind =
   | "send"
