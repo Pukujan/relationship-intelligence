@@ -48,7 +48,13 @@ export interface WorldPerson {
     id: string;
     personId: string;
     text: string;
-    source: { label: string; kind: string; date: string };
+    source: {
+      label: string;
+      kind: string;
+      date: string;
+      locator?: string;
+      excerpt?: string;
+    };
     confidence: "high" | "medium" | "low";
     status: "sourced" | "unverified";
   }[];
@@ -88,7 +94,16 @@ export interface WorldShape {
   mcpServers: Json[];
   plugins: Json[];
   smartLists: Json[];
+  /** True when Octo reports the graph projection stale or unavailable. */
+  graphStale: boolean;
   generatedAt: string;
+}
+
+/** Evidence returned from Octo's graph projection. */
+interface EvidenceRow {
+  claimId: string;
+  locator: string;
+  excerpt: string;
 }
 
 /** World collection -> ri_console table. Mirrors console/scripts/bootstrap-octo.mjs. */
@@ -314,7 +329,7 @@ export async function readCanonical(
       config,
       token,
       octoContainerId,
-      "MATCH (c:Claim)-[:CITES]->(v:Evidence) RETURN c.id AS claimId, v.locator AS locator",
+      "MATCH (c:Claim)-[:CITES]->(v:Evidence) RETURN c.id AS claimId, v.locator AS locator, v.quote AS excerpt",
     ),
     graph(
       config,
@@ -327,9 +342,21 @@ export async function readCanonical(
   const subjectOf = new Map<string, string>();
   for (const row of subjects)
     subjectOf.set(String(row.claimId), String(row.entityId));
-  const locatorOf = new Map<string, string>();
-  for (const row of cites)
-    locatorOf.set(String(row.claimId), String(row.locator));
+  const evidenceOf = new Map<string, EvidenceRow>();
+  for (const row of cites) {
+    const id = String(row.claimId);
+    const previous = evidenceOf.get(id);
+    if (
+      !previous ||
+      String(row.locator ?? "").length > previous.locator.length
+    ) {
+      evidenceOf.set(id, {
+        claimId: id,
+        locator: String(row.locator ?? ""),
+        excerpt: String(row.excerpt ?? previous?.excerpt ?? ""),
+      });
+    }
+  }
   const confidenceOfClaim = new Map<string, number>();
   for (const row of beliefs) {
     const id = String(row.claimId);
@@ -365,6 +392,25 @@ export async function readCanonical(
   const orgBySlug = new Map(orgs.map((e) => [String(e.kind), String(e.id)]));
   const referencedCompanyIds = new Set<string>();
 
+  // Derive person fields from sourced FACT attributes in the ledger. The
+  // owner's imported people carry attribute-tagged facts, not WORKS_AT claims.
+  const factValue = (
+    parsed: { claim: Json; provenance: Json }[],
+    attribute: string,
+  ): string => {
+    const match = parsed.find(
+      ({ claim, provenance }) =>
+        provenance.verb === "FACT" &&
+        provenance.attribute === attribute &&
+        Boolean(claim.statement),
+    );
+    return match ? String(match.claim.statement ?? "") : "";
+  };
+  const suffixAfter = (statement: string, marker: string): string => {
+    const at = statement.toLowerCase().indexOf(marker.toLowerCase());
+    return at < 0 ? "" : statement.slice(at + marker.length).trim();
+  };
+
   const people: WorldPerson[] = [];
   for (const entity of entities) {
     if (entity.kind !== "person") continue;
@@ -398,7 +444,8 @@ export async function readCanonical(
         )
       : 999;
     const mappedClaims = parsed.map(({ claim }) => {
-      const locator = locatorOf.get(String(claim.id));
+      const evidence = evidenceOf.get(String(claim.id));
+      const locator = evidence?.locator ?? "";
       return {
         id: String(claim.id),
         personId,
@@ -407,6 +454,8 @@ export async function readCanonical(
           label: locator ? hostOf(locator) : "Octo ledger",
           kind: locator ? "web" : "note",
           date: String(claim.validFrom ?? ""),
+          ...(locator ? { locator } : {}),
+          ...(evidence?.excerpt ? { excerpt: evidence.excerpt } : {}),
         },
         confidence: confidenceOf(confidenceOfClaim.get(String(claim.id))),
         status: (locator ? "sourced" : "unverified") as
@@ -415,19 +464,32 @@ export async function readCanonical(
       };
     });
     const sourced = mappedClaims.find((c) => c.status === "sourced");
+    const roleSummary = factValue(parsed, "public_role_summary");
+    const education = factValue(parsed, "public_education");
+    const credential = factValue(parsed, "public_profile_credential");
+    const role = employment
+      ? String(employment.provenance.title ?? "—")
+      : suffixAfter(roleSummary, ":") || "—";
+    const email =
+      factValue(parsed, "professional_email").match(
+        /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
+      )?.[0] ?? "";
+    const tags = [credential, education]
+      .map((value) => suffixAfter(value, ":"))
+      .filter(Boolean);
     people.push({
       id: personId,
       name: String(entity.name),
-      role: employment ? String(employment.provenance.title ?? "—") : "—",
+      role,
       companyId,
-      location: "",
+      location: suffixAfter(factValue(parsed, "location"), ":"),
       timezone: "",
       strength,
       warmth: warmthOf(quietDays),
       lastContact: lastContact || new Date(0).toISOString(),
-      tags: [],
-      summary: sourced?.text ?? mappedClaims[0]?.text ?? "",
-      email: "",
+      tags,
+      summary: roleSummary || sourced?.text || mappedClaims[0]?.text || "",
+      email,
       claims: mappedClaims,
     });
   }
@@ -536,6 +598,34 @@ async function getDoc(
   return (rows[0]?.doc as Json) ?? null;
 }
 
+/** Ask Octo whether the graph projection is current (PROJECT.md rule 10). */
+async function isGraphStale(
+  config: OctoClientConfig,
+  token: string,
+  octoContainerId: string,
+): Promise<boolean> {
+  try {
+    const response = await fetch(
+      new URL(
+        `/api/graph/health?workspaceId=${encodeURIComponent(octoContainerId)}`,
+        config.baseUrl,
+      ),
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(config.timeoutMs),
+      },
+    );
+    if (!response.ok) return true;
+    const body = (await response.json()) as Record<string, unknown>;
+    return body.stale === true || body.healthy === false;
+  } catch {
+    return true;
+  }
+}
+
 export async function readWorld(
   config: OctoClientConfig,
   token: string,
@@ -545,7 +635,7 @@ export async function readWorld(
   octoContainerId = workspaceId,
   role = "member",
 ): Promise<WorldShape> {
-  const [canonical, ops] = await Promise.all([
+  const [canonical, ops, graphStale] = await Promise.all([
     readCanonical(config, token, octoContainerId, {
       workspaceId,
       octoContainerId,
@@ -553,6 +643,7 @@ export async function readWorld(
       isContainerOwner: role === "owner" && workspaceId === octoContainerId,
     }),
     readOps(config, token, workspaceId, principal.id, octoContainerId),
+    isGraphStale(config, token, octoContainerId),
   ]);
   const {
     projects = [],
@@ -613,6 +704,7 @@ export async function readWorld(
     mcpServers,
     plugins,
     smartLists,
+    graphStale,
     generatedAt: new Date().toISOString(),
   };
 }

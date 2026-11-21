@@ -17,7 +17,10 @@ export interface RagMatch {
 }
 
 export async function queryRag(query: string, limit = 4): Promise<RagMatch[]> {
-  if (!BASE || !KEY || !WS) return [];
+  if (!BASE || !KEY || !WS) {
+    console.warn("[rag] not configured: set OCTO_API_URL, OCTO_API_KEY, OCTO_WORKSPACE_ID");
+    return [];
+  }
   try {
     const response = await fetch(`${BASE}/api/rag/query`, {
       method: "POST",
@@ -25,7 +28,10 @@ export async function queryRag(query: string, limit = 4): Promise<RagMatch[]> {
       body: JSON.stringify({ workspaceId: WS, query, limit }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!response.ok) return [];
+    if (!response.ok) {
+      console.warn(`[rag] query answered ${response.status}`);
+      return [];
+    }
     const body = (await response.json()) as { matches?: unknown[] };
     return (body.matches ?? []).slice(0, limit).map((raw) => {
       const item = (raw ?? {}) as Record<string, unknown>;
@@ -33,7 +39,8 @@ export async function queryRag(query: string, limit = 4): Promise<RagMatch[]> {
       const locator = String(item.locator ?? item.source ?? item.url ?? item.document ?? "");
       return { text: text.slice(0, 400), locator: locator.slice(0, 160) };
     }).filter((match) => match.text.length > 0);
-  } catch {
+  } catch (error) {
+    console.warn("[rag] query failed:", error instanceof Error ? error.message : error);
     return [];
   }
 }

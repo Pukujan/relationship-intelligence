@@ -158,9 +158,15 @@ the workspace SQL surface, always with the signed-in principal's token; guest
 mode stays on the labelled seed. Copilot calls export OTLP spans and CODE eval
 scores to the workspace's Octo-hosted Phoenix project.
 
+Hybrid RAG is now fed: `scripts/seed_rag.py` ingests sourced claims (with their
+evidence locators) from the canonical ledger into Octo RAG; the copilot's
+`/api/rag/query` call now carries evidence locators and excerpts into the digest,
+and the production entry point passes the Octo credentials to the copilot server.
+Graph health is checked on each world read and staleness is surfaced in the UI.
+
 Next, in order: (1) real voice/phone via Riley; (2) production static serving of
 the console under the app origin and the private→shared promotion flow; (3) the
-identity review and graph-exploration slices from the program; (4) ingesting
-source material so hybrid RAG has content to return (the search path is wired
-and labelled; the workspace index is currently thin). Each lands as its own
+identity review and graph-exploration slices from the program; (4) moving the
+RAG query behind the signed-in adapter (today the copilot's RAG call uses the
+workspace key) and adding raw source bytes to Octo Files. Each lands as its own
 accepted slice with real user-flow verification.
