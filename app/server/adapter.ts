@@ -34,7 +34,13 @@ import {
 } from "./connectors.js";
 import { handleRagQuery, proxyCopilot } from "./copilotProxy.js";
 import { crawlerAuthorized, crawlerIngest, crawlerQueue } from "./crawler.js";
-import { dmAuthorized, dmIngest, readDmBody } from "./dm.js";
+import {
+  dmAuthorized,
+  dmConversations,
+  dmIngest,
+  dmLink,
+  readDmBody,
+} from "./dm.js";
 import { type Env, readEnv } from "./env.js";
 import { deliverApprovedSend } from "./gmailSend.js";
 import {
@@ -825,7 +831,9 @@ export async function handleRequest(
     path.startsWith("/app-api/services") ||
     path.startsWith("/app-api/workflows") ||
     path.startsWith("/app-api/workflow-runs") ||
-    path.startsWith("/app-api/projects/");
+    path.startsWith("/app-api/projects/") ||
+    path === "/app-api/dm/conversations" ||
+    path === "/app-api/dm/link";
   if (
     worldRoutes.includes(path) ||
     path.startsWith("/app-api/sessions") ||
@@ -868,6 +876,38 @@ export async function handleRequest(
       tenancy;
     const requested = workspace.id;
     try {
+      // DM matching (#120): only the workspace owner, in the container
+      // workspace, ever sees conversations or links them to contacts.
+      if (path === "/app-api/dm/conversations" || path === "/app-api/dm/link") {
+        if (role !== "owner" || requested !== octoWorkspaceId) {
+          sendJson(res, 403, { error: "OWNER_ONLY" });
+          return;
+        }
+        if (path === "/app-api/dm/conversations" && req.method === "GET") {
+          sendJson(res, 200, {
+            conversations: await dmConversations(
+              config,
+              token,
+              octoWorkspaceId,
+              requested,
+            ),
+          });
+          return;
+        }
+        if (path === "/app-api/dm/link" && req.method === "POST") {
+          const result = await dmLink(
+            config,
+            token,
+            octoWorkspaceId,
+            requested,
+            body,
+          );
+          sendJson(res, result.status, result.body);
+          return;
+        }
+        sendJson(res, 405, { error: "method_not_allowed" });
+        return;
+      }
       if (path === "/app-api/agent-templates" && req.method === "GET") {
         sendJson(res, 200, { templates: AGENT_TEMPLATES });
         return;

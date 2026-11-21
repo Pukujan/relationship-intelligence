@@ -11,20 +11,16 @@
  *     written once with its final count.
  *
  * A thread is attached to a contact only through a stable handle stored on
- * that contact (a LinkedIn profile link today). Names never match: two people
- * share names, and PROJECT.md rule 6 forbids merging identities on them.
- * Unmatched threads keep their rows with no person, for later review.
+ * that contact: their LinkedIn profile link, or an account the owner linked
+ * once from "Conversations to match" (a Telegram user id, a phone number, a
+ * Discord id). Names never match on their own: two people share names, and
+ * PROJECT.md rule 6 forbids merging identities on them. Unmatched threads keep
+ * their rows with no person until the owner links them.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";
-import {
-  epistemic,
-  graph,
-  linkedinPeople,
-  normUrl,
-  type PersonUrl,
-} from "./crawler.js";
+import { epistemic, graph, linkedinPeople, normUrl } from "./crawler.js";
 import type { OctoClientConfig } from "./octo.js";
 import { appendLedgerEvent, endSpan, startSpan } from "./telemetry.js";
 import { octoSql } from "./world.js";
@@ -126,24 +122,113 @@ export const linkedinKey = (url: string): string | null => {
   }
 };
 
+/** A contact and one stable account handle of theirs on a channel. */
+export interface ContactHandle {
+  personId: string;
+  name: string;
+  handle: string;
+}
+
+/** Comparable form of a handle: LinkedIn by profile slug, others as given. */
+export const handleKey = (
+  channel: DmChannel,
+  handle: string,
+): string | null => {
+  if (channel === "linkedin") return linkedinKey(handle);
+  const key = handle.trim().toLowerCase();
+  return key ? key : null;
+};
+
 /**
- * The contact a thread belongs to, by stable handle only. LinkedIn threads
- * match a contact's sourced linkedin_url; other channels have no stored
- * handles yet, so they stay unmatched until they do.
+ * The contact a thread belongs to, by stable handle only: never by name.
  */
 export function matchThread(
   channel: DmChannel,
   thread: DmThread,
-  people: PersonUrl[],
-): PersonUrl | null {
+  contacts: ContactHandle[],
+): ContactHandle | null {
   const handle = thread.counterpart.handle;
   if (!handle) return null;
-  if (channel === "linkedin") {
-    const wanted = linkedinKey(handle);
-    if (!wanted) return null;
-    return people.find((p) => linkedinKey(p.url) === wanted) ?? null;
+  const wanted = handleKey(channel, handle);
+  if (!wanted) return null;
+  return contacts.find((c) => handleKey(channel, c.handle) === wanted) ?? null;
+}
+
+/** The FACT attribute that records a contact's account on a channel. */
+export const accountAttribute = (channel: DmChannel) => `${channel}_account`;
+
+/**
+ * Contacts with an account linked on this channel (FACT claims with attribute
+ * "<channel>_account" and the handle in provenance), plus, for LinkedIn, every
+ * contact's sourced profile link.
+ */
+export async function contactHandles(
+  config: OctoClientConfig,
+  token: string,
+  container: string,
+  channel: DmChannel,
+): Promise<ContactHandle[]> {
+  const [entities, claims, subjects] = await Promise.all([
+    graph(
+      config,
+      token,
+      container,
+      "MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.entityType AS kind",
+    ),
+    graph(
+      config,
+      token,
+      container,
+      `MATCH (c:Claim) WHERE c.provenance CONTAINS '"${accountAttribute(channel)}"' RETURN c.id AS id, c.supersededAt AS supersededAt, c.provenance AS provenance`,
+    ),
+    graph(
+      config,
+      token,
+      container,
+      "MATCH (c:Claim)-[:SUBJECT]->(e:Entity) RETURN c.id AS claimId, e.id AS entityId",
+    ),
+  ]);
+  const nameOf = new Map(
+    entities
+      .filter((e) => e.kind === "person")
+      .map((e) => [String(e.id), String(e.name)]),
+  );
+  const subjectOf = new Map(
+    subjects.map((r) => [String(r.claimId), String(r.entityId)]),
+  );
+  const out: ContactHandle[] = [];
+  for (const claim of claims) {
+    if (claim.supersededAt) continue;
+    let prov: Json = {};
+    try {
+      prov = (
+        typeof claim.provenance === "string"
+          ? JSON.parse(claim.provenance)
+          : (claim.provenance ?? {})
+      ) as Json;
+    } catch {
+      continue;
+    }
+    const personId = subjectOf.get(String(claim.id));
+    if (
+      !personId ||
+      prov.verb !== "FACT" ||
+      prov.attribute !== accountAttribute(channel)
+    )
+      continue;
+    if (typeof prov.handle !== "string" || !nameOf.has(personId)) continue;
+    out.push({
+      personId,
+      name: nameOf.get(personId) ?? personId,
+      handle: prov.handle,
+    });
   }
-  return null;
+  if (channel === "linkedin") {
+    for (const p of await linkedinPeople(config, token, container)) {
+      out.push({ personId: p.personId, name: p.name, handle: p.url });
+    }
+  }
+  return out;
 }
 
 export interface DayClaim {
@@ -168,7 +253,7 @@ const snippetOf = (text: string, max = 140) => {
 export function dayClaims(
   channel: DmChannel,
   thread: DmThread,
-  person: PersonUrl,
+  person: Pick<ContactHandle, "personId" | "name">,
   existingSeeds: Set<string>,
   now: Date,
 ): DayClaim[] {
@@ -254,6 +339,77 @@ export function readDmBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+/** seedIds of MESSAGED claims already in the ledger. */
+async function messagedSeeds(
+  config: OctoClientConfig,
+  token: string,
+  container: string,
+): Promise<Set<string>> {
+  const rows = await graph(
+    config,
+    token,
+    container,
+    `MATCH (c:Claim) WHERE c.provenance CONTAINS '"MESSAGED"' RETURN c.provenance AS p`,
+  );
+  const seeds = new Set<string>();
+  for (const row of rows) {
+    try {
+      const p = (
+        typeof row.p === "string" ? JSON.parse(row.p) : (row.p ?? {})
+      ) as Json;
+      if (typeof p.seedId === "string") seeds.add(p.seedId);
+    } catch {
+      // ignore malformed provenance
+    }
+  }
+  return seeds;
+}
+
+/** Writes day claims (with the thread link as evidence when there is one). */
+async function recordDayClaims(
+  config: OctoClientConfig,
+  token: string,
+  container: string,
+  claims: DayClaim[],
+  existingSeeds: Set<string>,
+  now: Date,
+): Promise<{ written: number; failed: number }> {
+  let written = 0;
+  let failed = 0;
+  for (const claim of claims) {
+    try {
+      const claimRes = (await epistemic(config, token, container, "claim", {
+        subjectEntityId: claim.personId,
+        statement: claim.statement,
+        validFrom: claim.day,
+        recordedAt: now.toISOString(),
+        provenance: claim.provenance,
+      })) as { claim?: { id?: string } };
+      const claimId = claimRes.claim?.id;
+      if (!claimId) throw new Error("no claim id");
+      if (claim.threadUrl) {
+        const evRes = (await epistemic(config, token, container, "evidence", {
+          locator: claim.threadUrl,
+          quote: null,
+        })) as { evidence?: { id?: string } };
+        const evidenceId = evRes.evidence?.id;
+        if (evidenceId) {
+          await epistemic(config, token, container, "claim_evidence", {
+            claimId,
+            evidenceId,
+            stance: "supports",
+          });
+        }
+      }
+      existingSeeds.add(claim.seedId);
+      written++;
+    } catch {
+      failed++;
+    }
+  }
+  return { written, failed };
+}
+
 export type DmIngestResult = {
   ok: boolean;
   status: number;
@@ -291,25 +447,8 @@ export async function dmIngest(
     attributes: { "ri.dm_channel": channel, "ri.dm_threads": threads.length },
   });
 
-  const people =
-    channel === "linkedin"
-      ? await linkedinPeople(config, token, container)
-      : [];
-  const existingRows = await graph(
-    config,
-    token,
-    container,
-    `MATCH (c:Claim) WHERE c.provenance CONTAINS '"MESSAGED"' RETURN c.provenance AS p`,
-  );
-  const existingSeeds = new Set<string>();
-  for (const row of existingRows) {
-    try {
-      const p = JSON.parse(String(row.p ?? "{}")) as Json;
-      if (typeof p.seedId === "string") existingSeeds.add(p.seedId);
-    } catch {
-      // ignore malformed provenance
-    }
-  }
+  const people = await contactHandles(config, token, container, channel);
+  const existingSeeds = await messagedSeeds(config, token, container);
 
   let stored = 0;
   let matched = 0;
@@ -334,43 +473,16 @@ export async function dmIngest(
       if (rows[0]?.inserted === true) stored++;
     }
     if (!person) continue;
-    for (const claim of dayClaims(
-      channel,
-      thread,
-      person,
+    const written = await recordDayClaims(
+      config,
+      token,
+      container,
+      dayClaims(channel, thread, person, existingSeeds, now),
       existingSeeds,
       now,
-    )) {
-      try {
-        const claimRes = (await epistemic(config, token, container, "claim", {
-          subjectEntityId: claim.personId,
-          statement: claim.statement,
-          validFrom: claim.day,
-          recordedAt: now.toISOString(),
-          provenance: claim.provenance,
-        })) as { claim?: { id?: string } };
-        const claimId = claimRes.claim?.id;
-        if (!claimId) throw new Error("no claim id");
-        if (claim.threadUrl) {
-          const evRes = (await epistemic(config, token, container, "evidence", {
-            locator: claim.threadUrl,
-            quote: null,
-          })) as { evidence?: { id?: string } };
-          const evidenceId = evRes.evidence?.id;
-          if (evidenceId) {
-            await epistemic(config, token, container, "claim_evidence", {
-              claimId,
-              evidenceId,
-              stance: "supports",
-            });
-          }
-        }
-        existingSeeds.add(claim.seedId);
-        claims++;
-      } catch {
-        failed++;
-      }
-    }
+    );
+    claims += written.written;
+    failed += written.failed;
   }
 
   await appendLedgerEvent(config, token, container, {
@@ -408,6 +520,170 @@ export async function dmIngest(
       claims,
       failed,
       traceId: span.traceId,
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Conversations to match (owner, signed in)                           */
+/* ------------------------------------------------------------------ */
+
+export interface UnmatchedConversation {
+  channel: DmChannel;
+  threadId: string;
+  threadUrl: string | null;
+  name: string;
+  handle: string | null;
+  messages: number;
+  lastAt: string;
+}
+
+/** Threads with no contact yet, newest first. Counts and names only, no text. */
+export async function dmConversations(
+  config: OctoClientConfig,
+  token: string,
+  container: string,
+  workspaceId: string,
+): Promise<UnmatchedConversation[]> {
+  for (const ddl of DM_DDL) await octoSql(config, token, container, ddl);
+  const rows = await octoSql(
+    config,
+    token,
+    container,
+    `SELECT channel, thread_id, max(thread_url) AS thread_url, max(counterpart_name) AS name,
+            max(counterpart_handle) AS handle, count(*) AS messages, max(sent_at) AS last_at
+       FROM ri_console.dm_message
+      WHERE workspace_id = ${lit(workspaceId)}
+      GROUP BY channel, thread_id
+     HAVING bool_and(person_id IS NULL)
+      ORDER BY max(sent_at) DESC
+      LIMIT 100`,
+  );
+  return rows.map((r) => ({
+    channel: DmChannelSchema.catch("linkedin").parse(r.channel),
+    threadId: String(r.thread_id),
+    threadUrl: r.thread_url ? String(r.thread_url) : null,
+    name: String(r.name ?? ""),
+    handle: r.handle ? String(r.handle) : null,
+    messages: Number(r.messages ?? 0),
+    lastAt: new Date(String(r.last_at)).toISOString(),
+  }));
+}
+
+export const DmLinkSchema = z.object({
+  channel: DmChannelSchema,
+  threadId: z.string().min(1).max(200),
+  personId: z.string().min(1).max(200),
+});
+
+/**
+ * The owner says "this conversation is with this contact". Records the
+ * account on the contact (a private FACT, so later threads match on their own),
+ * attaches the stored messages, and writes the completed days' claims.
+ */
+export async function dmLink(
+  config: OctoClientConfig,
+  token: string,
+  container: string,
+  workspaceId: string,
+  raw: unknown,
+  now = new Date(),
+): Promise<DmIngestResult> {
+  const parsed = DmLinkSchema.safeParse(raw);
+  if (!parsed.success)
+    return { ok: false, status: 400, body: { error: "BAD_REQUEST" } };
+  const { channel, threadId, personId } = parsed.data;
+  const people = await graph(
+    config,
+    token,
+    container,
+    "MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.entityType AS kind",
+  );
+  const person = people.find(
+    (e) => String(e.id) === personId && e.kind === "person",
+  );
+  if (!person)
+    return { ok: false, status: 404, body: { error: "UNKNOWN_PERSON" } };
+  const name = String(person.name);
+  const rows = await octoSql(
+    config,
+    token,
+    container,
+    `SELECT thread_url, counterpart_name, counterpart_handle, direction, sent_at, body
+       FROM ri_console.dm_message
+      WHERE workspace_id = ${lit(workspaceId)} AND channel = ${lit(channel)} AND thread_id = ${lit(threadId)}
+      ORDER BY sent_at`,
+  );
+  if (rows.length === 0)
+    return { ok: false, status: 404, body: { error: "UNKNOWN_THREAD" } };
+  const handle = rows.find((r) => r.counterpart_handle)?.counterpart_handle;
+  if (!handle) return { ok: false, status: 400, body: { error: "NO_HANDLE" } };
+
+  const label = CHANNEL_LABEL[channel];
+  const seedId = sha(
+    ["FACT", accountAttribute(channel), personId, String(handle)],
+    16,
+  );
+  const existing = await contactHandles(config, token, container, channel);
+  if (
+    !existing.some(
+      (c) =>
+        c.personId === personId &&
+        handleKey(channel, c.handle) === handleKey(channel, String(handle)),
+    )
+  ) {
+    await epistemic(config, token, container, "claim", {
+      subjectEntityId: personId,
+      statement: `${name}'s ${label} account is ${String(rows[0]?.counterpart_name ?? handle)} (${String(handle)})`,
+      validFrom: now.toISOString().slice(0, 10),
+      recordedAt: now.toISOString(),
+      provenance: {
+        verb: "FACT",
+        attribute: accountAttribute(channel),
+        handle: String(handle),
+        seedId,
+        visibility: "private",
+        source: "dm-link",
+      },
+    });
+  }
+  await octoSql(
+    config,
+    token,
+    container,
+    `UPDATE ri_console.dm_message SET person_id = ${lit(personId)}
+      WHERE workspace_id = ${lit(workspaceId)} AND channel = ${lit(channel)} AND thread_id = ${lit(threadId)}`,
+  );
+  const thread: DmThread = {
+    threadId,
+    ...(rows[0]?.thread_url ? { threadUrl: String(rows[0].thread_url) } : {}),
+    counterpart: {
+      name: String(rows[0]?.counterpart_name ?? name),
+      handle: String(handle),
+    },
+    messages: rows.map((r) => ({
+      direction: r.direction === "out" ? "out" : "in",
+      sentAt: new Date(String(r.sent_at)).toISOString(),
+      text: String(r.body ?? ""),
+    })),
+  };
+  const seeds = await messagedSeeds(config, token, container);
+  const written = await recordDayClaims(
+    config,
+    token,
+    container,
+    dayClaims(channel, thread, { personId, name }, seeds, now),
+    seeds,
+    now,
+  );
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      linked: true,
+      messages: rows.length,
+      claims: written.written,
+      failed: written.failed,
     },
   };
 }

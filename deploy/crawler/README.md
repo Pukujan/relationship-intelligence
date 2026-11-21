@@ -65,6 +65,29 @@ only by their LinkedIn profile link; threads with anyone else are stored but
 not attached to a contact. A day's messages show on the contact's event log the
 next day, once the day is complete. Only you can see them.
 
+## Telegram DMs (optional)
+
+Telegram runs as its own service, `ri-crawler-telegram`, on the VPS's normal
+network; its official API doesn't need your home address. It reads your
+one-to-one chats from the last 90 days, then new messages every 15 minutes. It
+never sends, and it doesn't mark anything as read.
+
+1. Get an API id and hash at <https://my.telegram.org> → *API development tools*.
+   Add them to the crawler env file as `TELEGRAM_API_ID=...` and
+   `TELEGRAM_API_HASH=...`. `RI_DM_TOKEN` must be set too (see above).
+2. Sign in once. You type your phone number, the code Telegram sends, and your
+   two-step password if you have one:
+
+   ```sh
+   docker compose --env-file /home/ubuntu/apps/relationship-intelligence-crawler.env \
+     -f deploy/crawler/docker-compose.yml run --rm telegram \
+     ./node_modules/.bin/tsx src/telegram.ts login
+   ```
+
+3. Restart the stack. New chats appear under **People → Conversations to
+   match**. Link each one to its contact once, and later messages attach by
+   themselves.
+
 ## Checking it
 
 ```sh

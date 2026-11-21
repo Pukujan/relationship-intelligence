@@ -5,6 +5,7 @@ import {
   daySeedId,
   dmAuthorized,
   dmIngest,
+  dmLink,
   matchThread,
   messageId,
 } from "../server/dm.js";
@@ -12,7 +13,7 @@ import {
 const JANE = {
   personId: "p-jane",
   name: "Jane Doe",
-  url: "https://www.linkedin.com/in/jane-doe",
+  handle: "https://www.linkedin.com/in/jane-doe",
 };
 const NOW = new Date("2026-11-21T15:00:00.000Z");
 
@@ -269,5 +270,152 @@ describe("dmIngest against a mocked Octo", () => {
     );
     expect(result.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("linked accounts (#120 Telegram slice)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("matches a Telegram chat only by the linked account id", () => {
+    const linked = [
+      { personId: "p-jane", name: "Jane Doe", handle: "tg:4242" },
+    ];
+    const chat = (handle?: string) =>
+      thread({
+        threadId: "tg-4242",
+        counterpart: { name: "Jane Doe", ...(handle ? { handle } : {}) },
+      });
+    expect(matchThread("telegram", chat(" TG:4242 "), linked)?.personId).toBe(
+      "p-jane",
+    );
+    expect(matchThread("telegram", chat("tg:9999"), linked)).toBeNull();
+    expect(matchThread("telegram", chat(), linked)).toBeNull();
+  });
+
+  function mockLinkOcto(accountAlreadyLinked: boolean) {
+    const claims: Record<string, unknown>[] = [];
+    const sql: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(url);
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+          string,
+          unknown
+        >;
+        const json = (data: unknown) =>
+          new Response(JSON.stringify(data), { status: 200 });
+        if (path.includes("/api/graph/query")) {
+          const q = String(body.query);
+          if (q.includes("MATCH (e:Entity)"))
+            return json({
+              rows: [{ id: "p-jane", name: "Jane Doe", kind: "person" }],
+            });
+          if (q.includes("[:SUBJECT]"))
+            return json({ rows: [{ claimId: "c-acct", entityId: "p-jane" }] });
+          if (q.includes('"telegram_account"') && accountAlreadyLinked)
+            return json({
+              rows: [
+                {
+                  id: "c-acct",
+                  supersededAt: null,
+                  provenance: JSON.stringify({
+                    verb: "FACT",
+                    attribute: "telegram_account",
+                    handle: "tg:4242",
+                  }),
+                },
+              ],
+            });
+          return json({ rows: [] });
+        }
+        if (path.includes("/api/epistemic/record")) {
+          if (body.kind === "claim") claims.push(body);
+          return json({ claim: { id: `c-${claims.length}` } });
+        }
+        if (path.includes("/query")) {
+          const text = String(body.sql);
+          sql.push(text);
+          if (text.startsWith("SELECT thread_url"))
+            return json({
+              rows: [
+                {
+                  thread_url: null,
+                  counterpart_name: "Jane",
+                  counterpart_handle: "tg:4242",
+                  direction: "in",
+                  sent_at: "2026-11-19T14:00:00Z",
+                  body: "Hi!",
+                },
+                {
+                  thread_url: null,
+                  counterpart_name: "Jane",
+                  counterpart_handle: "tg:4242",
+                  direction: "out",
+                  sent_at: "2026-11-21T09:00:00Z",
+                  body: "Today waits.",
+                },
+              ],
+            });
+          return json({ rows: [] });
+        }
+        return json({});
+      }),
+    );
+    return { claims, sql };
+  }
+
+  const config = { baseUrl: "https://octo.example.test", timeoutMs: 5000 };
+  const link = { channel: "telegram", threadId: "tg-4242", personId: "p-jane" };
+
+  it("records the account privately, attaches the stored messages and writes completed days", async () => {
+    const { claims, sql } = mockLinkOcto(false);
+    const result = await dmLink(config, "tok", "ws", "ws", link, NOW);
+    expect(result.body).toMatchObject({ linked: true, messages: 2, claims: 1 });
+    const account = claims.find(
+      (c) =>
+        (c.provenance as Record<string, unknown>).attribute ===
+        "telegram_account",
+    );
+    expect(account?.provenance).toMatchObject({
+      verb: "FACT",
+      handle: "tg:4242",
+      visibility: "private",
+    });
+    expect(
+      claims.filter(
+        (c) => (c.provenance as Record<string, unknown>).verb === "MESSAGED",
+      ),
+    ).toHaveLength(1);
+    expect(
+      sql.some((q) =>
+        q.startsWith("UPDATE ri_console.dm_message SET person_id = 'p-jane'"),
+      ),
+    ).toBe(true);
+  });
+
+  it("doesn't record the same account twice", async () => {
+    const { claims } = mockLinkOcto(true);
+    await dmLink(config, "tok", "ws", "ws", link, NOW);
+    expect(
+      claims.some(
+        (c) =>
+          (c.provenance as Record<string, unknown>).attribute ===
+          "telegram_account",
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses an unknown contact", async () => {
+    mockLinkOcto(false);
+    const result = await dmLink(
+      config,
+      "tok",
+      "ws",
+      "ws",
+      { ...link, personId: "p-nobody" },
+      NOW,
+    );
+    expect(result.status).toBe(404);
   });
 });
