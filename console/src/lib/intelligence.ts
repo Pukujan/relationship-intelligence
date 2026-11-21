@@ -1,19 +1,19 @@
 import {
   daysQuiet,
   goingCold,
-  missionById,
-  missionStatusMeta,
+  milestoneById,
+  milestoneStatusMeta,
   pendingApprovals,
-  planForMission,
+  planForMilestone,
   projectById,
 } from "@/data/derive";
 import type {
   Approval,
   ApprovalKind,
   EvidenceRef,
-  Mission,
-  MissionDesign,
-  MissionHorizon,
+  Milestone,
+  MilestoneDesign,
+  MilestoneHorizon,
   NewProposal,
   Risk,
   World,
@@ -37,7 +37,7 @@ import type {
 export type StallReason = "blocked" | "overdue" | "unplanned";
 
 export interface Stall {
-  mission: Mission;
+  milestone: Milestone;
   reason: StallReason;
   detail: string;
 }
@@ -45,39 +45,39 @@ export interface Stall {
 const isPast = (iso: string) => new Date(iso).getTime() < Date.now();
 
 /**
- * A mission is stalled when it cannot move on its own: it is blocked on a
+ * A milestone is stalled when it cannot move on its own: it is blocked on a
  * decision, its deadline has passed without completion, or it is running
  * with no plan to execute. Each case gets a different proposed way forward.
  */
-export const stallFor = (world: World, mission: Mission): Stall | null => {
-  if (mission.status === "done") return null;
-  if (mission.status === "blocked") {
+export const stallFor = (world: World, milestone: Milestone): Stall | null => {
+  if (milestone.status === "done") return null;
+  if (milestone.status === "blocked") {
     const approvals = pendingApprovals(world).filter((approval) =>
-      mission.agentIds.includes(approval.agentId),
+      milestone.agentIds.includes(approval.agentId),
     );
     return {
-      mission,
+      milestone,
       reason: "blocked",
       detail: approvals.length
         ? `Waiting on ${approvals.length} approval${approvals.length === 1 ? "" : "s"} — the first is “${approvals[0].title}”.`
         : "Marked blocked with no open approval — the block itself needs a decision.",
     };
   }
-  if (isPast(mission.due)) {
+  if (isPast(milestone.due)) {
     const days = Math.max(
       1,
-      Math.round((Date.now() - new Date(mission.due).getTime()) / 86_400_000),
+      Math.round((Date.now() - new Date(milestone.due).getTime()) / 86_400_000),
     );
     return {
-      mission,
+      milestone,
       reason: "overdue",
-      detail: `Past its deadline by ${days} day${days === 1 ? "" : "s"} and still ${mission.status.replace("_", " ")}.`,
+      detail: `Past its deadline by ${days} day${days === 1 ? "" : "s"} and still ${milestone.status.replace("_", " ")}.`,
     };
   }
-  const plan = planForMission(world, mission.id);
+  const plan = planForMilestone(world, milestone.id);
   if (!plan || plan.steps.length === 0) {
     return {
-      mission,
+      milestone,
       reason: "unplanned",
       detail: "Queued or running with no plan attached — nothing tells the agents what to do.",
     };
@@ -85,46 +85,46 @@ export const stallFor = (world: World, mission: Mission): Stall | null => {
   return null;
 };
 
-export const stalledMissions = (world: World): Stall[] =>
-  world.missions
-    .map((mission) => stallFor(world, mission))
+export const stalledMilestones = (world: World): Stall[] =>
+  world.milestones
+    .map((milestone) => stallFor(world, milestone))
     .filter((stall): stall is Stall => stall !== null);
 
 /* ------------------------------------------------------------------ */
 /* The iteration loop: a stall becomes a proposal                      */
 /* ------------------------------------------------------------------ */
 
-const replanHorizon = (mission: Mission): MissionHorizon =>
-  mission.horizon === "today" ? "this_week" : mission.horizon;
+const replanHorizon = (milestone: Milestone): MilestoneHorizon =>
+  milestone.horizon === "today" ? "this_week" : milestone.horizon;
 
 /**
- * The proposed way forward for one stalled mission. Deterministic on purpose:
+ * The proposed way forward for one stalled milestone. Deterministic on purpose:
  * the loop must keep working when the model is unreachable, and the human
  * gate makes a conservative default safe. Extend the deadline, re-plan the
  * steps, or escalate the block — never silently drop the work.
  */
 export const replanProposalFor = (world: World, stall: Stall): NewProposal => {
-  const { mission, reason, detail } = stall;
-  const project = projectById(world, mission.projectId);
-  const agentId = mission.agentIds[0] ?? "research";
+  const { milestone, reason, detail } = stall;
+  const project = projectById(world, milestone.projectId);
+  const agentId = milestone.agentIds[0] ?? "research";
   const due = new Date(
-    Math.max(Date.now(), new Date(mission.due).getTime()) + 7 * 86_400_000,
+    Math.max(Date.now(), new Date(milestone.due).getTime()) + 7 * 86_400_000,
   ).toISOString();
 
-  const design: MissionDesign = {
+  const design: MilestoneDesign = {
     kind: "replan",
-    missionId: mission.id,
+    milestoneId: milestone.id,
     adjustment:
       reason === "blocked" ? "escalate" : reason === "overdue" ? "extend" : "replan",
-    missionName: mission.name,
-    missionSummary: mission.summary,
-    projectId: mission.projectId,
-    objectiveId: mission.objectiveId,
-    objectiveName: `Recover ${mission.name}`,
+    missionName: milestone.name,
+    missionSummary: milestone.summary,
+    projectId: milestone.projectId,
+    objectiveId: milestone.objectiveId,
+    objectiveName: `Recover ${milestone.name}`,
     objectiveTarget: reason === "blocked" ? "unblock within 1 day" : "land within 7 days",
-    horizon: replanHorizon(mission),
+    horizon: replanHorizon(milestone),
     due,
-    agentIds: mission.agentIds.length ? mission.agentIds : [agentId],
+    agentIds: milestone.agentIds.length ? milestone.agentIds : [agentId],
     autonomy: "approve",
     planSteps:
       reason === "blocked"
@@ -136,7 +136,7 @@ export const replanProposalFor = (world: World, stall: Stall): NewProposal => {
         : reason === "overdue"
           ? [
               { label: "Audit what is already done", detail: "Keep finished steps, mark the rest", agentId },
-              { label: "Cut the mission to what still matters", detail: "Drop or defer the rest with your approval" },
+              { label: "Cut the milestone to what still matters", detail: "Drop or defer the rest with your approval" },
               { label: `Re-run to a new deadline (${due.slice(0, 10)})`, detail: "Progress reported against the new date", agentId },
             ]
           : [
@@ -144,7 +144,7 @@ export const replanProposalFor = (world: World, stall: Stall): NewProposal => {
               { label: "Hold the plan for your approval", detail: "You edit before it runs" },
               { label: "Execute the approved steps", detail: "Progress logged against the deadline", agentId },
             ],
-    rationale: `${mission.name} is ${reason} — ${detail} The loop says a stall becomes a proposal, so here is the way forward: ${
+    rationale: `${milestone.name} is ${reason} — ${detail} The loop says a stall becomes a proposal, so here is the way forward: ${
       reason === "blocked"
         ? "escalate the decision rather than wait it out."
         : reason === "overdue"
@@ -159,27 +159,27 @@ export const replanProposalFor = (world: World, stall: Stall): NewProposal => {
   return {
     agentId,
     kind: "replan",
-    title: `Re-plan: ${mission.name}`,
+    title: `Re-plan: ${milestone.name}`,
     proposedAction: design.rationale,
     reason: detail,
     evidence: [
-      { label: project?.name ?? "Mission", detail: `${mission.status.replace("_", " ")} · due ${mission.due.slice(0, 10)}` },
-      { label: missionStatusMeta[mission.status]?.label ?? mission.status, detail: reason },
+      { label: project?.name ?? "Milestone", detail: `${milestone.status.replace("_", " ")} · due ${milestone.due.slice(0, 10)}` },
+      { label: milestoneStatusMeta[milestone.status]?.label ?? milestone.status, detail: reason },
     ],
     risk: reason === "blocked" ? "medium" : "low",
     design,
-    personId: mission.personIds[0],
-    eventId: mission.eventId,
+    personId: milestone.personIds[0],
+    eventId: milestone.eventId,
   };
 };
 
-/** True when a pending replan proposal already covers this mission. */
-export const replanAlreadyPending = (world: World, missionId: string) =>
+/** True when a pending replan proposal already covers this milestone. */
+export const replanAlreadyPending = (world: World, milestoneId: string) =>
   world.approvals.some(
     (approval) =>
       approval.kind === "replan" &&
       approval.status === "pending" &&
-      approval.design?.missionId === missionId,
+      approval.design?.milestoneId === milestoneId,
   );
 
 /* ------------------------------------------------------------------ */
@@ -221,14 +221,14 @@ export const attentionSignals = (
   const inScope = (id: string) =>
     !projectId || projectId === "all" || id === projectId;
   const pending = pendingApprovals(world, projectId);
-  const overdue = world.missions.filter(
-    (mission) =>
-      mission.status !== "done" &&
-      isPast(mission.due) &&
-      inScope(mission.projectId),
+  const overdue = world.milestones.filter(
+    (milestone) =>
+      milestone.status !== "done" &&
+      isPast(milestone.due) &&
+      inScope(milestone.projectId),
   );
-  const stalled = stalledMissions(world).filter(
-    (stall) => stall.reason !== "overdue" && inScope(stall.mission.projectId),
+  const stalled = stalledMilestones(world).filter(
+    (stall) => stall.reason !== "overdue" && inScope(stall.milestone.projectId),
   );
   const cold = goingCold(world, projectId).slice(0, 6);
 
@@ -249,11 +249,11 @@ export const attentionSignals = (
       key: "overdue",
       label: "Overdue",
       hint: "Past deadline and not done.",
-      items: overdue.slice(0, 5).map((mission) => ({
-        id: mission.id,
-        label: mission.name,
-        detail: `due ${mission.due.slice(0, 10)} · ${mission.status.replace("_", " ")}`,
-        href: `/missions/${mission.id}`,
+      items: overdue.slice(0, 5).map((milestone) => ({
+        id: milestone.id,
+        label: milestone.name,
+        detail: `due ${milestone.due.slice(0, 10)} · ${milestone.status.replace("_", " ")}`,
+        href: `/milestones/${milestone.id}`,
         tone: "warn",
       })),
     },
@@ -262,10 +262,10 @@ export const attentionSignals = (
       label: "Stalled",
       hint: "Blocked or unplanned — each has a proposed way forward.",
       items: stalled.slice(0, 5).map((stall) => ({
-        id: stall.mission.id,
-        label: stall.mission.name,
+        id: stall.milestone.id,
+        label: stall.milestone.name,
         detail: stall.detail,
-        href: `/missions/${stall.mission.id}`,
+        href: `/milestones/${stall.milestone.id}`,
         tone: "warn",
       })),
     },
@@ -294,7 +294,7 @@ export const totalSignals = (groups: SignalGroup[]) =>
 /** Wrap a model-produced design as an approval proposal for the inbox. */
 export const designAsProposal = (
   world: World,
-  design: MissionDesign,
+  design: MilestoneDesign,
 ): NewProposal => {
   const agentId = design.agentIds[0] ?? "research";
   const project = design.projectId ? projectById(world, design.projectId) : undefined;
@@ -317,7 +317,7 @@ export const designAsProposal = (
   return {
     agentId,
     kind: "mission",
-    title: `New mission: ${design.missionName}`,
+    title: `New milestone: ${design.missionName}`,
     proposedAction: `${design.missionSummary} Plan: ${design.planSteps
       .map((step) => step.label)
       .join(" → ")}. Autonomy: ${design.autonomy}.`,
@@ -328,5 +328,5 @@ export const designAsProposal = (
   };
 };
 
-export const missionByIdSafe = (world: World, id?: string) =>
-  id ? missionById(world, id) : undefined;
+export const milestoneByIdSafe = (world: World, id?: string) =>
+  id ? milestoneById(world, id) : undefined;

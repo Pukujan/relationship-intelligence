@@ -47,9 +47,12 @@ export const CONNECTOR_CATALOG: ConnectorCatalogItem[] = [
     name: "Gmail",
     category: "google",
     authKind: "google_oauth",
-    scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    scopes: [
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/gmail.send",
+    ],
     description:
-      "Read threads and contact signals; outgoing drafts always wait for your approval.",
+      "Read threads and contact signals; outgoing mail sends only after you approve it.",
   },
   {
     provider: "gcal",

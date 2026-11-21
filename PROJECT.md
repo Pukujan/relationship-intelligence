@@ -20,13 +20,14 @@ below:
 
 - **Human always in control.** Agents propose (names, objectives, plans, drafts, research);
   the human decides. Nothing sends, calls, publishes, or commits without consent.
-- **No silent stalls.** Missions and objectives carry deadlines; blocked or overdue work is
+- **No silent stalls.** Milestones and objectives carry deadlines; blocked or overdue work is
   surfaced as a signal with a proposed way forward, never left to drift.
 - **State is legible.** Progress, decay, and "needs you" are represented as data signals,
   aggregated so the person always knows what needs them.
-- **Organized work, graph-backed people.** Work is grouped as Project → Objective → Mission
-  → Plan; people/companies/events stay a single evidence-backed graph that work references,
-  never duplicates.
+- **Organized work, graph-backed people.** Every project carries a mission — its enduring
+  purpose, never time-boxed. Bounded work is grouped as Project (mission) → Objective
+  (bounded goal) → Milestone (time-boxed unit) → Plan; people/companies/events stay a single
+  evidence-backed graph that work references, never duplicates.
 
 ## Authority and ownership
 

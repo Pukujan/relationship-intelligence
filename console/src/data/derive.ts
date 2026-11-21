@@ -12,7 +12,7 @@ import type {
   ConnectorStatus,
   Folder,
   McpServer,
-  MissionStatus,
+  MilestoneStatus,
   ObjectiveStatus,
   Person,
   Plan,
@@ -39,9 +39,9 @@ export const eventById = (world: World, id?: string) =>
 
 /**
  * The project a decision belongs to, when the world can attribute it:
- * replan/mission designs carry a mission, project, or objective id; otherwise
+ * replan/milestone designs carry a milestone, project, or objective id; otherwise
  * the referenced event, person, or company ties it to a project roster; last,
- * an agent whose missions all live in one project. `null` means the decision
+ * an agent whose milestones all live in one project. `null` means the decision
  * is workspace-level — it shows in the "all" scope, never inside a project.
  */
 export const approvalProjectId = (
@@ -49,9 +49,10 @@ export const approvalProjectId = (
   approval: Approval,
 ): string | null => {
   const design = approval.design;
-  if (design?.missionId) {
-    const mission = missionById(world, design.missionId);
-    if (mission) return mission.projectId;
+  const replanTarget = design?.milestoneId ?? design?.missionId;
+  if (replanTarget) {
+    const milestone = milestoneById(world, replanTarget);
+    if (milestone) return milestone.projectId;
   }
   if (design?.projectId) return design.projectId;
   if (design?.objectiveId) {
@@ -74,11 +75,11 @@ export const approvalProjectId = (
     if (project) return project.id;
   }
   const agentProjects = new Set(
-    world.missions
-      .filter((mission) => mission.agentIds.includes(approval.agentId))
-      .map((mission) => mission.projectId),
+    world.milestones
+      .filter((milestone) => milestone.agentIds.includes(approval.agentId))
+      .map((milestone) => milestone.projectId),
   );
-  return agentProjects.size === 1 ? [...agentProjects][0] : null;
+  return agentProjects.size === 1 ? ([...agentProjects][0] ?? null) : null;
 };
 
 /** Pending decisions, optionally narrowed to one project's scope. */
@@ -151,15 +152,16 @@ export const agentStats = (world: World, agentId: string): AgentStats => {
   const tasks = tasksForAgent(world, agentId);
   const runs = runsForAgent(world, agentId);
   const successes = runs.filter((run) => run.outcome === "success").length;
+  // A run skipped while the agent was paused did no work, so it does not
+  // count for or against the success rate.
+  const worked = runs.filter((run) => run.outcome !== "skipped").length;
   return {
     running: tasks.filter((task) => task.status === "running").length,
     queued: tasks.filter((task) => task.status === "queued").length,
     blocked: tasks.filter((task) => task.status === "blocked").length,
     done: tasks.filter((task) => task.status === "done").length,
     pending: pendingApprovalsForAgent(world, agentId).length,
-    successRate: runs.length
-      ? Math.round((successes / runs.length) * 100)
-      : 0,
+    successRate: worked ? Math.round((successes / worked) * 100) : 0,
   };
 };
 
@@ -253,6 +255,10 @@ export const outcomeTone: Record<
     label: "Failed",
     className: "text-destructive border-destructive/30 bg-destructive/10",
   },
+  skipped: {
+    label: "Skipped, paused",
+    className: "text-muted-foreground border-border/70 bg-muted/40",
+  },
 };
 
 export const strengthLabel = (person: Person) => {
@@ -277,44 +283,44 @@ export const projectById = (world: World, id?: string) =>
 export const objectiveById = (world: World, id?: string) =>
   byId(world.objectives, id);
 
-export const missionById = (world: World, id?: string) =>
-  byId(world.missions, id);
+export const milestoneById = (world: World, id?: string) =>
+  byId(world.milestones, id);
 
-export const planForMission = (world: World, missionId: string) =>
-  world.plans.find((plan) => plan.missionId === missionId);
+export const planForMilestone = (world: World, milestoneId: string) =>
+  world.plans.find((plan) => plan.milestoneId === milestoneId);
 
 export const objectivesForProject = (world: World, projectId: string) =>
   world.objectives.filter((objective) => objective.projectId === projectId);
 
-export const missionsForProject = (world: World, projectId: string) =>
-  world.missions
-    .filter((mission) => mission.projectId === projectId)
+export const milestonesForProject = (world: World, projectId: string) =>
+  world.milestones
+    .filter((milestone) => milestone.projectId === projectId)
     .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
 
-export const tasksForMission = (world: World, missionId: string) =>
-  world.tasks.filter((task) => task.missionId === missionId);
+export const tasksForMilestone = (world: World, milestoneId: string) =>
+  world.tasks.filter((task) => task.milestoneId === milestoneId);
 
 export const projectsForPerson = (world: World, personId: string) =>
   world.projects.filter((project) => project.personIds.includes(personId));
 
-export const missionsForPerson = (world: World, personId: string) =>
-  world.missions
-    .filter((mission) => mission.personIds.includes(personId))
+export const milestonesForPerson = (world: World, personId: string) =>
+  world.milestones
+    .filter((milestone) => milestone.personIds.includes(personId))
     .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
 
-export const missionsForAgent = (world: World, agentId: string) =>
-  world.missions
-    .filter((mission) => mission.agentIds.includes(agentId))
+export const milestonesForAgent = (world: World, agentId: string) =>
+  world.milestones
+    .filter((milestone) => milestone.agentIds.includes(agentId))
     .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
 
-export const missionsDueToday = (world: World) =>
-  world.missions
-    .filter((mission) => isToday(new Date(mission.due)))
+export const milestonesDueToday = (world: World) =>
+  world.milestones
+    .filter((milestone) => isToday(new Date(milestone.due)))
     .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
 
-export const missionsThisWeek = (world: World) =>
-  world.missions
-    .filter((mission) => mission.horizon === "this_week")
+export const milestonesThisWeek = (world: World) =>
+  world.milestones
+    .filter((milestone) => milestone.horizon === "this_week")
     .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
 
 export const projectProgress = (world: World, projectId: string) => {
@@ -431,8 +437,8 @@ export const objectiveStatusMeta: Record<
   },
 };
 
-export const missionStatusMeta: Record<
-  MissionStatus,
+export const milestoneStatusMeta: Record<
+  MilestoneStatus,
   { label: string; className: string }
 > = {
   running: { label: "Running", className: "border-run/30 bg-run/10 text-run" },

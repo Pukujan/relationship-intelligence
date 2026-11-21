@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
 import {
   agentById,
-  missionById,
+  milestoneById,
   planProgress,
   relativeTime,
 } from "@/data/derive";
@@ -18,7 +18,7 @@ import {
   PageSkeleton,
   SectionHeader,
 } from "@/components/common";
-import { MissionChain, ProgressBar, ScopeBanner } from "@/components/work";
+import { MilestoneChain, ProgressBar, ScopeBanner } from "@/components/work";
 import { Button } from "@/components/ui/button";
 import type { StepStatus } from "@/data/types";
 
@@ -45,9 +45,9 @@ const Plans = () => {
     if (!world) return [];
     return world.plans
       .filter((plan) => {
-        const mission = world.missions.find((item) => item.id === plan.missionId);
-        if (!mission) return false;
-        return activeProjectId === "all" || mission.projectId === activeProjectId;
+        const milestone = world.milestones.find((item) => item.id === plan.milestoneId);
+        if (!milestone) return false;
+        return activeProjectId === "all" || milestone.projectId === activeProjectId;
       })
       .sort(
         (a, b) =>
@@ -66,10 +66,10 @@ const Plans = () => {
     );
   }
 
-  const missionsWithoutPlan = world.missions.filter(
-    (mission) =>
-      (activeProjectId === "all" || mission.projectId === activeProjectId) &&
-      !world.plans.some((plan) => plan.missionId === mission.id),
+  const milestonesWithoutPlan = world.milestones.filter(
+    (milestone) =>
+      (activeProjectId === "all" || milestone.projectId === activeProjectId) &&
+      !world.plans.some((plan) => plan.milestoneId === milestone.id),
   );
 
   return (
@@ -77,13 +77,13 @@ const Plans = () => {
       <PageHeader
         eyebrow="Work"
         title="Plans"
-        description="The agent's strategy for each mission, step by step. A plan is where you can see exactly what will happen before anything goes out."
+        description="The agent's strategy for each milestone, step by step. A plan is where you can see exactly what will happen before anything goes out."
         actions={
           <Button
             variant="outline"
             size="sm"
             className="h-9 gap-1.5 rounded-lg text-[12px]"
-            onClick={() => openCopilot("What's the plan for the Halcyon renewal?")}
+            onClick={() => openCopilot("Which missions still need a plan, and what would you propose for them?")}
           >
             <Sparkles className="h-3.5 w-3.5 text-primary" />
             Ask about a plan
@@ -103,7 +103,7 @@ const Plans = () => {
           <EmptyState
             icon={ListChecks}
             title="No plans in this scope"
-            description="Plans appear once an agent starts a mission. Switch the project scope to see the rest of the workspace."
+            description="Plans appear once an agent starts a milestone. Switch the project scope to see the rest of the workspace."
             action={
               <Button
                 size="sm"
@@ -119,22 +119,22 @@ const Plans = () => {
       ) : (
         <div className="grid gap-3 lg:grid-cols-2">
           {plans.map((plan) => {
-            const mission = missionById(world, plan.missionId);
+            const milestone = milestoneById(world, plan.milestoneId);
             const agent = agentById(world, plan.agentId);
-            if (!mission) return null;
+            if (!milestone) return null;
             const done = plan.steps.filter((step) => step.status === "done").length;
             return (
               <article key={plan.id} className="panel flex flex-col gap-2.5 p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <Link
-                      to={`/missions/${mission.id}`}
+                      to={`/milestones/${milestone.id}`}
                       className="focus-ring rounded text-[13px] font-semibold transition-colors hover:text-primary"
                     >
                       {plan.title}
                     </Link>
-                    {mission ? (
-                      <MissionChain world={world} mission={mission} className="mt-1" />
+                    {milestone ? (
+                      <MilestoneChain world={world} milestone={milestone} className="mt-1" />
                     ) : null}
                   </div>
                   {agent ? (
@@ -190,10 +190,10 @@ const Plans = () => {
                     {relativeTime(plan.updatedAt)}
                   </span>
                   <Link
-                    to={`/missions/${mission.id}`}
+                    to={`/milestones/${milestone.id}`}
                     className="focus-ring inline-flex items-center gap-1 rounded text-primary transition-colors hover:text-primary/80"
                   >
-                    Open mission
+                    Open milestone
                     <ArrowRight className="h-3 w-3" />
                   </Link>
                 </div>
@@ -203,18 +203,18 @@ const Plans = () => {
         </div>
       )}
 
-      {missionsWithoutPlan.length ? (
+      {milestonesWithoutPlan.length ? (
         <section className="space-y-2">
-          <SectionHeader title="Missions without a plan yet" count={missionsWithoutPlan.length} />
+          <SectionHeader title="Milestones without a plan yet" count={milestonesWithoutPlan.length} />
           <div className="grid gap-1.5 sm:grid-cols-2">
-            {missionsWithoutPlan.map((mission) => (
+            {milestonesWithoutPlan.map((milestone) => (
               <Link
-                key={mission.id}
-                to={`/missions/${mission.id}`}
+                key={milestone.id}
+                to={`/milestones/${milestone.id}`}
                 className="focus-ring flex items-center gap-2 rounded-lg border border-dashed border-border/70 bg-surface-1/30 px-3 py-2 text-[11.5px] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
               >
                 <ListChecks className="h-3 w-3 shrink-0" />
-                <span className="flex-1 truncate">{mission.name}</span>
+                <span className="flex-1 truncate">{milestone.name}</span>
                 <span className="text-[10px]">queued</span>
               </Link>
             ))}

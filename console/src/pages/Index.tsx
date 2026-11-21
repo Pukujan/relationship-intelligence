@@ -24,8 +24,8 @@ import {
   daysQuiet,
   eventAttendees,
   goingCold,
-  missionsDueToday,
-  missionsThisWeek,
+  milestonesDueToday,
+  milestonesThisWeek,
   pendingApprovals,
   relativeTime,
   shortDate,
@@ -44,7 +44,7 @@ import {
   SectionHeader,
   StrengthMeter,
 } from "@/components/common";
-import { MissionRow, Pill } from "@/components/work";
+import { MilestoneRow, Pill } from "@/components/work";
 import { AltitudeControl, useAltitude } from "@/components/crm/AltitudeControl";
 import { Peek, type PeekTarget } from "@/components/crm/Peek";
 import {
@@ -117,12 +117,12 @@ const Index = () => {
   const highRisk = pending.filter((approval) => approval.risk === "high").length;
   const inScope = (projectId: string) =>
     activeProjectId === "all" || projectId === activeProjectId;
-  const todayMissions = missionsDueToday(world).filter((mission) =>
-    inScope(mission.projectId),
+  const todayMilestones = milestonesDueToday(world).filter((milestone) =>
+    inScope(milestone.projectId),
   );
-  const weekMissions = missionsThisWeek(world)
-    .filter((mission) => inScope(mission.projectId))
-    .filter((mission) => !todayMissions.some((item) => item.id === mission.id))
+  const weekMilestones = milestonesThisWeek(world)
+    .filter((milestone) => inScope(milestone.projectId))
+    .filter((milestone) => !todayMilestones.some((item) => item.id === milestone.id))
     .slice(0, 4);
   const cold = goingCold(world, activeProjectId).slice(0, 4);
   const signals = attentionSignals(world, activeProjectId);
@@ -164,8 +164,8 @@ const Index = () => {
                   : "Your approval inbox is clear"}
               </span>
             )}{" "}
-            and {todayMissions.length} mission
-            {todayMissions.length === 1 ? " is" : "s are"} due today.{" "}
+            and {todayMilestones.length} milestone
+            {todayMilestones.length === 1 ? " is" : "s are"} due today.{" "}
             {activeProject ? (
               <span className="text-foreground/80">
                 Scoped to {activeProject.name}.
@@ -222,10 +222,10 @@ const Index = () => {
               to: "/approvals",
             },
             {
-              label: "Missions today",
-              value: todayMissions.length,
-              hint: `${weekMissions.length} more this week`,
-              to: "/missions",
+              label: "Milestones today",
+              value: todayMilestones.length,
+              hint: `${weekMilestones.length} more this week`,
+              to: "/milestones",
             },
             {
               label: "Going cold",
@@ -410,7 +410,7 @@ const Index = () => {
           }
         />
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Missions, objective deadlines, events, and expiring decisions on one
+          Milestones, objective deadlines, events, and expiring decisions on one
           strip — click anything to peek at its brief.
         </p>
         <UnifiedTimeline
@@ -515,24 +515,24 @@ const Index = () => {
 
         <section className="panel flex flex-col p-4">
           <SectionHeader
-            title="Missions due today"
-            count={todayMissions.length}
+            title="Milestones due today"
+            count={todayMilestones.length}
             action={
               <Link
-                to="/missions"
+                to="/milestones"
                 className="focus-ring inline-flex items-center gap-1 rounded-md px-1 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
               >
-                All missions
+                All milestones
                 <ArrowRight className="h-3 w-3" />
               </Link>
             }
           />
-          {todayMissions.length === 0 ? (
+          {todayMilestones.length === 0 ? (
             <EmptyState
               className="mt-3"
               icon={Sun}
               title="Nothing due today"
-              description="No mission lands today in this scope. The next ones are already queued for this week."
+              description="No milestone lands today in this scope. The next ones are already queued for this week."
               action={
                 <Button
                   size="sm"
@@ -546,25 +546,25 @@ const Index = () => {
             />
           ) : (
             <div className="mt-2.5 space-y-2">
-              {todayMissions.map((mission) => (
-                <MissionRow key={mission.id} world={world} mission={mission} />
+              {todayMilestones.map((milestone) => (
+                <MilestoneRow key={milestone.id} world={world} milestone={milestone} />
               ))}
             </div>
           )}
 
-          {weekMissions.length ? (
+          {weekMilestones.length ? (
             <div className="mt-3 border-t border-border/60 pt-2.5">
               <p className="eyebrow mb-1.5">Later this week</p>
               <div className="space-y-1">
-                {weekMissions.map((mission) => (
+                {weekMilestones.map((milestone) => (
                   <Link
-                    key={mission.id}
-                    to={`/missions/${mission.id}`}
+                    key={milestone.id}
+                    to={`/milestones/${milestone.id}`}
                     className="focus-ring flex items-center gap-2 rounded-md px-1 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
                   >
                     <Target className="h-3 w-3 shrink-0" />
-                    <span className="flex-1 truncate">{mission.name}</span>
-                    <span className="num text-[10px]">{shortDate(mission.due)}</span>
+                    <span className="flex-1 truncate">{milestone.name}</span>
+                    <span className="num text-[10px]">{shortDate(milestone.due)}</span>
                   </Link>
                 ))}
               </div>
@@ -666,7 +666,7 @@ const Index = () => {
             </span>
             <span className="text-[12.5px] font-medium">Add an agent</span>
             <span className="max-w-[170px] text-[11px] leading-relaxed text-muted-foreground">
-              Start from a mission. Ops, recruiting, partnerships.
+              Start from a milestone. Ops, recruiting, partnerships.
             </span>
           </button>
         </div>

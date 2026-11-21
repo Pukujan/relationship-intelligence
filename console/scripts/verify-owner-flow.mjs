@@ -9,7 +9,7 @@
  *
  * Verifies: owner world reads canonical ledger people; signals render; the
  * copilot answers live and attributes the principal; design mode proposes a
- * mission referencing real people; approval materializes it in Octo SQL.
+ * milestone referencing real people; approval materializes it in Octo SQL.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -92,11 +92,11 @@ await page.waitForTimeout(7000);
 await page.screenshot({ path: PRE + "/owner-copilot.png" });
 log("3 owner copilot: live model | principal:", principalId.slice(0, 8));
 
-// 4. design -> hold -> approve -> mission in Octo
+// 4. design -> hold -> approve -> milestone in Octo
 await page.getByRole("button", { name: "Design" }).click();
 await page.getByLabel("Ask the copilot").fill("Re-engage Jane Doe on open-source tooling with a sourced brief");
 await page.getByRole("button", { name: "Run" }).click();
-await page.getByText("Proposed mission — held for you").waitFor({ timeout: 100000 });
+await page.getByText("Proposed milestone — held for you").waitFor({ timeout: 100000 });
 await page.waitForTimeout(7000);
 await page.screenshot({ path: PRE + "/owner-design.png" });
 await page.getByRole("button", { name: "Hold for approval" }).click();
@@ -106,15 +106,15 @@ const id = href.split("focus=")[1];
 await page.getByRole("link", { name: "Open in inbox" }).click();
 const card = page.locator("#approval-" + id);
 await card.waitFor({ timeout: 15000 });
-const missionName = ((await card.innerText()).match(/New mission: (.+)/) || [])[1]?.trim();
+const missionName = ((await card.innerText()).match(/New milestone: (.+)/) || [])[1]?.trim();
 await card.getByRole("button", { name: "Approve" }).click();
 await page.waitForTimeout(2500);
-await page.getByRole("link", { name: "Missions", exact: true }).first().click();
-await page.waitForURL("**/missions", { timeout: 15000 });
+await page.getByRole("link", { name: "Milestones", exact: true }).first().click();
+await page.waitForURL("**/milestones", { timeout: 15000 });
 await page.waitForTimeout(1500);
 const created = missionName ? await page.getByText(missionName, { exact: false }).count() : 0;
-log("4 owner mission created in Octo:", created > 0, "|", missionName);
-await page.screenshot({ path: PRE + "/owner-mission.png" });
+log("4 owner milestone created in Octo:", created > 0, "|", missionName);
+await page.screenshot({ path: PRE + "/owner-milestone.png" });
 
 log("ERRORS:", errs.length ? errs.join(" | ") : "none");
 await browser.close();

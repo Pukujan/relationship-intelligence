@@ -3,10 +3,11 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { DataProvider, useData } from "@/data/store";
 import { OrchestratorProvider } from "@/components/copilot/OrchestratorProvider";
 import { AppShell } from "@/components/shell/AppShell";
+import { landingPath } from "@/lib/landing";
 import SignIn from "./pages/SignIn";
 import Index from "./pages/Index";
 import AgentDetail from "./pages/AgentDetail";
@@ -21,8 +22,8 @@ import CalendarPage from "./pages/Calendar";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import Objectives from "./pages/Objectives";
-import Missions from "./pages/Missions";
-import MissionDetail from "./pages/MissionDetail";
+import Milestones from "./pages/Milestones";
+import MilestoneDetail from "./pages/MilestoneDetail";
 import Plans from "./pages/Plans";
 import Files from "./pages/knowledge/Files";
 import Notes from "./pages/knowledge/Notes";
@@ -44,6 +45,18 @@ const RequireSession = ({ children }: { children: ReactNode }) => {
   return <>{children}</>;
 };
 
+/** The console root opens the session's first screen: the chat for owners (#96). */
+const Landing = () => {
+  const { session } = useData();
+  return <Navigate to={landingPath(session?.mode)} replace />;
+};
+
+/** Bookmarks from before the milestone rename keep working. */
+const LegacyMilestoneRedirect = () => {
+  const { missionId } = useParams();
+  return <Navigate to={`/milestones/${missionId ?? ""}`} replace />;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -61,7 +74,7 @@ const App = () => (
                   </RequireSession>
                 }
               >
-                <Route path="/" element={<Index />} />
+                <Route path="/" element={<Landing />} />
                 <Route path="/today" element={<Index />} />
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/agents/:agentId" element={<AgentDetail />} />
@@ -78,8 +91,10 @@ const App = () => (
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/projects/:projectId" element={<ProjectDetail />} />
                 <Route path="/objectives" element={<Objectives />} />
-                <Route path="/missions" element={<Missions />} />
-                <Route path="/missions/:missionId" element={<MissionDetail />} />
+                <Route path="/milestones" element={<Milestones />} />
+                <Route path="/milestones/:milestoneId" element={<MilestoneDetail />} />
+                <Route path="/missions" element={<Navigate to="/milestones" replace />} />
+                <Route path="/missions/:missionId" element={<LegacyMilestoneRedirect />} />
                 <Route path="/plans" element={<Plans />} />
                 <Route path="/knowledge/files" element={<Files />} />
                 <Route path="/knowledge/notes" element={<Notes />} />

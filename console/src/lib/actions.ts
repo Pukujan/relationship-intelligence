@@ -6,13 +6,25 @@
  *
  * Guards live here, not in prompts: navigation requires an explicit human
  * confirmation (`go`), citations must name a route we actually have, and
- * scope opens pin the research thread rather than leaking context.
+ * scope opens pin the research thread rather than leaking context, and a
+ * proposed schedule is only created when a human explicitly confirms it.
  */
 export type CopilotAction =
   | { kind: "navigate"; path: string; label: string; go?: boolean }
   | { kind: "cite"; path: string; anchor: string; heading: string; quote?: string }
   | { kind: "openScope"; scopeKind: "person" | "project" | "mission" | "event"; id: string; label: string }
+  | {
+      kind: "createSchedule";
+      prompt: string;
+      cadence: "daily" | "weekly" | "once";
+      scopeKind: "workspace" | "project" | "person";
+      scopeId?: string | null;
+      label: string;
+    }
   | { kind: "ask"; text: string };
+
+/** Cadences the schedules API accepts; anything else is not a real schedule. */
+export const SCHEDULE_CADENCES = ["daily", "weekly", "once"] as const;
 
 /** Routes the copilot may send a person to. Nothing outside this list. */
 export const KNOWN_ROUTE_PREFIXES = [
@@ -20,7 +32,7 @@ export const KNOWN_ROUTE_PREFIXES = [
   "/approvals",
   "/projects",
   "/objectives",
-  "/missions",
+  "/milestones",
   "/plans",
   "/people",
   "/events",
@@ -48,6 +60,14 @@ export const canExecute = (action: CopilotAction): boolean => {
       return isKnownRoute(action.path) && Boolean(action.anchor);
     case "openScope":
       return Boolean(action.id);
+    case "createSchedule":
+      return (
+        Boolean(action.prompt.trim()) &&
+        (SCHEDULE_CADENCES as readonly string[]).includes(action.cadence) &&
+        (action.scopeKind === "workspace" ||
+          ((action.scopeKind === "project" || action.scopeKind === "person") &&
+            Boolean(action.scopeId)))
+      );
     case "ask":
       return Boolean(action.text.trim());
   }
@@ -60,7 +80,7 @@ export const scopePath = (action: Extract<CopilotAction, { kind: "openScope" }>)
     case "project":
       return `/projects/${action.id}`;
     case "mission":
-      return `/missions/${action.id}`;
+      return `/milestones/${action.id}`;
     case "event":
       return `/events?focus=${action.id}`;
   }

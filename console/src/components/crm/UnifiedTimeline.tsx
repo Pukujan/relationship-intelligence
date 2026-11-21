@@ -6,7 +6,7 @@ import type { World } from "@/data/types";
 import type { PeekTarget } from "./Peek";
 
 /**
- * One timeline, many dated entities: mission.due, objective.dueDate,
+ * One timeline, many dated entities: milestone.due, objective.dueDate,
  * event.date, and approval.expiresAt (plus meeting notes, which the calendar
  * has always shown). The Calendar page and Today's next-7-days strip render
  * the same feed, so the two surfaces can never disagree about what lands when.
@@ -21,7 +21,7 @@ export interface TimelineItem {
   date: string;
   title: string;
   meta: string;
-  /** Missions only — drives the needs-you dot. */
+  /** Milestones only — drives the needs-you dot. */
   status?: string;
   /** Fallback navigation for kinds without a Peek (meeting notes). */
   href?: string;
@@ -46,7 +46,7 @@ export const peekTargetForItem = (item: TimelineItem): PeekTarget | null =>
   item.kind === "meeting" ? null : { kind: item.kind, id: item.id };
 
 interface CollectOptions {
-  /** "all" or a project id — missions/objectives/approvals follow the scope. */
+  /** "all" or a project id — milestones/objectives/approvals follow the scope. */
   projectId?: string;
   kinds?: TimelineKind[];
   from?: Date;
@@ -63,16 +63,16 @@ export const collectTimelineItems = (
   const items: TimelineItem[] = [];
 
   if (wanted("mission")) {
-    for (const mission of world.missions) {
-      if (!inScope(mission.projectId)) continue;
-      const parent = world.projects.find((item) => item.id === mission.projectId);
+    for (const milestone of world.milestones) {
+      if (!inScope(milestone.projectId)) continue;
+      const parent = world.projects.find((item) => item.id === milestone.projectId);
       items.push({
         kind: "mission",
-        id: mission.id,
-        date: mission.due,
-        title: mission.name,
-        meta: `${parent?.name ?? "Project"} · ${mission.status.replace("_", " ")}`,
-        status: mission.status,
+        id: milestone.id,
+        date: milestone.due,
+        title: milestone.name,
+        meta: `${parent?.name ?? "Project"} · ${milestone.status.replace("_", " ")}`,
+        status: milestone.status,
       });
     }
   }

@@ -303,7 +303,7 @@ const Files = () => {
               variant="outline"
               size="sm"
               className="h-9 gap-1.5 rounded-lg text-[12px]"
-              onClick={() => openCopilot("Summarise the Halcyon renewal plan")}
+              onClick={() => openCopilot("Summarise my files — what's recent, what's stale, and what's worth reading first?")}
             >
               <Sparkles className="h-3.5 w-3.5 text-primary" />
               Ask about a file

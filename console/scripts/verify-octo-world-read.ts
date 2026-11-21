@@ -36,7 +36,7 @@ console.log("companies:", world.companies.map((c) => c.name));
 console.log("sourced vs unverified claims:", world.people.flatMap((p) => p.claims).reduce((acc, c) => { acc[c.status] = (acc[c.status] ?? 0) + 1; return acc; }, {} as Record<string, number>));
 console.log("agents:", world.agents.map((a) => a.name));
 console.log("connectors:", world.connectors.length, "| plugins:", world.plugins.length, "| smartLists:", world.smartLists.length);
-console.log("work (should be empty until approved):", { projects: world.projects.length, missions: world.missions.length, approvals: world.approvals.length });
+console.log("work (should be empty until approved):", { projects: world.projects.length, milestones: world.milestones.length, approvals: world.approvals.length });
 console.log("events (none in ledger yet):", world.events.length);
 if (!world.people.some((p) => p.name === "Jane Doe")) {
   console.error("FAIL: canonical ledger people missing");

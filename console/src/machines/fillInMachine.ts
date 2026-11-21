@@ -1,5 +1,5 @@
 import { assign, setup } from "xstate";
-import type { DesignStep, MissionAutonomy, MissionDesign, MissionHorizon } from "@/data/types";
+import type { DesignStep, MilestoneAutonomy, MilestoneDesign, MilestoneHorizon } from "@/data/types";
 
 /**
  * RI-0010 fill-in machine (XState v5).
@@ -11,7 +11,7 @@ import type { DesignStep, MissionAutonomy, MissionDesign, MissionHorizon } from 
  * a stray event) can never push work through on its own.
  *
  * The emitted payload (`context.proposal`, also the machine output on `done`) is
- * a full `MissionDesign` — exactly the input shape of `designAsProposal(world,
+ * a full `MilestoneDesign` — exactly the input shape of `designAsProposal(world,
  * design)` in src/lib/intelligence.ts — so the inbox and the copilot share one
  * proposal contract. Defaults are conservative: autonomy "approve", and every
  * model-derived field stays flagged unverified until a human signs off.
@@ -27,15 +27,15 @@ export interface FillInQuestion {
 
 export interface FillInInput {
   /** Whatever the model produced; required fields may be absent. */
-  design: Partial<MissionDesign>;
+  design: Partial<MilestoneDesign>;
 }
 
 export interface FillInContext {
-  draft: Partial<MissionDesign>;
+  draft: Partial<MilestoneDesign>;
   questions: FillInQuestion[];
   /** Human gate: only an APPROVE event sets this true. */
   approved: boolean;
-  proposal: MissionDesign | null;
+  proposal: MilestoneDesign | null;
 }
 
 export type FillInEvent =
@@ -45,15 +45,15 @@ export type FillInEvent =
   | { type: "EDIT" }
   | { type: "APPLY" };
 
-const isComplete = (draft: Partial<MissionDesign>): boolean =>
+const isComplete = (draft: Partial<MilestoneDesign>): boolean =>
   Boolean(draft.missionName?.trim()) &&
   Boolean(draft.objectiveTarget?.trim()) &&
   Boolean(draft.due?.trim()) &&
   Boolean(draft.agentIds?.length);
 
-const questionsFor = (draft: Partial<MissionDesign>): FillInQuestion[] => {
+const questionsFor = (draft: Partial<MilestoneDesign>): FillInQuestion[] => {
   const questions: FillInQuestion[] = [];
-  if (!draft.missionName?.trim()) questions.push({ field: "missionName", question: "What should this mission be called?" });
+  if (!draft.missionName?.trim()) questions.push({ field: "missionName", question: "What should this milestone be called?" });
   if (!draft.objectiveTarget?.trim()) questions.push({ field: "objectiveTarget", question: "What outcome tells us the objective is met?" });
   if (!draft.due?.trim()) questions.push({ field: "due", question: "When is it due? (ISO date)" });
   if (!draft.agentIds?.length) questions.push({ field: "agentIds", question: "Which agents should own it?" });
@@ -61,21 +61,22 @@ const questionsFor = (draft: Partial<MissionDesign>): FillInQuestion[] => {
 };
 
 /**
- * Assemble a complete MissionDesign from the collected draft. Conservative
+ * Assemble a complete MilestoneDesign from the collected draft. Conservative
  * defaults keep the human gate intact (autonomy "approve") and keep model
  * output flagged unverified — unsourced claims never become canonical here.
  */
-export const toDesign = (draft: Partial<MissionDesign>): MissionDesign => {
+export const toDesign = (draft: Partial<MilestoneDesign>): MilestoneDesign => {
   const missionName = draft.missionName?.trim() ?? "";
   const planSteps: DesignStep[] = draft.planSteps ?? [];
-  const horizon: MissionHorizon = draft.horizon ?? "this_week";
-  const autonomy: MissionAutonomy = draft.autonomy ?? "approve";
+  const horizon: MilestoneHorizon = draft.horizon ?? "this_week";
+  const autonomy: MilestoneAutonomy = draft.autonomy ?? "approve";
   return {
     kind: draft.kind ?? "mission",
     missionName,
     missionSummary: draft.missionSummary ?? "",
     projectId: draft.projectId,
     projectName: draft.projectName,
+    projectMission: draft.projectMission,
     objectiveName: draft.objectiveName ?? missionName,
     objectiveTarget: draft.objectiveTarget?.trim() ?? "",
     objectiveId: draft.objectiveId,
@@ -86,7 +87,7 @@ export const toDesign = (draft: Partial<MissionDesign>): MissionDesign => {
     planSteps,
     rationale: draft.rationale ?? "Collected the missing required fields; nothing runs without your approval.",
     unverified: draft.unverified ?? ["Model-produced design — review before approving; not canonical until approved."],
-    missionId: draft.missionId,
+    milestoneId: draft.milestoneId,
     adjustment: draft.adjustment,
   };
 };
@@ -108,7 +109,7 @@ export const fillInMachine = setup({
   actions: {
     answer: assign(({ context, event }) => {
       const e = event as Extract<FillInEvent, { type: "ANSWER" }>;
-      const draft: Partial<MissionDesign> = { ...context.draft };
+      const draft: Partial<MilestoneDesign> = { ...context.draft };
       if (e.field === "agentIds") {
         draft.agentIds = Array.isArray(e.value) ? e.value : [e.value];
       } else {

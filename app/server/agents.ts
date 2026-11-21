@@ -8,7 +8,7 @@
  *  - Custom workspace agent creation (trigger cadence, autonomy zone, scoped
  *    connectors, plain-language instructions) stored in `ri_console.agent`.
  *  - Zone 3 Co-Design: mutable Draft Plans (`status: "draft"`) that materialize
- *    real Objective + Mission + Plan rows ONLY when the user explicitly clicks
+ *    real Objective + Milestone + Plan rows ONLY when the user explicitly clicks
  *    Lock (`POST /app-api/draft-plans/:id/lock`).
  *  - Every mutation logs an immutable `ri_console.ledger_event` with Phoenix
  *    OTLP `trace_id`.
@@ -343,7 +343,7 @@ export async function createDraftPlan(
 }
 
 /**
- * Explicitly lock a mutable Draft Plan into tracked Objective, Mission, and
+ * Explicitly lock a mutable Draft Plan into tracked Objective, Milestone, and
  * locked Plan rows (Zone 3 Co-Design -> Commit).
  */
 export async function lockDraftPlan(
@@ -448,9 +448,9 @@ export async function lockDraftPlan(
      VALUES (${lit(objectiveId)}, ${lit(workspaceId)}, ${lit(principalId)}, 'shared', ${lit(JSON.stringify(objectiveDoc))}::jsonb)`,
   );
 
-  const missionId = randomUUID();
-  const missionDoc = {
-    id: missionId,
+  const milestoneId = randomUUID();
+  const milestoneDoc = {
+    id: milestoneId,
     objectiveId,
     projectId,
     name: String(draft.title),
@@ -466,7 +466,7 @@ export async function lockDraftPlan(
     token,
     octoContainerId,
     `INSERT INTO ri_console.mission (id, workspace_id, principal_id, visibility, doc)
-     VALUES (${lit(missionId)}, ${lit(workspaceId)}, ${lit(principalId)}, 'shared', ${lit(JSON.stringify(missionDoc))}::jsonb)`,
+     VALUES (${lit(milestoneId)}, ${lit(workspaceId)}, ${lit(principalId)}, 'shared', ${lit(JSON.stringify(milestoneDoc))}::jsonb)`,
   );
 
   const lockedDoc = {
@@ -474,7 +474,8 @@ export async function lockDraftPlan(
     status: "locked",
     projectId,
     objectiveId,
-    missionId,
+    // Persisted doc key stays `missionId` (canonical Octo schema).
+    missionId: milestoneId,
     lockedAt: nowIso,
     lockedBy: principalId,
     traceId: span.traceId,
@@ -500,13 +501,13 @@ export async function lockDraftPlan(
     payload: {
       projectId,
       objectiveId,
-      missionId,
+      missionId: milestoneId,
       title: String(draft.title),
     },
   });
   await endSpan(span, "OK", {
     "ri.project_id": projectId,
-    "ri.mission_id": missionId,
+    "ri.mission_id": milestoneId,
   });
 
   return {
@@ -517,7 +518,7 @@ export async function lockDraftPlan(
       draftPlan: lockedDoc,
       projectId,
       objectiveId,
-      missionId,
+      milestoneId,
       traceId: span.traceId,
     },
   };

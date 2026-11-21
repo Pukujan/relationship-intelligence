@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight, CalendarDays, Columns2, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  missionsForProject,
+  milestonesForProject,
   objectivesForProject,
   personById,
   projectProgress,
@@ -37,8 +37,8 @@ import type { PeekTarget } from "./Peek";
  */
 
 const nextDeadline = (world: World, project: Project) => {
-  const open = missionsForProject(world, project.id).filter(
-    (mission) => mission.status !== "done",
+  const open = milestonesForProject(world, project.id).filter(
+    (milestone) => milestone.status !== "done",
   );
   const first = open[0];
   if (first) return { date: first.due, label: first.name, overdue: new Date(first.due).getTime() < Date.now() };
@@ -87,7 +87,7 @@ const CompareBrief = ({
   onRemove: () => void;
 }) => {
   const objectives = objectivesForProject(world, project.id);
-  const missions = missionsForProject(world, project.id);
+  const milestones = milestonesForProject(world, project.id);
   const progress = projectProgress(world, project.id);
   const rollup = rollupForProject(world, project.id);
   const next = nextDeadline(world, project);
@@ -138,7 +138,7 @@ const CompareBrief = ({
         ) : null}
       </div>
       <p className="mt-auto text-[10px] text-muted-foreground">
-        {objectives.length} objectives · {missions.length} missions ·{" "}
+        {objectives.length} objectives · {milestones.length} milestones ·{" "}
         {project.personIds.length} people referenced
       </p>
     </div>

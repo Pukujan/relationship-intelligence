@@ -18,6 +18,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { completeFileDoc, completeNoteDoc } from "./knowledgeShape.js";
 import type { OctoClientConfig } from "./octo.js";
 import { OctoError } from "./octo.js";
 import { octoSql } from "./world.js";
@@ -114,6 +115,83 @@ const LinkEntityKindSchema = z.enum([
   "event",
   "mission",
 ]);
+
+const FileLinkOutSchema = z.object({
+  id: z.string().max(60),
+  fileId: z.string().max(60),
+  entityKind: LinkEntityKindSchema,
+  entityId: z.string().max(120),
+  principalId: z.string().max(60),
+});
+
+/**
+ * The response contracts the console parses (console/src/data/profileTypes.ts).
+ * Rows are checked one at a time so a single bad row is dropped and counted
+ * instead of failing the whole page with a zod issue list.
+ */
+const ProfileFileOutSchema = z.object({
+  id: z.string().max(60),
+  folderId: z.string().max(60),
+  name: z.string().max(200),
+  kind: DocKindSchema,
+  size: z.string().max(40),
+  updatedAt: z.string().max(40),
+  owner: z.string().max(120),
+  summary: z.string().max(500),
+  personIds: z.array(z.string().max(60)).max(24),
+  projectId: z.string().max(60).optional(),
+  octoFileId: z.string().max(120).optional(),
+  // Ownership and links ride on the row; keep them through validation.
+  principalId: z.string().max(60),
+  visibility: FileVisibilitySchema,
+  links: z.array(FileLinkOutSchema).max(48),
+});
+
+const NoteOutSchema = z.object({
+  id: z.string().max(60),
+  title: z.string().max(200),
+  kind: z.enum(["note", "meeting"]),
+  at: z.string().max(40),
+  body: z.string().max(20_000),
+  personIds: z.array(z.string().max(60)).max(24),
+  projectId: z.string().max(60).optional(),
+  eventId: z.string().max(60).optional(),
+  agentId: z.string().max(60).optional(),
+});
+
+interface DroppedRow {
+  id: string;
+  reason: string;
+}
+
+/** Keeps the valid rows, reports what was skipped and why. */
+function parseRows<T>(
+  rows: { value: Json; id: string }[],
+  schema: z.ZodType<T>,
+): { rows: T[]; dropped: DroppedRow[] } {
+  const kept: T[] = [];
+  const dropped: DroppedRow[] = [];
+  for (const row of rows) {
+    const parsed = schema.safeParse(row.value);
+    if (parsed.success) {
+      kept.push(parsed.data);
+      continue;
+    }
+    dropped.push({
+      id: row.id,
+      reason: parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "(row)"}: ${issue.message}`)
+        .join("; "),
+    });
+  }
+  if (dropped.length > 0) {
+    console.error(
+      "profile route skipped malformed rows:",
+      dropped.map((row) => `${row.id} (${row.reason})`).join(" | "),
+    );
+  }
+  return { rows: kept, dropped };
+}
 
 const NewFileSchema = z.object({
   name: z.string().min(1).max(200),
@@ -445,29 +523,44 @@ async function readFiles(
   const linksByFile = new Map<string, Json[]>();
   for (const row of linkRows) {
     const fileId = String(row.file_id);
-    const link: Json = {
+    // A malformed link must not take its file down: skip it, keep the file.
+    const link = FileLinkOutSchema.safeParse({
       id: String(row.id),
       fileId,
       entityKind: String(row.entity_kind),
       entityId: String(row.entity_id),
       principalId: String(row.principal_id),
-    };
-    linksByFile.set(fileId, [...(linksByFile.get(fileId) ?? []), link]);
+    });
+    if (link.success) {
+      linksByFile.set(fileId, [
+        ...(linksByFile.get(fileId) ?? []),
+        link.data as Json,
+      ]);
+    }
   }
-  const files = fileRows.map((row) => {
-    const doc = (row.doc ?? {}) as Json;
-    return {
-      ...doc,
-      principalId: String(row.principal_id ?? ""),
-      visibility: String(row.visibility ?? "private"),
-      // Links only ride along on files the caller may see (filter above).
-      links: linksByFile.get(String(doc.id)) ?? [],
-    };
-  });
+  const { rows: files, dropped } = parseRows(
+    fileRows.map((row) => {
+      const doc = (row.doc ?? {}) as Json;
+      return {
+        id: String(doc.id ?? ""),
+        // Connector imports arrive with the connector's keys, not the console
+        // contract; fill the gaps before the page's zod parse (knowledgeShape.ts).
+        value: {
+          ...completeFileDoc(doc, ctx.principal.displayName),
+          principalId: String(row.principal_id ?? ""),
+          visibility: String(row.visibility ?? "private"),
+          // Links only ride along on files the caller may see (filter above).
+          links: linksByFile.get(String(doc.id)) ?? [],
+        } as Json,
+      };
+    }),
+    ProfileFileOutSchema,
+  );
   return {
     scope,
     folders: folderRows.map((row) => row.doc as Json),
     files,
+    ...(dropped.length > 0 ? { dropped } : {}),
   };
 }
 
@@ -588,7 +681,17 @@ async function readNotes(ctx: ProfileRouteContext): Promise<Json[]> {
     ctx.octoContainerId,
     `SELECT doc FROM ri_console.note WHERE ${owns(ctx)} ORDER BY updated_at DESC`,
   );
-  return rows.map((row) => row.doc as Json);
+  const { rows: notes } = parseRows(
+    rows.map((row) => {
+      const doc = (row.doc ?? {}) as Json;
+      return {
+        id: String(doc.id ?? ""),
+        value: completeNoteDoc(doc) as Json,
+      };
+    }),
+    NoteOutSchema,
+  );
+  return notes;
 }
 
 async function createNote(ctx: ProfileRouteContext, body: Json): Promise<Json> {

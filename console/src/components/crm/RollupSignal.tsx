@@ -2,11 +2,11 @@ import { AlertTriangle, CircleCheck, Clock, Snowflake } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   goingCold,
-  missionsForProject,
+  milestonesForProject,
   pendingApprovals,
 } from "@/data/derive";
-import { stalledMissions } from "@/lib/intelligence";
-import type { Mission, World } from "@/data/types";
+import { stalledMilestones } from "@/lib/intelligence";
+import type { Milestone, World } from "@/data/types";
 
 /**
  * Worst-child rollup: a project or objective row carries the most urgent
@@ -52,27 +52,27 @@ const rollupMeta: Record<
 };
 
 /**
- * The worst signal across a set of missions and the people they reference.
+ * The worst signal across a set of milestones and the people they reference.
  * Shared by project and objective rollups so both levels read identically.
  */
 export const rollupFor = (
   world: World,
-  missions: Mission[],
+  milestones: Milestone[],
   personIds: string[],
 ): Rollup | null => {
-  if (!missions.length && !personIds.length) return null;
-  const missionIds = new Set(missions.map((mission) => mission.id));
-  const agentIds = new Set(missions.flatMap((mission) => mission.agentIds));
+  if (!milestones.length && !personIds.length) return null;
+  const milestoneIds = new Set(milestones.map((milestone) => milestone.id));
+  const agentIds = new Set(milestones.flatMap((milestone) => milestone.agentIds));
 
-  // needs-you: pending decisions from these agents, plus blocked missions
+  // needs-you: pending decisions from these agents, plus blocked milestones
   // that have no open approval (the block itself needs a decision).
   const waiting = pendingApprovals(world).filter((approval) =>
     agentIds.has(approval.agentId),
   );
-  const blocked = missions.filter((mission) => mission.status === "blocked");
+  const blocked = milestones.filter((milestone) => milestone.status === "blocked");
   const blockedWithoutApproval = blocked.filter(
-    (mission) =>
-      !waiting.some((approval) => mission.agentIds.includes(approval.agentId)),
+    (milestone) =>
+      !waiting.some((approval) => milestone.agentIds.includes(approval.agentId)),
   );
   const needsCount = waiting.length + blockedWithoutApproval.length;
   if (needsCount > 0) {
@@ -88,8 +88,8 @@ export const rollupFor = (
     };
   }
 
-  const stalls = stalledMissions(world).filter((stall) =>
-    missionIds.has(stall.mission.id),
+  const stalls = stalledMilestones(world).filter((stall) =>
+    milestoneIds.has(stall.milestone.id),
   );
   const overdue = stalls.filter((stall) => stall.reason === "overdue");
   if (overdue.length) {
@@ -127,17 +127,17 @@ export const rollupFor = (
 export const rollupForProject = (world: World, projectId: string): Rollup | null => {
   const project = world.projects.find((item) => item.id === projectId);
   if (!project) return null;
-  return rollupFor(world, missionsForProject(world, projectId), project.personIds);
+  return rollupFor(world, milestonesForProject(world, projectId), project.personIds);
 };
 
 export const rollupForObjective = (world: World, objectiveId: string): Rollup | null => {
   const objective = world.objectives.find((item) => item.id === objectiveId);
   if (!objective) return null;
-  const missions = world.missions.filter(
-    (mission) => mission.objectiveId === objectiveId,
+  const milestones = world.milestones.filter(
+    (milestone) => milestone.objectiveId === objectiveId,
   );
-  const personIds = [...new Set(missions.flatMap((mission) => mission.personIds))];
-  return rollupFor(world, missions, personIds);
+  const personIds = [...new Set(milestones.flatMap((milestone) => milestone.personIds))];
+  return rollupFor(world, milestones, personIds);
 };
 
 /** The worst-child chip. `null` renders a quiet "Clear" so rows stay scannable. */

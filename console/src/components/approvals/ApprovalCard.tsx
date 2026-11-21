@@ -23,7 +23,7 @@ const SWIPE_THRESHOLD = 110;
 const DECLINE_LABELS: Record<DeclinePath, { label: string; consequence: string }> = {
   stop: {
     label: "Stop",
-    consequence: "Stops this thread cleanly — no mission or follow-up created.",
+    consequence: "Stops this thread cleanly — no milestone or follow-up created.",
   },
   re_plan: {
     label: "Re-plan",

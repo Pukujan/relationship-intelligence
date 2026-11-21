@@ -56,7 +56,7 @@ export const AgentCard = ({ agent, world }: { agent: Agent; world: World }) => {
           ) : null}
         </div>
         <p className="mt-1 line-clamp-2 min-h-[32px] text-[12.5px] leading-snug text-foreground/90">
-          {agent.currentTask?.title ?? "No task running — waiting for a mission."}
+          {agent.currentTask?.title ?? "No task running — waiting for a milestone."}
         </p>
         {agent.currentTask ? (
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-surface-3">
