@@ -258,6 +258,29 @@ Blocked/uncertain:
 Next:
 - Open the pull request for #96 and let CI run; after merge, the owner signs in on the deployed console and should land on the chat.
 
+### 2026-11-21 02:21:15 UTC — agent:claude-code/b8230d8e-5287-4bb1-afbc-6196712a0498
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/b8230d8e-5287-4bb1-afbc-6196712a0498","blocked":["Whether to pause the owner's four agents is decision 1 in #98 and stays with the owner. Pause was not exercised against production."],"changed":["app/server/agentShape.ts adds isAgentPaused and agentStatusPatch; app/server/adapter.ts writes the pause flag and refuses unknown statuses; app/server/executor.ts checks pause at queue, start and save and merges its own fields; console run outcomes gain skipped (types, derive, AgentDetail); tests in app/tests/executor.test.ts, executorMetamorphic.test.ts and executorHarness.ts"],"completed":["Pause in the console now stops the agent runner (#101). Pause writes paused: true with the paused status and Resume clears both; one check, isAgentPaused, counts either field, so rows paused the old way stay paused. The runner checks it when it queues a run, before it calls the model and before it saves what the model returned, and a skipped run leaves a receipt that says the agent was paused."],"decisions":["paused: true is the stored record of a pause because status is also the runner's live state, which is how a run erased a pause. The runner merges only its own fields into an agent row and no longer creates a row for an agent that has none. Scheduled research runs as Atlas, so it is skipped while Atlas is paused; pausing the schedule still stops it for good."],"evidence":["Twelve new executor tests cover both pause shapes: never queued, a run queued before the pause is closed without a model call, a pause during the model call saves nothing, a pause landing at the final write or while runs are queued survives, a full tick runs only the unpaused agent, and scheduled research is skipped while Atlas is paused. A new metamorphic property (MR-E6) checks over random agents and answers that both shapes give the same empty result. Undoing each check in turn makes its tests fail. App types, lint, 116 tests and build pass; console typecheck, lint (0 errors), machine tests, orphan check and build pass; planning and continuity validation pass. Checked against the mock Octo only: no production agent row was read or changed."],"next_action":"Open the pull request for #101 and let CI run; after it deploys, Pause on the Agents page should hold through the runner's next tick.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T02:21:15Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"d58f52177c94841f19d146741922610a0449c9d79dec544c22e02fa9094bd44a","request_id":"d92082dc27ab41a58a51cfefb7601438","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- Pause in the console now stops the agent runner (#101). Pause writes paused: true with the paused status and Resume clears both; one check, isAgentPaused, counts either field, so rows paused the old way stay paused. The runner checks it when it queues a run, before it calls the model and before it saves what the model returned, and a skipped run leaves a receipt that says the agent was paused.
+
+Evidence:
+- Twelve new executor tests cover both pause shapes: never queued, a run queued before the pause is closed without a model call, a pause during the model call saves nothing, a pause landing at the final write or while runs are queued survives, a full tick runs only the unpaused agent, and scheduled research is skipped while Atlas is paused. A new metamorphic property (MR-E6) checks over random agents and answers that both shapes give the same empty result. Undoing each check in turn makes its tests fail. App types, lint, 116 tests and build pass; console typecheck, lint (0 errors), machine tests, orphan check and build pass; planning and continuity validation pass. Checked against the mock Octo only: no production agent row was read or changed.
+
+Decisions:
+- paused: true is the stored record of a pause because status is also the runner's live state, which is how a run erased a pause. The runner merges only its own fields into an agent row and no longer creates a row for an agent that has none. Scheduled research runs as Atlas, so it is skipped while Atlas is paused; pausing the schedule still stops it for good.
+
+Changed:
+- app/server/agentShape.ts adds isAgentPaused and agentStatusPatch; app/server/adapter.ts writes the pause flag and refuses unknown statuses; app/server/executor.ts checks pause at queue, start and save and merges its own fields; console run outcomes gain skipped (types, derive, AgentDetail); tests in app/tests/executor.test.ts, executorMetamorphic.test.ts and executorHarness.ts
+
+Blocked/uncertain:
+- Whether to pause the owner's four agents is decision 1 in #98 and stays with the owner. Pause was not exercised against production.
+
+Next:
+- Open the pull request for #101 and let CI run; after it deploys, Pause on the Agents page should hold through the runner's next tick.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
