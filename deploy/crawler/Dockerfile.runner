@@ -1,0 +1,17 @@
+# The slow LinkedIn crawler runner (collector/src/crawl.ts) for octo-vps.
+# It never launches a browser: it attaches over CDP to the Chromium container
+# that shares its network, so no browser is downloaded here.
+FROM node:24-alpine
+RUN corepack enable && corepack prepare pnpm@12.14.0 --activate
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PATCHRIGHT_SKIP_BROWSER_DOWNLOAD=1
+WORKDIR /collector
+COPY collector/package.json collector/pnpm-lock.yaml collector/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --config.strict-dep-builds=false
+COPY collector/tsconfig.json ./
+COPY collector/src ./src
+COPY deploy/crawler/run-hourly.sh /usr/local/bin/run-hourly.sh
+RUN chmod +x /usr/local/bin/run-hourly.sh && mkdir -p /data && chown node:node /data
+ENV RI_PROOF_ROOT=/data
+USER node
+CMD ["/usr/local/bin/run-hourly.sh"]
