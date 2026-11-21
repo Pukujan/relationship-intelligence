@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Env } from "./env.js";
 import { type OctoClientConfig, OctoError } from "./octo.js";
+import { lit } from "./sql.js";
 import { appendLedgerEvent, endSpan, startSpan } from "./telemetry.js";
 import { normalizeRole, type WorkspaceRole } from "./tenancy.js";
 import { octoSql } from "./world.js";
@@ -37,8 +38,6 @@ const CONSOLE_TABLES = [
   "retrospective",
   "smart_list",
 ] as const;
-
-const lit = (value: unknown) => `'${String(value).replace(/'/g, "''")}'`;
 
 const slugify = (name: string) =>
   name
@@ -148,6 +147,40 @@ export const RI_CONSOLE_DDL: string[] = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS connector_route_principal ON ri_console.connector_route (principal_id, provider)`,
+  `CREATE TABLE IF NOT EXISTS ri_console.runner_pairing (
+    id TEXT PRIMARY KEY,
+    principal_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS runner_pairing_code ON ri_console.runner_pairing (code_hash)`,
+  `CREATE TABLE IF NOT EXISTS ri_console.user_runner (
+    id TEXT PRIMARY KEY,
+    principal_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    device_label TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    pairing_status TEXT NOT NULL DEFAULT 'paired' CHECK (pairing_status IN ('paired','revoked')),
+    last_seen_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS user_runner_token ON ri_console.user_runner (token_hash)`,
+  `CREATE TABLE IF NOT EXISTS ri_console.runner_consent (
+    principal_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    granted_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    PRIMARY KEY (principal_id, provider)
+  )`,
+  `UPDATE ri_console.activity
+      SET id = 'sync-' || principal_id || '-' || substring(id from 6)
+    WHERE id LIKE 'sync-%' AND principal_id IS NOT NULL
+      AND id NOT LIKE ('sync-' || principal_id || '-%')`,
   ...CONSOLE_TABLES.map(
     (table) => `CREATE TABLE IF NOT EXISTS ri_console.${table} (
       id TEXT PRIMARY KEY,
@@ -268,9 +301,9 @@ export async function ensureAppWorkspaceTables(
     config,
     token,
     octoContainerId,
-    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'ri_console' AND table_name IN ('workspace', 'workspace_member', 'ledger_event', 'user_connector', 'connector_route')",
+    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'ri_console' AND table_name IN ('workspace', 'workspace_member', 'ledger_event', 'user_connector', 'connector_route', 'runner_pairing', 'user_runner', 'runner_consent')",
   );
-  if (existing.length < 5) {
+  if (existing.length < 8) {
     await provisionWorkspace(config, token, octoContainerId);
   }
 }

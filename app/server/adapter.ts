@@ -24,7 +24,6 @@ import {
 } from "./agents.js";
 import {
   buildGoogleConnectorAuthUrl,
-  buildZoomConnectorAuthUrl,
   type ConnectorProviderId,
   createConnectorRoute,
   deleteConnectorRoute,
@@ -33,10 +32,20 @@ import {
 } from "./connectors.js";
 import { proxyCopilot } from "./copilotProxy.js";
 import { type Env, readEnv } from "./env.js";
+import {
+  buildProviderAuthUrl,
+  exchangeProviderCode,
+  fetchProviderIdentity,
+  ProviderOAuthError,
+  type ProviderOAuthId,
+} from "./oauthProviders.js";
 import { fetchPrincipal, OctoError } from "./octo.js";
 import { handleProfileRoutes } from "./profile.js";
+import { handleRunnerRoutes } from "./runners.js";
 import { handleScheduleRoutes } from "./schedules.js";
 import {
+  beginOauthState,
+  consumeOauthState,
   isIdleExpired,
   newOauthState,
   readSession,
@@ -50,6 +59,7 @@ import {
   listConversations,
   patchConversation,
 } from "./sessions.js";
+import { lit } from "./sql.js";
 import { syncUserConnector } from "./sync.js";
 import {
   requireRole,
@@ -76,7 +86,6 @@ import {
 } from "./world.js";
 
 const MAX_BODY_BYTES = 8 * 1024;
-const lit = (value: unknown) => `'${String(value).replace(/'/g, "''")}'`;
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -126,6 +135,9 @@ export async function handleRequest(
     sendJson(res, 200, { status: "ok" });
     return;
   }
+
+  // RI-0021: local runner daemon contract (device + session routes).
+  if (await handleRunnerRoutes(req, res, url, env)) return;
 
   // The copilot server's routes. It has no sign-in of its own, so the proxy
   // forwards only for a signed-in session (see copilotProxy.ts).
@@ -290,8 +302,7 @@ export async function handleRequest(
       redirect(res, `${env.APP_ORIGIN}/console/signin`);
       return;
     }
-    const state = newOauthState();
-    session.connectorOauthState = state;
+    const state = beginOauthState(session, provider);
     session.connectorProvider = provider;
     await session.save();
     const authUrl = buildGoogleConnectorAuthUrl(env, provider, state);
@@ -314,10 +325,12 @@ export async function handleRequest(
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const provider = session.connectorProvider;
+    const gEntry = session.connectorOauthStates?.[String(provider)];
     if (
       !code ||
       !state ||
-      state !== session.connectorOauthState ||
+      !gEntry ||
+      gEntry.state !== state ||
       (provider !== "gmail" && provider !== "gcal" && provider !== "gdrive") ||
       !env.GOOGLE_CLIENT_ID ||
       !env.GOOGLE_CLIENT_SECRET
@@ -385,6 +398,8 @@ export async function handleRequest(
             : null,
         },
       );
+      consumeOauthState(session, String(provider), state);
+      await session.save();
       redirect(
         res,
         `${env.APP_ORIGIN}/console/integrations/connectors?connected=${provider}`,
@@ -402,73 +417,59 @@ export async function handleRequest(
     return;
   }
 
-  // Zoom OAuth 2.0 for user-level meetings & recordings
-  if (path === "/app-api/connectors/oauth/zoom/start" && req.method === "GET") {
+  // Provider OAuth for Slack / Calendly / Discord / Zoom (RI-0021, replaces
+  // the dedicated zoom handlers; redirect_uri strings unchanged).
+  const oauthStartMatch =
+    /^\/app-api\/connectors\/oauth\/(slack|calendly|discord|zoom)\/start$/.exec(
+      path,
+    );
+  const oauthCallbackMatch =
+    /^\/app-api\/connectors\/oauth\/(slack|calendly|discord|zoom)\/callback$/.exec(
+      path,
+    );
+  if (oauthStartMatch && req.method === "GET") {
+    const provider = oauthStartMatch[1] as ProviderOAuthId;
     const session = await readSession(req, res, env);
-    if (!session.octoToken && !session.principalId) {
+    if (
+      (!session.octoToken && !session.principalId) ||
+      isIdleExpired(session)
+    ) {
       redirect(res, `${env.APP_ORIGIN}/console/signin`);
       return;
     }
-    const state = newOauthState();
-    session.connectorOauthState = state;
-    session.connectorProvider = "zoom";
+    const state = beginOauthState(session, provider);
     await session.save();
-    const authUrl = buildZoomConnectorAuthUrl(env, state);
+    const authUrl = buildProviderAuthUrl(env, provider, state);
     if (!authUrl) {
       redirect(
         res,
-        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=ZOOM_NOT_CONFIGURED`,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=NOT_CONFIGURED`,
       );
       return;
     }
     redirect(res, authUrl);
     return;
   }
-
-  if (
-    path === "/app-api/connectors/oauth/zoom/callback" &&
-    req.method === "GET"
-  ) {
+  if (oauthCallbackMatch && req.method === "GET") {
+    const provider = oauthCallbackMatch[1] as ProviderOAuthId;
     const session = await readSession(req, res, env);
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
-    if (
-      !code ||
-      !state ||
-      state !== session.connectorOauthState ||
-      !env.ZOOM_CLIENT_ID ||
-      !env.ZOOM_CLIENT_SECRET
-    ) {
+    const entry = session.connectorOauthStates?.[provider];
+    if (!code || !state || !entry || entry.state !== state) {
       redirect(
         res,
-        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=ZOOM_STATE_MISMATCH`,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=STATE_MISMATCH`,
       );
       return;
     }
     try {
-      const basic = Buffer.from(
-        `${env.ZOOM_CLIENT_ID}:${env.ZOOM_CLIENT_SECRET}`,
-      ).toString("base64");
-      const tokenRes = await fetch("https://zoom.us/oauth/token", {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${basic}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code,
-          redirect_uri: `${env.APP_ORIGIN}/app-api/connectors/oauth/zoom/callback`,
-        }),
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!tokenRes.ok) throw new Error(`zoom token ${tokenRes.status}`);
-      const tokens = (await tokenRes.json()) as {
-        access_token?: string;
-        refresh_token?: string;
-        expires_in?: number;
-        scope?: string;
-      };
+      const tokens = await exchangeProviderCode(env, provider, code);
+      const identity = await fetchProviderIdentity(
+        env,
+        provider,
+        tokens.accessToken,
+      );
       const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 20_000 };
       const tenancy = await resolveTenancy(req, res, env, config);
       if (!tenancy.ok) {
@@ -482,29 +483,28 @@ export async function handleRequest(
         tenancy.workspace.id,
         tenancy.principal.id,
         {
-          provider: "zoom",
+          provider,
           status: "connected",
-          accountEmail: tenancy.principal.email || null,
-          scopes: tokens.scope ? tokens.scope.split(/\s+/) : undefined,
-          accessToken: tokens.access_token ?? null,
-          refreshToken: tokens.refresh_token ?? null,
-          expiresAt: tokens.expires_in
-            ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
-            : null,
+          accountEmail: identity.email ?? (tenancy.principal.email || null),
+          scopes: tokens.scopes.length ? tokens.scopes : undefined,
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresAt: tokens.expiresAt,
         },
       );
+      consumeOauthState(session, provider, state);
+      await session.save();
       redirect(
         res,
-        `${env.APP_ORIGIN}/console/integrations/connectors?connected=zoom`,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connected=${provider}`,
       );
     } catch (error) {
-      console.error(
-        "zoom connector callback failed:",
-        error instanceof Error ? error.message : "unknown",
-      );
+      const codeEnum =
+        error instanceof ProviderOAuthError ? error.code : "EXCHANGE_FAILED";
+      console.error(`connector callback failed: ${provider} ${codeEnum}`);
       redirect(
         res,
-        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=ZOOM_EXCHANGE_FAILED`,
+        `${env.APP_ORIGIN}/console/integrations/connectors?connector_error=${codeEnum}`,
       );
     }
     return;
@@ -874,6 +874,7 @@ export async function handleRequest(
           token,
           octoWorkspaceId,
           principal.id,
+          workspaces.map((w) => w.id),
           body,
         );
         sendJson(res, result.status, result.body);
@@ -930,6 +931,7 @@ export async function handleRequest(
               status: "needs_setup",
               accessToken: null,
               refreshToken: null,
+              clearTokens: true,
             },
           ),
         );

@@ -12,12 +12,12 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Env } from "./env.js";
+import { type ProviderOAuthId, providerCreds } from "./oauthProviders.js";
 import type { OctoClientConfig } from "./octo.js";
+import { lit } from "./sql.js";
 import { appendLedgerEvent, endSpan, startSpan } from "./telemetry.js";
 import { ensureAppWorkspaceTables } from "./workspaces.js";
 import { octoSql } from "./world.js";
-
-const lit = (value: unknown) => `'${String(value).replace(/'/g, "''")}'`;
 
 export type ConnectorProviderId =
   | "gmail"
@@ -36,7 +36,7 @@ export interface ConnectorCatalogItem {
   provider: ConnectorProviderId;
   name: string;
   category: "google" | "meetings" | "messaging" | "network" | "voice";
-  authKind: "google_oauth" | "zoom_oauth" | "oauth_soon" | "local_runner";
+  authKind: "google_oauth" | "zoom_oauth" | "provider_oauth" | "local_runner";
   scopes: string[];
   description: string;
 }
@@ -82,7 +82,7 @@ export const CONNECTOR_CATALOG: ConnectorCatalogItem[] = [
     provider: "calendly",
     name: "Calendly",
     category: "meetings",
-    authKind: "oauth_soon",
+    authKind: "provider_oauth",
     scopes: ["scheduled_events:read"],
     description:
       "Pull newly booked intro calls into your daily brief and contact graph.",
@@ -109,7 +109,7 @@ export const CONNECTOR_CATALOG: ConnectorCatalogItem[] = [
     provider: "slack",
     name: "Slack",
     category: "messaging",
-    authKind: "oauth_soon",
+    authKind: "provider_oauth",
     scopes: ["channels:history", "users:read"],
     description:
       "Route team channel updates and partner mentions into workspace projects.",
@@ -118,7 +118,7 @@ export const CONNECTOR_CATALOG: ConnectorCatalogItem[] = [
     provider: "discord",
     name: "Discord",
     category: "messaging",
-    authKind: "oauth_soon",
+    authKind: "provider_oauth",
     scopes: ["messages:read"],
     description:
       "Track hackathon and community threads alongside your project goals.",
@@ -155,6 +155,9 @@ export interface UserConnectorView {
   scopes: string[];
   description: string;
   lastSync: string | null;
+  /** local_runner only (RI-0021). */
+  runnerStatus: "unpaired" | "online" | "offline" | null;
+  consentedScopes: string[] | null;
 }
 
 export interface ConnectorRouteRecord {
@@ -194,22 +197,6 @@ export function buildGoogleConnectorAuthUrl(
   url.searchParams.set("prompt", "consent");
   url.searchParams.set("include_granted_scopes", "true");
   url.searchParams.set("scope", ["openid email", ...item.scopes].join(" "));
-  url.searchParams.set("state", state);
-  return url.toString();
-}
-
-export function buildZoomConnectorAuthUrl(
-  env: Env,
-  state: string,
-): string | null {
-  if (!env.ZOOM_CLIENT_ID || !env.ZOOM_CLIENT_SECRET) return null;
-  const url = new URL("https://zoom.us/oauth/authorize");
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", env.ZOOM_CLIENT_ID);
-  url.searchParams.set(
-    "redirect_uri",
-    `${env.APP_ORIGIN}/app-api/connectors/oauth/zoom/callback`,
-  );
   url.searchParams.set("state", state);
   return url.toString();
 }
@@ -255,6 +242,43 @@ export async function listUserConnectors(
 
   const googleReady = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
   const zoomReady = Boolean(env.ZOOM_CLIENT_ID && env.ZOOM_CLIENT_SECRET);
+  let runnerRows: Record<string, unknown>[] = [];
+  let consentRows: Record<string, unknown>[] = [];
+  try {
+    [runnerRows, consentRows] = await Promise.all([
+      octoSql(
+        config,
+        token,
+        octoContainerId,
+        `SELECT id, last_seen_at FROM ri_console.user_runner WHERE principal_id = ${lit(principalId)} AND pairing_status = 'paired'`,
+      ),
+      octoSql(
+        config,
+        token,
+        octoContainerId,
+        `SELECT provider, scopes, revoked_at FROM ri_console.runner_consent WHERE principal_id = ${lit(principalId)}`,
+      ),
+    ]);
+  } catch {
+    // runner tables not provisioned yet
+  }
+  const windowMs =
+    process.env.NODE_ENV === "production"
+      ? 90_000
+      : env.RI_RUNNER_ONLINE_WINDOW_MS;
+  const runnerOnline = runnerRows.some(
+    (r) => Date.now() - Date.parse(String(r.last_seen_at)) <= windowMs,
+  );
+  const runnerStatus: "unpaired" | "online" | "offline" =
+    runnerRows.length === 0 ? "unpaired" : runnerOnline ? "online" : "offline";
+  const consentByProvider = new Map<string, string[]>(
+    consentRows
+      .filter((c) => c.revoked_at === null)
+      .map((c) => [
+        String(c.provider),
+        Array.isArray(c.scopes) ? (c.scopes as string[]) : [],
+      ]),
+  );
 
   const connectors: UserConnectorView[] = CONNECTOR_CATALOG.map((item) => {
     const saved = byProvider.get(item.provider);
@@ -263,12 +287,16 @@ export async function listUserConnectors(
         ? googleReady
         : item.authKind === "zoom_oauth"
           ? zoomReady
-          : false;
+          : item.authKind === "provider_oauth"
+            ? Boolean(providerCreds(env, item.provider as ProviderOAuthId))
+            : false;
     const connectUrl =
       item.authKind === "google_oauth" && googleReady
         ? `/app-api/connectors/oauth/google/start?provider=${item.provider}`
-        : item.authKind === "zoom_oauth" && zoomReady
-          ? "/app-api/connectors/oauth/zoom/start"
+        : (item.authKind === "zoom_oauth" ||
+              item.authKind === "provider_oauth") &&
+            oauthConfigured
+          ? `/app-api/connectors/oauth/${item.provider}/start`
           : null;
     const statusRaw = String(saved?.status ?? "needs_setup");
     const status: UserConnectorView["status"] =
@@ -290,6 +318,11 @@ export async function listUserConnectors(
         : item.scopes,
       description: item.description,
       lastSync: typeof saved?.last_sync === "string" ? saved.last_sync : null,
+      runnerStatus: item.authKind === "local_runner" ? runnerStatus : null,
+      consentedScopes:
+        item.authKind === "local_runner"
+          ? (consentByProvider.get(item.provider) ?? [])
+          : null,
     };
   });
 
@@ -324,6 +357,7 @@ export async function saveUserConnector(
     accessToken?: string | null | undefined;
     refreshToken?: string | null | undefined;
     expiresAt?: string | null | undefined;
+    clearTokens?: boolean;
   },
 ): Promise<{ ok: true; provider: ConnectorProviderId; status: string }> {
   await ensureAppWorkspaceTables(config, token, octoContainerId);
@@ -366,9 +400,9 @@ export async function saveUserConnector(
        status = EXCLUDED.status,
        account_email = COALESCE(EXCLUDED.account_email, ri_console.user_connector.account_email),
        scopes = EXCLUDED.scopes,
-       access_token = COALESCE(EXCLUDED.access_token, ri_console.user_connector.access_token),
-       refresh_token = COALESCE(EXCLUDED.refresh_token, ri_console.user_connector.refresh_token),
-       expires_at = COALESCE(EXCLUDED.expires_at, ri_console.user_connector.expires_at),
+       access_token = ${input.clearTokens ? "NULL" : "COALESCE(EXCLUDED.access_token, ri_console.user_connector.access_token)"},
+       refresh_token = ${input.clearTokens ? "NULL" : "COALESCE(EXCLUDED.refresh_token, ri_console.user_connector.refresh_token)"},
+       expires_at = ${input.clearTokens ? "NULL" : "COALESCE(EXCLUDED.expires_at, ri_console.user_connector.expires_at)"},
        last_sync = CASE WHEN EXCLUDED.status = 'connected' THEN now() ELSE ri_console.user_connector.last_sync END,
        updated_at = now()`,
   );
@@ -392,6 +426,7 @@ export async function createConnectorRoute(
   token: string,
   octoContainerId: string,
   principalId: string,
+  activeWorkspaceIds: string[],
   rawBody: unknown,
 ): Promise<
   | { ok: true; status: number; body: Record<string, unknown> }
@@ -408,9 +443,37 @@ export async function createConnectorRoute(
       },
     };
   }
+  const data = parsed.data;
+  if (!activeWorkspaceIds.includes(data.targetWorkspaceId)) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: "TARGET_NOT_MEMBER",
+        detail: "target workspace is not one of your active workspaces",
+      },
+    };
+  }
+  if (data.targetProjectId) {
+    const proj = await octoSql(
+      config,
+      token,
+      octoContainerId,
+      `SELECT 1 AS ok FROM ri_console.project_member WHERE project_id = ${lit(data.targetProjectId)} AND workspace_id = ${lit(data.targetWorkspaceId)} AND principal_id = ${lit(principalId)} LIMIT 1`,
+    );
+    if (proj.length === 0) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: "TARGET_NOT_MEMBER",
+          detail: "target project is not in that workspace for you",
+        },
+      };
+    }
+  }
   await ensureAppWorkspaceTables(config, token, octoContainerId);
   const id = randomUUID();
-  const data = parsed.data;
   await octoSql(
     config,
     token,

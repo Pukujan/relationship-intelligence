@@ -17,6 +17,7 @@ const baseEnv: Env = {
   OCTO_API_URL: "https://octo.example.test",
   OCTO_API_KEY: "octo_live_ws_ownerkey",
   SESSION_PASSWORD: "0123456789abcdef0123456789abcdef",
+  RI_RUNNER_ONLINE_WINDOW_MS: 90000,
 };
 
 describe("tenancy role ordering (RI-0012 / #37)", () => {

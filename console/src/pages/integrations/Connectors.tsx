@@ -33,20 +33,21 @@ import {
 import { Pill } from "@/components/work";
 import { Button } from "@/components/ui/button";
 import type { ConnectorProvider } from "@/data/types";
+import {
+  CONNECTOR_CRED_PREFIX,
+  deriveConnectorChip,
+  type UserConnectorView,
+} from "../../../../app/shared/contracts";
+import { RunnerSetupDialog } from "@/components/integrations/RunnerSetupDialog";
 
-interface UserConnectorItem {
-  provider: string;
-  name: string;
-  category: "google" | "meetings" | "messaging" | "network" | "voice";
-  authKind: "google_oauth" | "zoom_oauth" | "oauth_soon" | "local_runner";
-  oauthConfigured: boolean;
-  connectUrl: string | null;
-  status: "connected" | "needs_setup" | "expired";
-  accountEmail: string | null;
-  scopes: string[];
-  description: string;
-  lastSync: string | null;
-}
+type UserConnectorItem = UserConnectorView;
+
+const CHIP_CLASS: Record<string, string> = {
+  ok: "border-run/30 bg-run/10 text-run",
+  warn: "border-warn/30 bg-warn/10 text-warn",
+  error: "border-destructive/40 bg-destructive/10 text-destructive",
+  muted: "border-border bg-surface-2 text-muted-foreground",
+};
 
 interface ConnectorRouteItem {
   id: string;
@@ -84,6 +85,7 @@ const Connectors = () => {
   const [routeProjectId, setRouteProjectId] = useState("");
   const [routeCadence, setRouteCadence] = useState<"daily" | "pre_event" | "signal">("signal");
   const [routeBusy, setRouteBusy] = useState(false);
+  const [setupFor, setSetupFor] = useState<UserConnectorItem | null>(null);
 
   const loadUserConnectors = useCallback(async () => {
     try {
@@ -260,7 +262,7 @@ const Connectors = () => {
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {userConnectors.map((c) => {
               const Icon = providerIcon[c.provider] ?? Plug;
-              const meta = connectorStatusMeta[c.status];
+              const chip = deriveConnectorChip(c);
               const isBusy = pendingId === c.provider;
               return (
                 <article key={c.provider} className="panel flex flex-col gap-3 p-4">
@@ -276,7 +278,7 @@ const Connectors = () => {
                         </p>
                       </div>
                     </div>
-                    <Pill className={meta.className}>{meta.label}</Pill>
+                    <Pill className={CHIP_CLASS[chip.tone] ?? CHIP_CLASS.muted}>{chip.label}</Pill>
                   </div>
 
                   <p className="text-[11.5px] leading-relaxed text-muted-foreground">
@@ -300,6 +302,7 @@ const Connectors = () => {
                     </span>
                     {c.status === "connected" ? (
                       <div className="flex items-center gap-1.5">
+                        {c.authKind !== "local_runner" ? (
                         <Button
                           size="sm"
                           className="h-7 gap-1 rounded-md px-2 text-[11px]"
@@ -313,6 +316,7 @@ const Connectors = () => {
                           )}
                           Sync now
                         </Button>
+                        ) : null}
                         <Button
                           size="sm"
                           variant="outline"
@@ -336,13 +340,21 @@ const Connectors = () => {
                         </a>
                       </Button>
                     ) : (
-                      <span className="text-[10px] text-muted-foreground">
-                        {c.authKind === "zoom_oauth"
-                          ? "Add ZOOM_CLIENT_ID/SECRET"
-                          : c.authKind === "local_runner"
-                            ? "Local session runner"
-                            : "OAuth wiring next"}
-                      </span>
+                      c.authKind === "local_runner" ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1 rounded-md px-2 text-[11px]"
+                          onClick={() => setSetupFor(c)}
+                        >
+                          <Plug className="h-3 w-3" />
+                          Set up
+                        </Button>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">
+                          {`Add ${CONNECTOR_CRED_PREFIX[c.provider] ?? c.provider.toUpperCase()}_CLIENT_ID/SECRET`}
+                        </span>
+                      )
                     )}
                   </div>
                 </article>
@@ -369,12 +381,22 @@ const Connectors = () => {
             onChange={(e) => setRouteProvider(e.target.value)}
             className="h-8 rounded-md border border-border bg-surface-1 px-2 text-[11.5px]"
           >
-            <option value="gmail">Gmail</option>
-            <option value="gcal">Google Calendar</option>
-            <option value="gdrive">Google Drive</option>
-            <option value="zoom">Zoom</option>
-            <option value="linkedin">LinkedIn</option>
-            <option value="luma">Luma</option>
+            {userConnectors.length > 0 ? (
+              userConnectors.map((c) => (
+                <option key={c.provider} value={c.provider}>
+                  {c.name}
+                </option>
+              ))
+            ) : (
+              <>
+                <option value="gmail">Gmail</option>
+                <option value="gcal">Google Calendar</option>
+                <option value="gdrive">Google Drive</option>
+                <option value="zoom">Zoom</option>
+                <option value="linkedin">LinkedIn</option>
+                <option value="luma">Luma</option>
+              </>
+            )}
           </select>
           <input
             value={routeMatch}
@@ -512,6 +534,16 @@ const Connectors = () => {
             })}
           </div>
         </section>
+      ) : null}
+
+      {setupFor ? (
+        <RunnerSetupDialog
+          provider={setupFor.provider}
+          name={setupFor.name}
+          scopes={setupFor.scopes}
+          onClose={() => setSetupFor(null)}
+          onChanged={() => void loadUserConnectors()}
+        />
       ) : null}
 
       <div className={cn("rounded-xl border border-border/60 bg-surface-1/40 p-3.5")}>

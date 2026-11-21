@@ -325,8 +325,9 @@ export async function appendLedgerEvent(
   token: string,
   octoContainerId: string,
   event: LedgerEventInput,
+  eventId?: string,
 ): Promise<{ id: string; traceId: string }> {
-  const id = randomUUID();
+  const id = eventId ?? randomUUID();
   const traceId = event.traceId ?? newTraceId();
   const safePayload = scrubAttributes(event.payload);
   try {
@@ -348,7 +349,8 @@ export async function appendLedgerEvent(
         ${lit(event.entityKind)},
         ${lit(event.entityId)},
         ${lit(JSON.stringify(safePayload))}::jsonb
-       )`,
+       )
+       ON CONFLICT (id) DO NOTHING`,
     );
   } catch {
     // Best-effort when running against minimal mocks or unprovisioned containers.

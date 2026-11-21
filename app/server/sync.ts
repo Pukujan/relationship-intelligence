@@ -11,17 +11,22 @@
  * Phoenix OTLP `trace_id`.
  */
 
-import type {
-  ConnectorProviderId,
-  ConnectorRouteRecord,
+import {
+  type ConnectorProviderId,
+  type ConnectorRouteRecord,
+  saveUserConnector,
 } from "./connectors.js";
 import type { Env } from "./env.js";
+import {
+  type ProviderOAuthId,
+  providerEndpoints,
+  refreshProviderAccessToken,
+} from "./oauthProviders.js";
 import type { OctoClientConfig } from "./octo.js";
+import { lit } from "./sql.js";
 import { appendLedgerEvent, endSpan, startSpan } from "./telemetry.js";
 import { ensureAppWorkspaceTables } from "./workspaces.js";
 import { octoSql } from "./world.js";
-
-const lit = (value: unknown) => `'${String(value).replace(/'/g, "''")}'`;
 
 export interface SyncedSignal {
   externalId: string;
@@ -106,35 +111,17 @@ async function refreshProviderToken(
         : null,
     };
   }
-  if (provider === "zoom") {
-    if (!env.ZOOM_CLIENT_ID || !env.ZOOM_CLIENT_SECRET) return null;
-    const basic = Buffer.from(
-      `${env.ZOOM_CLIENT_ID}:${env.ZOOM_CLIENT_SECRET}`,
-    ).toString("base64");
-    const res = await fetch("https://zoom.us/oauth/token", {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${basic}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-      }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      access_token?: string;
-      expires_in?: number;
-    };
-    if (!data.access_token) return null;
-    return {
-      accessToken: data.access_token,
-      expiresAt: data.expires_in
-        ? new Date(Date.now() + data.expires_in * 1000).toISOString()
-        : null,
-    };
+  if (
+    provider === "zoom" ||
+    provider === "slack" ||
+    provider === "calendly" ||
+    provider === "discord"
+  ) {
+    return refreshProviderAccessToken(
+      env,
+      provider as ProviderOAuthId,
+      refreshToken,
+    );
   }
   return null;
 }
@@ -272,9 +259,12 @@ async function fetchGdriveSignals(
   }));
 }
 
-async function fetchZoomSignals(accessToken: string): Promise<SyncedSignal[]> {
+async function fetchZoomSignals(
+  env: Env,
+  accessToken: string,
+): Promise<SyncedSignal[]> {
   const res = await fetch(
-    "https://api.zoom.us/v2/users/me/meetings?type=upcoming&page_size=10",
+    `${providerEndpoints(env, "zoom").api}/users/me/meetings?type=upcoming&page_size=10`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(15_000),
@@ -300,6 +290,115 @@ async function fetchZoomSignals(accessToken: string): Promise<SyncedSignal[]> {
   }));
 }
 
+async function fetchSlackSignals(
+  env: Env,
+  accessToken: string,
+): Promise<SyncedSignal[]> {
+  const api = providerEndpoints(env, "slack").api;
+  const list = await fetch(
+    `${api}/conversations.list?limit=5&types=public_channel,private_channel`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(15_000),
+    },
+  );
+  if (!list.ok) throw new Error(`HTTP ${list.status}`);
+  const channels =
+    ((await list.json()) as { channels?: { id: string; name?: string }[] })
+      .channels ?? [];
+  const signals: SyncedSignal[] = [];
+  for (const ch of channels.slice(0, 3)) {
+    const hist = await fetch(
+      `${api}/conversations.history?channel=${encodeURIComponent(ch.id)}&limit=4`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!hist.ok) continue;
+    const msgs =
+      (
+        (await hist.json()) as {
+          messages?: { ts: string; text?: string; user?: string }[];
+        }
+      ).messages ?? [];
+    for (const m of msgs) {
+      signals.push({
+        externalId: `${ch.id}:${m.ts}`,
+        provider: "slack",
+        title: `Slack #${ch.name ?? ch.id}`,
+        detail: (m.text ?? "").slice(0, 240),
+        occurredAt: new Date(Number(m.ts) * 1000).toISOString(),
+        matchText: `${ch.name ?? ""} ${m.text ?? ""}`,
+      });
+    }
+  }
+  return signals;
+}
+
+async function fetchCalendlySignals(
+  env: Env,
+  accessToken: string,
+): Promise<SyncedSignal[]> {
+  const api = providerEndpoints(env, "calendly").api;
+  const me = await fetch(`${api}/users/me`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!me.ok) throw new Error(`HTTP ${me.status}`);
+  const userUri =
+    ((await me.json()) as { resource?: { uri?: string } }).resource?.uri ?? "";
+  const ev = await fetch(
+    `${api}/scheduled_events?user=${encodeURIComponent(userUri)}&count=8&sort=start_time:asc`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(15_000),
+    },
+  );
+  if (!ev.ok) throw new Error(`HTTP ${ev.status}`);
+  const items =
+    (
+      (await ev.json()) as {
+        collection?: {
+          uri: string;
+          name?: string;
+          start_time?: string;
+          location?: { join_url?: string };
+        }[];
+      }
+    ).collection ?? [];
+  return items.map((e) => ({
+    externalId: e.uri,
+    provider: "calendly",
+    title: `Calendly: ${e.name ?? "Intro call"}`,
+    detail: e.start_time ?? "Upcoming",
+    occurredAt: e.start_time ?? new Date().toISOString(),
+    matchText: e.name ?? "",
+    ...(e.location?.join_url ? { url: e.location.join_url } : {}),
+  }));
+}
+
+async function fetchDiscordSignals(
+  env: Env,
+  accessToken: string,
+): Promise<SyncedSignal[]> {
+  const api = providerEndpoints(env, "discord").api;
+  const guilds = await fetch(`${api}/users/@me/guilds`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!guilds.ok) throw new Error(`HTTP ${guilds.status}`);
+  const items = (await guilds.json()) as { id: string; name?: string }[];
+  return items.slice(0, 8).map((g) => ({
+    externalId: g.id,
+    provider: "discord",
+    title: `Discord: ${g.name ?? g.id}`,
+    detail: "Community membership",
+    occurredAt: new Date().toISOString(),
+    matchText: g.name ?? "",
+  }));
+}
+
 export async function syncUserConnector(
   config: OctoClientConfig,
   token: string,
@@ -312,6 +411,19 @@ export async function syncUserConnector(
   SyncResult | { ok: false; status: number; error: string; detail: string }
 > {
   await ensureAppWorkspaceTables(config, token, octoContainerId);
+  if (
+    provider === "linkedin" ||
+    provider === "luma" ||
+    provider === "wispr" ||
+    provider === "riley"
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error: "UNSUPPORTED_PROVIDER",
+      detail: "local_runner providers sync via the daemon, not this route",
+    };
+  }
   const rows = await octoSql(
     config,
     token,
@@ -380,7 +492,13 @@ export async function syncUserConnector(
     } else if (provider === "gdrive") {
       signals = await fetchGdriveSignals(accessToken);
     } else if (provider === "zoom") {
-      signals = await fetchZoomSignals(accessToken);
+      signals = await fetchZoomSignals(env, accessToken);
+    } else if (provider === "slack") {
+      signals = await fetchSlackSignals(env, accessToken);
+    } else if (provider === "calendly") {
+      signals = await fetchCalendlySignals(env, accessToken);
+    } else if (provider === "discord") {
+      signals = await fetchDiscordSignals(env, accessToken);
     } else {
       await endSpan(span, "ERROR", { "ri.reason": "unsupported_provider" });
       return {
@@ -394,11 +512,27 @@ export async function syncUserConnector(
     await endSpan(span, "ERROR", {
       "ri.error": error instanceof Error ? error.message : "sync_failed",
     });
+    const statusMatch =
+      error instanceof Error
+        ? /(?:HTTP |\()(\d{3})\)?/.exec(error.message)
+        : null;
+    if (statusMatch?.[1] === "401") {
+      await saveUserConnector(
+        config,
+        token,
+        octoContainerId,
+        activeWorkspaceId,
+        principalId,
+        { provider, status: "expired" },
+      );
+    }
     return {
       ok: false,
       status: 502,
       error: "PROVIDER_SYNC_FAILED",
-      detail: error instanceof Error ? error.message : "Provider sync failed",
+      detail: statusMatch
+        ? `PROVIDER_HTTP_${statusMatch[1]}`
+        : "PROVIDER_SYNC_FAILED",
     };
   }
 
@@ -431,8 +565,16 @@ export async function syncUserConnector(
       sig.matchText,
       activeWorkspaceId,
     );
-    routedSet.add(dest.workspaceId);
-    const id = `sync-${provider}-${sig.externalId}`;
+    let destWs = dest.workspaceId;
+    const member = await octoSql(
+      config,
+      token,
+      octoContainerId,
+      `SELECT 1 AS ok FROM ri_console.workspace_member WHERE workspace_id = ${lit(destWs)} AND principal_id = ${lit(principalId)} AND status = 'active' LIMIT 1`,
+    );
+    if (member.length === 0) destWs = activeWorkspaceId;
+    routedSet.add(destWs);
+    const id = `sync-${principalId}-${provider}-${sig.externalId}`;
     const doc = {
       id,
       at: sig.occurredAt,
@@ -451,14 +593,14 @@ export async function syncUserConnector(
       token,
       octoContainerId,
       `INSERT INTO ri_console.activity (id, workspace_id, principal_id, visibility, doc)
-       VALUES (${lit(id)}, ${lit(dest.workspaceId)}, ${lit(principalId)}, 'private', ${lit(JSON.stringify(doc))}::jsonb)
+       VALUES (${lit(id)}, ${lit(destWs)}, ${lit(principalId)}, 'private', ${lit(JSON.stringify(doc))}::jsonb)
        ON CONFLICT (id) DO UPDATE SET doc = EXCLUDED.doc, updated_at = now()`,
     );
     items.push({
       id,
       title: sig.title,
-      workspaceId: dest.workspaceId,
-      projectId: dest.projectId,
+      workspaceId: destWs,
+      projectId: destWs === dest.workspaceId ? dest.projectId : null,
     });
   }
 

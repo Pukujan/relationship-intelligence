@@ -40,6 +40,8 @@ export interface AppSessionData {
   /** CSRF nonce and target provider for incremental connector OAuth round trips. */
   connectorOauthState?: string;
   connectorProvider?: string;
+  /** Per-provider OAuth state map with creation time (RI-0021 R12). */
+  connectorOauthStates?: Record<string, { state: string; createdAt: number }>;
   /**
    * Epoch ms of the last authenticated /app-api/* request. Slides the local
    * idle window; absent on cookies sealed before longevity landed, which are
@@ -77,6 +79,34 @@ export function readSession(
 /** Base64url random nonce for the login round trip. */
 export function newOauthState(): string {
   return randomBytes(24).toString("base64url");
+}
+
+/** RI-0021 R12: per-provider OAuth state with a 10-minute TTL. */
+export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+export function beginOauthState(
+  session: AppSessionData,
+  provider: string,
+): string {
+  const state = newOauthState();
+  const states = { ...(session.connectorOauthStates ?? {}) };
+  states[provider] = { state, createdAt: Date.now() };
+  session.connectorOauthStates = states;
+  return state;
+}
+
+/** Single-use: consumes and clears the provider's state; false on mismatch/expiry. */
+export function consumeOauthState(
+  session: AppSessionData,
+  provider: string,
+  state: string | null,
+): boolean {
+  const entry = session.connectorOauthStates?.[provider];
+  const states = { ...(session.connectorOauthStates ?? {}) };
+  delete states[provider];
+  session.connectorOauthStates = states;
+  if (!entry || !state || entry.state !== state) return false;
+  return Date.now() - entry.createdAt <= OAUTH_STATE_TTL_MS;
 }
 
 /** Only a local path may be returned to; an absolute URL would be an open redirect. */
