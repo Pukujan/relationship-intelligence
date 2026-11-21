@@ -779,6 +779,45 @@ const agentAnswer = (world: World, agent: Agent): CopilotAnswer => {
   };
 };
 
+/** Scheduled research is planned, never preset: the offline router asks for
+ * the three decisions (brief, cadence, scope) instead of creating anything. */
+const scheduleAnswer = (world: World, prompt: string): CopilotAnswer => {
+  const text = prompt.toLowerCase();
+  const cadence = hasAny(text, ["daily", "every day", "each morning"])
+    ? "daily"
+    : hasAny(text, ["weekly", "every week"])
+      ? "weekly"
+      : hasAny(text, ["once", "one-off", "one time"])
+        ? "once"
+        : null;
+  const project = findProjectMentioned(prompt, world);
+  const person = findPersonMentioned(prompt, world);
+  const scope = project ? `the ${project.name} project` : person ? person.name : null;
+  const decided = [
+    cadence ? `cadence: ${cadence}` : null,
+    scope ? `scope: ${scope}` : null,
+  ].filter(Boolean);
+  return {
+    intentId: "plan-schedule",
+    intentLabel: "Scheduled research · plan together",
+    agents: [],
+    steps: [
+      { label: "Agree the research brief", detail: "what each run should produce, and for whom" },
+      { label: "Settle the cadence", detail: cadence ? `you said ${cadence} — confirm or change it` : "daily, weekly, or once — your call, not a default" },
+      { label: "Pick the scope", detail: scope ? `you pointed at ${scope} — confirm or widen it` : "whole workspace, one project, or one person" },
+      { label: "Propose the schedule for your confirmation", detail: "nothing is created until you confirm it" },
+    ],
+    summary: `Let's plan this before anything is scheduled. ${
+      decided.length ? `So far you've decided ${decided.join(" and ")}.` : "Nothing is decided yet — we'll settle it together."
+    } Tell me what a good run should produce${scope ? "" : ", who or what it should cover"}, and how often you want it. I'll ask about anything missing, then propose the exact schedule for you to confirm — I won't create it on my own.`,
+    links: [
+      ...(project ? [projectLink(project, world)] : []),
+      ...(person ? [personLink(person)] : []),
+    ],
+    approvalIds: [],
+  };
+};
+
 export const planRequest = (prompt: string, world: World): CopilotAnswer => {
   const text = prompt.toLowerCase().trim();
 
@@ -798,6 +837,25 @@ export const planRequest = (prompt: string, world: World): CopilotAnswer => {
   }
   if (hasAny(text, ["call me", "phone me", "ring me", "dial", "give me a call", "call my"])) {
     return phoneAnswer(world);
+  }
+  if (
+    hasAny(text, [
+      "scheduled research",
+      "schedule a",
+      "schedule research",
+      "plan a schedule",
+      "new schedule",
+      "recurring",
+      "every week",
+      "every day",
+      "weekly brief",
+      "daily brief",
+      "on a cadence",
+      "schedule this",
+      "set up a schedule",
+    ])
+  ) {
+    return scheduleAnswer(world, prompt);
   }
   if (
     hasAny(text, [
@@ -862,12 +920,3 @@ export const planRequest = (prompt: string, world: World): CopilotAnswer => {
   }
   return followUpAnswer(world);
 };
-
-export const copilotSuggestions = [
-  "What's due today across the team?",
-  "Where does the Halcyon Renewal stand?",
-  "Who should I follow up with this week?",
-  "Draft a note to the Halcyon sponsors",
-  "What's waiting on my approval?",
-  "Prep me for the Atlas Ops Review",
-];
