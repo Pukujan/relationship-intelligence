@@ -340,7 +340,7 @@ const Projects = () => {
               <Button
                 size="sm"
                 className="rounded-lg"
-                onClick={() => openCopilot("Open a project for the Halcyon renewal")}
+                onClick={() => openCopilot("Help me open the first project — which relationship needs work most, and what should the objective be?")}
               >
                 <Target className="h-3.5 w-3.5" />
                 Open a project

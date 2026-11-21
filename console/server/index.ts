@@ -17,6 +17,7 @@ import { endSpan, recordEvals, startSpan } from "./telemetry.ts";
 import { queryRag, ragPromptBlock } from "./rag.ts";
 import { webSearch, webPromptBlock } from "./web.ts";
 import { PartSchema, sanitizeArtifactHtml } from "../src/data/sessionTypes.ts";
+import { isKnownRoute } from "../src/lib/actions.ts";
 import {
   askWithFailover,
   chains,
@@ -643,9 +644,20 @@ Return ONLY a JSON object: {"parts": [ ... ]} where each part is one of:
  {"kind":"proposal","design":{missionName,missionSummary,projectId?,projectName?,objectiveName,objectiveTarget,horizon,dueInDays,agentIds,autonomy,planSteps:[{label,detail,agentId?}],rationale,unverified:[]}}
  {"kind":"approval","approvalId":"pending approval id from digest"}
  {"kind":"artifact","title":"...","html":"<static html, no scripts>","sources":[{"label":"...","detail":"..."}]}
+ {"kind":"actions","actions":[typed UI actions — see the action contract below]}
 Prefer visual parts (table, kpi, sparkline, graph, timeline) over long prose when the data supports them.
 Use 2-6 parts. Every factual part carries evidence or is flagged unverified in text. Proposals are held for
-human approval; nothing sends. Artifacts are static presentations of validated data only.`;
+human approval; nothing sends. Artifacts are static presentations of validated data only.
+Action contract for "actions" parts (the UI guards these; writes need a human tap):
+ {"kind":"navigate","path":"/schedules","label":"Schedules"} — a known route; the human confirms the jump.
+ {"kind":"ask","text":"a follow-up question"} — seeds a new thread.
+ {"kind":"createSchedule","prompt":"the agreed research brief","cadence":"daily|weekly|once","scopeKind":"workspace|project|person","scopeId":"a project/person id from the digest, or null for workspace","label":"short label"}
+Scheduled research protocol: when the human wants recurring or scheduled research, plan it WITH them first.
+Agree in conversation on (1) the brief — what each run should produce, (2) the cadence — daily, weekly, or
+once, (3) the scope — whole workspace, or one project/person from the digest. Ask about whatever is undecided;
+never assume defaults and never pick for them. Only once you both agree, emit a createSchedule action. The UI
+holds it for the human's explicit confirmation — emitting it does NOT create the schedule, so never say one
+exists or is queued until the human confirms it.`;
 
 const ChatStreamSchema = z.object({
   prompt: z.string().min(1).max(2_000),
@@ -685,6 +697,19 @@ function groundPart(part: z.infer<typeof PartSchema>, digest: Digest): boolean {
         ? knownId(digest, "company", node.id)
         : knownId(digest, "person", node.id),
     );
+  }
+  if (part.kind === "actions") {
+    return part.actions.every((action) => {
+      if (action.kind === "navigate") return isKnownRoute(action.path);
+      if (action.kind === "createSchedule") {
+        if (!action.prompt.trim()) return false;
+        if (!["daily", "weekly", "once"].includes(action.cadence)) return false;
+        if (action.scopeKind === "project") return knownId(digest, "project", action.scopeId ?? "");
+        if (action.scopeKind === "person") return knownId(digest, "person", action.scopeId ?? "");
+        return action.scopeKind === "workspace";
+      }
+      return true; // cite/openScope/ask keep their client-side guards
+    });
   }
   if (part.kind === "approval") return knownId(digest, "approval", part.approvalId);
   if (part.kind === "proposal") {

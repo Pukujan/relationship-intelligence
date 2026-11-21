@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { CalendarClock, Pause, Play, Plus, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { CalendarClock, Pause, Play, Sparkles, Trash2 } from "lucide-react";
 import { useData } from "@/data/store";
+import { useOrchestrator } from "@/components/copilot/OrchestratorProvider";
 import { PageHeader, SectionHeader, EmptyState } from "@/components/common";
 import { Button } from "@/components/ui/button";
 
@@ -21,14 +21,25 @@ interface Run {
   due_at: string;
 }
 
+/**
+ * Schedules are agreed in conversation, not configured on this page. The seed
+ * opens a copilot thread that plans the brief, cadence, and scope with the
+ * human; the schedule itself is only proposed there, and only created after
+ * the human explicitly confirms it (see SessionActions).
+ */
+const planSeed = (idea: string) =>
+  `I want to plan a scheduled research job${idea.trim() ? `: ${idea.trim()}` : ""}. ` +
+  "Talk it through with me first — what each run should produce, how often it should run, " +
+  "and whether it covers the whole workspace, one project, or one person. " +
+  "Ask me about anything I haven't decided; don't assume defaults. " +
+  "Only propose the schedule once we agree, and wait for my confirmation before it's created.";
+
 const Schedules = () => {
   const { session, world } = useData();
+  const { openCopilot } = useOrchestrator();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
-  const [prompt, setPrompt] = useState("");
-  const [cadence, setCadence] = useState("weekly");
-  const [scope, setScope] = useState("workspace:");
-  const [busy, setBusy] = useState(false);
+  const [idea, setIdea] = useState("");
 
   const load = useCallback(async () => {
     if (!session) return;
@@ -40,21 +51,6 @@ const Schedules = () => {
   }, [session]);
 
   useEffect(() => { void load(); }, [load]);
-
-  const create = async () => {
-    if (!prompt.trim() || !session) return;
-    setBusy(true);
-    const [kind, id] = scope.split(":");
-    const r = await fetch("/app-api/schedules", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: session.workspaceId, prompt, cadence, scopeKind: kind, scopeId: id || null }),
-    });
-    setBusy(false);
-    if (r.ok) { setPrompt(""); toast.success("Schedule created", { description: "Due runs are queued; execution lands with the research slice." }); void load(); }
-    else toast.error("Could not create schedule");
-  };
 
   const patch = async (id: string, paused: boolean) => {
     await fetch(`/app-api/schedules/${id}?workspaceId=${encodeURIComponent(session?.workspaceId ?? "")}`, {
@@ -69,44 +65,65 @@ const Schedules = () => {
     void load();
   };
 
+  // Starting points grounded in the actual workspace — each opens a planning
+  // conversation, never a pre-decided schedule.
+  const suggestions = [
+    ...(world?.projects ?? []).slice(0, 3).map((project) => ({
+      label: `Recurring brief on ${project.name}`,
+      idea: `Keep a recurring brief on the ${project.name} project — what moved, what's stuck, and what needs me.`,
+    })),
+    ...(world?.people ?? []).slice(0, 2).map((person) => ({
+      label: `Watch ${person.name}`,
+      idea: `Track ${person.name} on a cadence — role or company changes, and anything worth a timely touchpoint.`,
+    })),
+  ];
+
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Cadence"
         title="Scheduled research"
-        description="Recurring research jobs scoped to a project, person, or the whole workspace. Due runs queue here; the research worker executes them in the next slice."
+        description="Recurring research jobs scoped to a project, person, or the whole workspace. Plan them with the copilot — nothing is scheduled until you agree. Due runs queue here; the research worker executes them in the next slice."
       />
       <section className="panel p-4">
-        <SectionHeader title="New schedule" />
+        <SectionHeader title="Plan with the copilot" />
+        <p className="mt-1 text-[11.5px] text-muted-foreground">
+          Describe the research you want repeated. The copilot talks through the brief, cadence, and scope
+          with you, then proposes the schedule for your confirmation — no defaults decided for you.
+        </p>
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            value={idea}
+            onChange={(e) => setIdea(e.target.value)}
             rows={2}
-            placeholder="e.g. Refresh attendee briefs for the Halcyon renewal dinner"
-            aria-label="Schedule prompt"
-            className="min-h-10 min-w-64 flex-1 resize-none rounded-lg border border-border/70 bg-surface-1 px-2.5 py-2 text-[13px] outline-none"
+            placeholder="What should the research track, for whom, and what should a good run produce? Start here and the copilot will ask about the rest."
+            aria-label="Schedule idea"
+            className="min-h-10 min-w-64 flex-1 resize-none rounded-lg border border-border/70 bg-surface-1 px-2.5 py-2 text-[13px] outline-none placeholder:text-muted-foreground/70"
           />
-          <select value={cadence} onChange={(e) => setCadence(e.target.value)} aria-label="Cadence" className="h-9 rounded-md border border-border/70 bg-surface-1 px-2 text-[12px]">
-            <option value="daily">daily</option>
-            <option value="weekly">weekly</option>
-            <option value="once">once</option>
-          </select>
-          <select value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Scope" className="h-9 max-w-56 rounded-md border border-border/70 bg-surface-1 px-2 text-[12px]">
-            <option value="workspace:">whole workspace</option>
-            {(world?.projects ?? []).map((p) => <option key={p.id} value={`project:${p.id}`}>project: {p.name}</option>)}
-            {(world?.people ?? []).slice(0, 12).map((p) => <option key={p.id} value={`person:${p.id}`}>person: {p.name}</option>)}
-          </select>
-          <Button size="sm" className="h-9 gap-1.5 rounded-lg" disabled={busy || !prompt.trim()} onClick={() => void create()}>
-            <Plus className="h-3.5 w-3.5" /> Create
+          <Button size="sm" className="h-9 gap-1.5 rounded-lg" onClick={() => openCopilot(planSeed(idea))}>
+            <Sparkles className="h-3.5 w-3.5" /> Plan with copilot
           </Button>
         </div>
+        {suggestions.length > 0 ? (
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion.label}
+                type="button"
+                onClick={() => openCopilot(planSeed(suggestion.idea))}
+                className="focus-ring rounded-full border border-border/70 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+              >
+                {suggestion.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="panel p-4">
         <SectionHeader title="Schedules" count={schedules.length} />
         {schedules.length === 0 ? (
-          <EmptyState className="mt-3" icon={CalendarClock} title="No scheduled research" description="Create one above; due runs appear in the queue below." />
+          <EmptyState className="mt-3" icon={CalendarClock} title="No scheduled research" description="Plan one with the copilot above; agreed schedules appear here and due runs queue below." />
         ) : (
           <div className="mt-2 divide-y divide-border/60">
             {schedules.map((s) => (
