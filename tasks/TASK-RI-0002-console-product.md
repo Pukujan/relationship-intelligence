@@ -327,6 +327,29 @@ Blocked/uncertain:
 Next:
 - Mark PR #107 ready, let CI run, and merge it with auto-merge.
 
+### 2026-11-21 15:38:07 UTC — agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1","blocked":[],"changed":["app/shared/workflowContracts.ts (new), app/shared/contracts.ts re-exports it, three console files import from it"],"completed":["The canvas PR's console CI job failed because the console imported workflow types from a file that needs zod, which that job doesn't install. The types now sit in a dependency-free file like the connector types."],"decisions":["no new decisions"],"evidence":["Reproduced CI by hiding the app's packages: console typecheck, eslint, machine tests, orphan check and build pass; app types, biome and 178 Vitest tests pass."],"evidence_class":"observed","next_action":"Wait for PR #107's checks; auto-merge is on.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T15:38:07Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"18311be5db6a014ec08019729eef84e3936f512d508179f71c2b5b2a43e3c238","request_id":"d6c92548ea5f49dba4e3c0a0bcf425ff","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- The canvas PR's console CI job failed because the console imported workflow types from a file that needs zod, which that job doesn't install. The types now sit in a dependency-free file like the connector types.
+
+Evidence:
+- Reproduced CI by hiding the app's packages: console typecheck, eslint, machine tests, orphan check and build pass; app types, biome and 178 Vitest tests pass.
+
+Decisions:
+- no new decisions
+
+Changed:
+- app/shared/workflowContracts.ts (new), app/shared/contracts.ts re-exports it, three console files import from it
+
+Blocked/uncertain:
+- none
+
+Next:
+- Wait for PR #107's checks; auto-merge is on.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
