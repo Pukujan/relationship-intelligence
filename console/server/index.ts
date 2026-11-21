@@ -641,6 +641,233 @@ async function handleDesign(body: unknown) {
 
 
 /* ------------------------------------------------------------------ */
+/* RI-0022: autonomous agent execution                                 */
+/* ------------------------------------------------------------------ */
+
+// The adapter's executor calls this on an agent's cadence. The answer is a
+// proposal set only: the adapter's zone gate decides what persists, and no
+// action here ever executes an external send. Referenced ids are grounded
+// against the digest exactly like the interactive copilot.
+const AgentRunRequestSchema = z.object({
+  agentId: z.string().min(1).max(80),
+  agentName: z.string().min(1).max(120),
+  instructions: z.string().min(1).max(4_000),
+  autonomy: z.enum(["draft", "approve", "full"]),
+  cadence: z.enum(["daily", "pre_event", "signal", "schedule"]).default("daily"),
+  digest: z.unknown(),
+  signals: z.array(z.string().max(600)).max(30).default([]),
+  graphStale: z.boolean().default(false),
+  runId: z.string().max(120).optional(),
+  principalId: z.string().max(64).optional(),
+  model: z.string().max(80).optional(),
+});
+
+const AgentActionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("note"),
+    text: z.string().min(1).max(1_200),
+    personId: z.string().max(40).nullish(),
+  }),
+  z.object({
+    kind: z.literal("approval"),
+    approvalKind: z.enum(["send", "call", "publish", "invite", "commit"]),
+    title: z.string().min(1).max(200),
+    proposedAction: z.string().min(1).max(2_000),
+    reason: z.string().max(600).default(""),
+    risk: z.enum(["low", "medium", "high"]).default("medium"),
+    personId: z.string().max(40).nullish(),
+    companyId: z.string().max(40).nullish(),
+    eventId: z.string().max(40).nullish(),
+  }),
+  z.object({
+    kind: z.literal("draft_plan"),
+    title: z.string().min(1).max(140),
+    objectiveName: z.string().min(1).max(140),
+    objectiveTarget: z.string().max(140).default("Ship milestone"),
+    missionSummary: z.string().max(600).default(""),
+    horizon: z.enum(["today", "this_week", "this_month"]).default("this_week"),
+    steps: z
+      .array(
+        z.object({
+          label: z.string().min(1).max(200),
+          detail: z.string().max(400).default(""),
+        }),
+      )
+      .min(1)
+      .max(12),
+  }),
+]);
+
+const AgentRunResultSchema = z.object({
+  summary: z.string().min(1).max(1_200),
+  findings: z
+    .array(
+      z.object({
+        text: z.string().min(1).max(600),
+        personId: z.string().max(40).nullish(),
+        sourceUrl: z.string().max(300).nullish(),
+      }),
+    )
+    .max(8)
+    .default([]),
+  actions: z.array(AgentActionSchema).max(12).default([]),
+});
+
+const AGENT_RUN_SYSTEM = `You are the execution mode of one agent in "Mission Control", a relationship-intelligence
+console. You run on a cadence while the owner is away. Do the agent's INSTRUCTIONS using only the
+WORLD DIGEST and SIGNALS — never invent people, companies, events, or ids. Trust rules are absolute:
+agents propose, humans decide; you NEVER send, call, publish, or commit anything yourself. Outbound
+mail or messages become an "approval" action holding the exact draft for the owner to decide.
+Unsourced facts must be labelled unverified. Respect the stated autonomy zone: "full" means internal
+prep only (notes), "approve" means notes plus approval proposals, "draft" means notes plus mutable
+draft plans and approval proposals. The server enforces this regardless of what you return.
+Return ONLY a JSON object shaped like:
+{
+  "summary": "2-4 sentences: what you did this run and what needs the owner",
+  "findings": [{"text": "one sourced or explicitly-unverified observation", "personId": "optional digest id", "sourceUrl": "optional url"}],
+  "actions": [
+    {"kind": "note", "text": "a durable note", "personId": "optional digest person id"},
+    {"kind": "approval", "approvalKind": "send|call|publish|invite|commit", "title": "short decision title", "proposedAction": "the exact draft or action text", "reason": "why now", "risk": "low|medium|high", "personId": "optional", "companyId": "optional", "eventId": "optional"},
+    {"kind": "draft_plan", "title": "plan title", "objectiveName": "outcome", "objectiveTarget": "measurable target", "missionSummary": "1-2 sentences", "horizon": "today|this_week|this_month", "steps": [{"label": "step", "detail": "why/how"}]}
+  ]
+}
+Keep actions between 0 and 6 — a quiet run with one useful note beats six weak proposals. Write like
+a calm chief of staff. If the digest is stale, say so in the summary and propose verification, not facts.`;
+
+async function handleAgentRun(body: unknown) {
+  const request = AgentRunRequestSchema.parse(body);
+  const digest = readDigest(request.digest);
+  const started = Date.now();
+  const span = startSpan("copilot.agent_run", {
+    model: MODEL,
+    agent_id: request.agentId,
+    run_id: request.runId ?? "adhoc",
+    autonomy: request.autonomy,
+    cadence: request.cadence,
+    principal_id: request.principalId ?? "scheduler",
+    digest_people: digest.people.length,
+    digest_events: digest.events.length,
+  });
+  try {
+    const matches = await queryRag(request.instructions);
+    const web = matches.length
+      ? []
+      : await webSearch(`${request.agentName} ${request.instructions.slice(0, 160)}`);
+    const staleNote = request.graphStale
+      ? "\n\nNOTE: the graph projection reports STALE — label findings unverified and propose re-verification."
+      : "";
+    const signalsBlock = request.signals.length
+      ? `\n\nRECENT SIGNALS (connector syncs and activity, unverified until sourced):\n${request.signals.map((s, i) => `${i + 1}. ${s}`).join("\n")}`
+      : "";
+    const routed = await askWithFailover(
+      resolveRoute(request.model, "ask"),
+      AGENT_RUN_SYSTEM,
+      `AGENT: ${request.agentName} (${request.agentId})\nAUTONOMY ZONE: ${request.autonomy}\nCADENCE: ${request.cadence}\nINSTRUCTIONS:\n${request.instructions}\n\nWORLD DIGEST:\n${JSON.stringify(request.digest)}${signalsBlock}${ragPromptBlock(matches)}${webPromptBlock(web)}${staleNote}`,
+      "off",
+      REQUEST_TIMEOUT_MS,
+      undefined,
+      (content) => void AgentRunResultSchema.parse(parseModelJson(content)),
+    );
+    const answer = AgentRunResultSchema.parse(parseModelJson(routed.content));
+
+    // Ground every reference: an id absent from the digest is dropped, never
+    // created. Overlong lists are trimmed; a malformed action is skipped.
+    let dropped = 0;
+    const groundPerson = (id: string | null | undefined) => {
+      if (!id) return undefined;
+      if (knownId(digest, "person", id)) return id;
+      dropped++;
+      return undefined;
+    };
+    const findings = answer.findings.slice(0, 8).map((f) => {
+      const personId = groundPerson(f.personId);
+      return {
+        text: clip(f.text, 600),
+        ...(personId ? { personId } : {}),
+        ...(f.sourceUrl ? { sourceUrl: clip(f.sourceUrl, 300) } : {}),
+      };
+    });
+    const actions: z.infer<typeof AgentActionSchema>[] = [];
+    for (const action of answer.actions.slice(0, 12)) {
+      if (actions.length >= 6) break;
+      if (action.kind === "note") {
+        const personId = groundPerson(action.personId);
+        actions.push({
+          kind: "note",
+          text: clip(action.text, 1_200),
+          ...(personId ? { personId } : {}),
+        });
+      } else if (action.kind === "approval") {
+        const personId = groundPerson(action.personId);
+        const companyId = action.companyId && knownId(digest, "company", action.companyId) ? action.companyId : undefined;
+        const eventId = action.eventId && knownId(digest, "event", action.eventId) ? action.eventId : undefined;
+        if (action.companyId && !companyId) dropped++;
+        if (action.eventId && !eventId) dropped++;
+        actions.push({
+          kind: "approval",
+          approvalKind: action.approvalKind,
+          title: clip(action.title, 200),
+          proposedAction: clip(action.proposedAction, 2_000),
+          reason: clip(action.reason, 600),
+          risk: action.risk,
+          ...(personId ? { personId } : {}),
+          ...(companyId ? { companyId } : {}),
+          ...(eventId ? { eventId } : {}),
+        });
+      } else {
+        actions.push({
+          kind: "draft_plan",
+          title: clip(action.title, 140),
+          objectiveName: clip(action.objectiveName, 140),
+          objectiveTarget: clip(action.objectiveTarget, 140),
+          missionSummary: clip(action.missionSummary, 600),
+          horizon: action.horizon,
+          steps: action.steps.slice(0, 12).map((s) => ({
+            label: clip(s.label, 200),
+            detail: clip(s.detail, 400),
+          })),
+        });
+      }
+    }
+
+    const latency = Date.now() - started;
+    const spanId = endSpan(span, true, {
+      latency_ms: latency,
+      provider: routed.provider,
+      model: routed.model,
+      failovers: routed.failovers,
+      actions_requested: answer.actions.length,
+      actions_kept: actions.length,
+      findings: findings.length,
+      ids_dropped: dropped,
+      rag_matches: matches.length,
+      web_matches: web.length,
+    });
+    void recordEvals(spanId, [
+      { name: "schema_valid", score: 1, label: "pass", explanation: "agent run answer parsed and clipped to contract" },
+      { name: "ids_grounded", score: dropped === 0 ? 1 : 0, label: dropped === 0 ? "pass" : "fail", explanation: `${dropped} referenced id(s) absent from the digest were dropped` },
+      { name: "latency_budget", score: latency <= REQUEST_TIMEOUT_MS ? 1 : 0, label: latency <= REQUEST_TIMEOUT_MS ? "pass" : "fail", explanation: `${latency}ms against ${REQUEST_TIMEOUT_MS}ms budget` },
+    ]);
+    return {
+      summary: clip(answer.summary, 1_200),
+      findings,
+      actions,
+      dropped,
+      provider: routed.provider,
+      model: routed.model,
+      source: "live-model",
+    };
+  } catch (error) {
+    endSpan(span, false, {
+      latency_ms: Date.now() - started,
+      error: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+    });
+    throw error;
+  }
+}
+
+
+/* ------------------------------------------------------------------ */
 /* RI-0010: streaming session turns                                    */
 /* ------------------------------------------------------------------ */
 
@@ -1019,6 +1246,12 @@ const server = createServer((req, res) => {
       const reply = await handleVoice(await readBody(req));
       json(res, 200, reply);
       finish(200, `voice ${reply.intent}`);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/agent-run") {
+      const result = await handleAgentRun(await readBody(req));
+      json(res, 200, result);
+      finish(200, `agent run "${result.summary.slice(0, 60)}"`);
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/design") {

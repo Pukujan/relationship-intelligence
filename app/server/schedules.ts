@@ -1,10 +1,11 @@
 /**
- * Scheduled research jobs (RI-0016). Schedules are principal-private rows in
- * the workspace SQL surface; a 60s tick marks due schedules as queued runs.
- * Execution of queued runs is a later slice — this module owns cadence,
- * ownership, and the queue, not the research itself.
+ * Scheduled research jobs (RI-0016) and autonomous execution (RI-0022).
+ * Schedules are principal-private rows in the workspace SQL surface; a 60s
+ * tick marks due schedules as queued runs, enqueues due agent cadences, and
+ * executes up to two runs through the copilot (see executor.ts).
  */
 import { randomUUID } from "node:crypto";
+import { executeDueRuns } from "./executor.js";
 import type { OctoClientConfig } from "./octo.js";
 import { octoSql } from "./world.js";
 
@@ -155,7 +156,7 @@ const readJson = (req: import("node:http").IncomingMessage): Promise<Json> =>
     req.on("error", reject);
   });
 
-/** Mark due schedules as queued runs. Execution lands in a later slice. */
+/** Mark due schedules as queued runs, then execute due agent work (RI-0022). */
 export function startScheduler(
   getCtx: () => Promise<ScheduleCtx | null>,
 ): NodeJS.Timeout {
@@ -189,6 +190,19 @@ export function startScheduler(
       }
       if (due.length)
         console.log(`scheduler: queued ${due.length} research run(s)`);
+      try {
+        await executeDueRuns({
+          config: ctx.config,
+          token: ctx.token,
+          workspaceId: ctx.workspaceId,
+          octoContainerId: ctx.octoContainerId,
+        });
+      } catch (error) {
+        console.error(
+          "executor tick failed:",
+          error instanceof Error ? error.message : "unknown",
+        );
+      }
     } catch (error) {
       console.error(
         "scheduler tick failed:",
