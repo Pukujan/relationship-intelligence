@@ -341,3 +341,127 @@ describe("imported fact fields populate the people directory (#71)", () => {
     }
   });
 });
+
+describe("events and where-we-met from the ledger (#71)", () => {
+  const mockLedger = () =>
+    vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const { query } = JSON.parse(String(init?.body ?? "{}")) as {
+        query: string;
+      };
+      if (query.includes("MATCH (e:Entity)")) {
+        return new Response(
+          JSON.stringify({
+            rows: [
+              { id: "p-1", name: "Amber Atkins", kind: "person" },
+              {
+                id: "ev-1",
+                name: "Daytona HackSprint",
+                kind: "event:daytona-hacksprint-2020-05-05",
+              },
+              {
+                id: "ev-2",
+                name: "All City AI Training Tour",
+                kind: "event:luma-all-city-ai-2030-01-15",
+              },
+              {
+                id: "ev-3",
+                name: "Mystery Luma Event",
+                kind: "event:luma-3jtm4813",
+              },
+              {
+                id: "ev-4",
+                name: "Compact Dated Event",
+                kind: "event:nycdesign-10000year-20201008",
+              },
+              {
+                id: "ev-5",
+                name: "Impossible Date Event",
+                kind: "event:bad-2026-13-40",
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (query.includes("MATCH (c:Claim) RETURN")) {
+        return new Response(
+          JSON.stringify({
+            rows: [
+              {
+                id: "c-met",
+                statement:
+                  "[UNVERIFIED] Amber Atkins: (self reported) met at Daytona HackSprint",
+                validFrom: "2020-05-06",
+                supersededAt: null,
+                provenance: JSON.stringify({ verb: "UNVERIFIED" }),
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (query.includes("[:SUBJECT]")) {
+        return new Response(
+          JSON.stringify({
+            rows: [{ claimId: "c-met", entityId: "p-1" }],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ rows: [] }), { status: 200 });
+    });
+
+  it("reads dated events, derives attendees from met-at notes, skips undated slugs", async () => {
+    vi.stubGlobal("fetch", mockLedger());
+    try {
+      const view = await readCanonical(
+        { baseUrl: "https://octo.example.test", timeoutMs: 5000 },
+        "tok",
+        CONTAINER,
+        {
+          workspaceId: CONTAINER,
+          octoContainerId: CONTAINER,
+          principalId: OWNER_ID,
+          isContainerOwner: true,
+        } satisfies CanonicalScope,
+      );
+      // ev-3 has no day in its slug and ev-5's day is not a real date:
+      // neither may be emitted, because the console formats date unguarded.
+      expect(view.events.map((e) => e.id)).toEqual(["ev-1", "ev-4", "ev-2"]);
+      const hack = view.events.find((e) => e.id === "ev-1");
+      expect(hack?.attendeeIds).toEqual(["p-1"]);
+      expect(hack?.status).toBe("past");
+      expect(hack?.date).toBe("2020-05-05T00:00:00.000Z");
+      const compact = view.events.find((e) => e.id === "ev-4");
+      expect(compact?.date).toBe("2020-10-08T00:00:00.000Z");
+      const upcoming = view.events.find((e) => e.id === "ev-2");
+      expect(upcoming?.status).toBe("upcoming");
+      expect(upcoming?.attendeeIds).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("hides legacy private meeting history from non-owner members", async () => {
+    vi.stubGlobal("fetch", mockLedger());
+    try {
+      const view = await readCanonical(
+        { baseUrl: "https://octo.example.test", timeoutMs: 5000 },
+        "tok",
+        CONTAINER,
+        {
+          workspaceId: CONTAINER,
+          octoContainerId: CONTAINER,
+          principalId: MEMBER_ID,
+          isContainerOwner: false,
+        } satisfies CanonicalScope,
+      );
+      // The untagged met-at note is owner-only, so the member sees neither
+      // the person nor any event tied to that private history.
+      expect(view.people).toHaveLength(0);
+      expect(view.events).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
