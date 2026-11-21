@@ -73,7 +73,7 @@ function getPath(obj: unknown, path: string): unknown {
   return cur;
 }
 const stringify = (v: unknown) => (typeof v === "string" ? v : v === undefined ? "" : JSON.stringify(v));
-function resolveTemplate(value: unknown, ctx: Json): unknown {
+export function resolveTemplate(value: unknown, ctx: Json): unknown {
   if (typeof value !== "string") return value;
   const whole = value.match(/^\s*\{\{\s*([^}]+?)\s*\}\}\s*$/);
   if (whole) return getPath(ctx, (whole[1] ?? "").trim());
@@ -83,6 +83,23 @@ function resolveConfig(config: Json, ctx: Json): Json {
   const out: Json = {};
   for (const [k, v] of Object.entries(config || {})) out[k] = resolveTemplate(v, ctx);
   return out;
+}
+
+/** Pure condition evaluator (unit-tested). Returns the boolean branch result. */
+export function evaluateCondition(left: unknown, operator: string, right: unknown): boolean {
+  const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : NaN; };
+  switch (operator) {
+    case "eq": return String(left ?? "") === String(right ?? "");
+    case "neq": return String(left ?? "") !== String(right ?? "");
+    case "gt": return num(left) > num(right);
+    case "gte": return num(left) >= num(right);
+    case "lt": return num(left) < num(right);
+    case "lte": return num(left) <= num(right);
+    case "contains": return stringify(left).toLowerCase().includes(String(right ?? "").toLowerCase());
+    case "truthy": return left !== undefined && left !== null && left !== "" && left !== false && left !== 0 && !(Array.isArray(left) && !left.length) && !(typeof left === "object" && !Array.isArray(left) && !Object.keys(left as object).length);
+    case "empty": return left === undefined || left === null || left === "" || (Array.isArray(left) && !left.length);
+    default: return false;
+  }
 }
 
 /* ---------------- node execution ---------------- */
@@ -154,23 +171,8 @@ async function execNode(node: WorkflowNode, cfg: Json, ctx: Json, run: RunState,
       }
     }
     case "action.condition": {
-      const left = cfg.left;
-      const right = cfg.right;
-      const op = String(cfg.operator || "eq");
-      const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : NaN; };
-      let result = false;
-      switch (op) {
-        case "eq": result = String(left ?? "") === String(right ?? ""); break;
-        case "neq": result = String(left ?? "") !== String(right ?? ""); break;
-        case "gt": result = num(left) > num(right); break;
-        case "gte": result = num(left) >= num(right); break;
-        case "lt": result = num(left) < num(right); break;
-        case "lte": result = num(left) <= num(right); break;
-        case "contains": result = stringify(left).toLowerCase().includes(String(right ?? "").toLowerCase()); break;
-        case "truthy": result = left !== undefined && left !== null && left !== "" && left !== false && left !== 0 && !(Array.isArray(left) && !left.length) && !(typeof left === "object" && !Array.isArray(left) && !Object.keys(left as object).length); break;
-        case "empty": result = left === undefined || left === null || left === "" || (Array.isArray(left) && !left.length); break;
-      }
-      return { __branch: result ? "true" : "false", result, value: left };
+      const result = evaluateCondition(cfg.left, String(cfg.operator || "eq"), cfg.right);
+      return { __branch: result ? "true" : "false", result, value: cfg.left };
     }
     case "action.log": {
       const message = String(cfg.message || "");
