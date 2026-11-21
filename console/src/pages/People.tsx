@@ -28,6 +28,7 @@ import {
 } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import ConversationsToMatch from "@/components/crm/ConversationsToMatch";
 import type { Person } from "@/data/types";
 
 const warmthClass: Record<Person["warmth"], string> = {
@@ -339,6 +340,8 @@ const People = () => {
             ))}
         </div>
       ) : null}
+
+      {tab === "people" ? <ConversationsToMatch /> : null}
 
       {tab === "people" ? (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_248px]">

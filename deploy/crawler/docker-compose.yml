@@ -102,7 +102,31 @@ services:
       - crawl-evidence:/data
     logging: *logging
 
+  # Telegram DM import (#120). Telegram's own API needs no home address, so
+  # this runs on the VPS's normal network, apart from the exit-node namespace.
+  # Sign in once:  docker compose ... run --rm telegram \
+  #                  ./node_modules/.bin/tsx src/telegram.ts login
+  telegram:
+    image: ri-crawler-runner:local
+    container_name: ri-crawler-telegram
+    depends_on:
+      runner:
+        condition: service_started
+    restart: unless-stopped
+    command: ["/usr/local/bin/run-telegram.sh"]
+    environment:
+      RI_DM_TOKEN: ${RI_DM_TOKEN:-}
+      RI_CRAWL_SERVER: ${RI_CRAWL_SERVER:-https://business.design-bakery.com}
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_SESSION_FILE: /data/telegram.session
+      RI_TG_INTERVAL_SECONDS: ${RI_TG_INTERVAL_SECONDS:-900}
+    volumes:
+      - telegram-data:/data
+    logging: *logging
+
 volumes:
   tailscale-state:
   browser-profile:
   crawl-evidence:
+  telegram-data:

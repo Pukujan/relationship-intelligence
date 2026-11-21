@@ -21,6 +21,7 @@ import { isConversationOver, parseVoiceCommand, resolveConfirmation } from "../s
 import { resolveThreadEntry } from "../src/lib/threadEntry.ts";
 import { landingPath } from "../src/lib/landing.ts";
 import { buildProfile, parseNote, POST_SNIPPET_MAX, snippet, tidy } from "../src/lib/profileSections.ts";
+import { suggestContact } from "../src/lib/suggestContact.ts";
 import { allowed, askWithFailover, authHeaders, parseChain, parseModelJson } from "../server/providers.ts";
 
 let failures = 0;
@@ -590,6 +591,20 @@ await check("profile: a private DM day lands in the event log, never in Sources 
   assert.equal(entry.detail, "Jane: See you Thursday.");
   assert.ok(!view.sources.some((c) => c.id === "c-dm"), "DMs stay out of Sources");
   assert.ok(!JSON.stringify([view.experience, view.posts, view.about]).includes("Thursday"));
+});
+
+await check("dm: a name only suggests a contact when exactly one matches (#120)", () => {
+  const people = [
+    { id: "p-1", name: "Jane Doe" },
+    { id: "p-2", name: "José Álvarez" },
+    { id: "p-3", name: "Sam Lee" },
+    { id: "p-4", name: "Sam Lee" },
+  ];
+  assert.equal(suggestContact("jane  doe", people), "p-1");
+  assert.equal(suggestContact("Jose Alvarez", people), "p-2");
+  assert.equal(suggestContact("Sam Lee", people), "", "two contacts share the name: no suggestion");
+  assert.equal(suggestContact("Jane", people), "", "one word is not enough");
+  assert.equal(suggestContact("", people), "");
 });
 
 if (failures > 0) {

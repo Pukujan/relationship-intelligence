@@ -396,6 +396,29 @@ Blocked/uncertain:
 Next:
 - Owner sets DM_INGEST_TOKEN and RI_DM_TOKEN once the crawler stack runs; then build the Telegram slice.
 
+### 2026-11-21 18:54:49 UTC — agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1","blocked":[],"changed":["app/server/dm.ts (contact handles, conversations, link) and two owner-only routes; People page card; collector/src/telegram.ts; telegram service in deploy/crawler"],"completed":["Telegram chats couldn't reach the app or attach to contacts. A Telegram reader now runs in the VPS stack, and the People page lists unmatched chats so the owner can link each to a contact once."],"decisions":["no new decisions"],"evidence":["App: types, biome, 192 Vitest tests (4 new for linking and Telegram matching) and build pass. Console: typecheck without the app's packages, eslint, machine tests (1 new for name suggestions) and build pass. Collector: types and 21 tests pass (3 new). The reader has not signed in to a real Telegram account."],"evidence_class":"observed","next_action":"Owner adds Telegram API id and hash, signs in once, and links chats on the People page; then WhatsApp.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T18:54:49Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"e9257c8abb9d966a1e05fb85095e0ddf7e3e6b47d1aae0537b96b4ec3625fcb0","request_id":"c11e1e43f64243b8b53e8b58fdd7d942","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- Telegram chats couldn't reach the app or attach to contacts. A Telegram reader now runs in the VPS stack, and the People page lists unmatched chats so the owner can link each to a contact once.
+
+Evidence:
+- App: types, biome, 192 Vitest tests (4 new for linking and Telegram matching) and build pass. Console: typecheck without the app's packages, eslint, machine tests (1 new for name suggestions) and build pass. Collector: types and 21 tests pass (3 new). The reader has not signed in to a real Telegram account.
+
+Decisions:
+- no new decisions
+
+Changed:
+- app/server/dm.ts (contact handles, conversations, link) and two owner-only routes; People page card; collector/src/telegram.ts; telegram service in deploy/crawler
+
+Blocked/uncertain:
+- none
+
+Next:
+- Owner adds Telegram API id and hash, signs in once, and links chats on the People page; then WhatsApp.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
