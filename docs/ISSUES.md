@@ -21,6 +21,7 @@ Issues are filed in `Pukujan/relationship-intelligence` using the installed OIO 
 | RI-0015 | [#40](https://github.com/Pukujan/relationship-intelligence/issues/40) | Slice 010: altitude layering + Glance agenda redesign (research-gated by #42) | 2 |
 | RI-0016 | [#41](https://github.com/Pukujan/relationship-intelligence/issues/41) | Slice 011: competitive borrowings (research-gated by #42) | 2 |
 | RI-0017 | [#42](https://github.com/Pukujan/relationship-intelligence/issues/42) | UX research gate before any redesign | 3 |
+| RI-0023 | [#111](https://github.com/Pukujan/relationship-intelligence/issues/111) | Slow LinkedIn crawler: paced local runner + sourced ingest (owner decision #108) | 2 |
 | RI-0022 | [#92](https://github.com/Pukujan/relationship-intelligence/issues/92) | Autonomous agent execution: cadence runs, zone-gated actions, receipts, approved Gmail send | 2 |
 
 Implementation begins with RI-007 / issue #9. The CSV-first RI-001/RI-002 scope is superseded; later identity, event, research, and graph slices are re-sequenced by the authenticated collection plan in `docs/COLLECTION-AND-TEAM-PLAN.md`. RI-008 proposes where collection executes and must be decided before the source-connection schema in #12 is implemented; see `docs/COLLECTION-EXECUTION.md`. RI-009 defines the console product surface (goal, operating model, UX map) in `docs/CONSOLE.md` and is the canonical target for the console UI and intelligence slices.
