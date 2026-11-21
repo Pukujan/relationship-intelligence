@@ -545,7 +545,10 @@ function normalizeMilestoneRef(doc: Json): Json {
   if (!doc || typeof doc !== "object" || Array.isArray(doc)) return doc;
   const record = doc as Record<string, Json>;
   if (record.milestoneId === undefined && record.missionId !== undefined) {
-    const next: Record<string, Json> = { ...record, milestoneId: record.missionId };
+    const next: Record<string, Json> = {
+      ...record,
+      milestoneId: record.missionId,
+    };
     delete next.missionId;
     return next;
   }
