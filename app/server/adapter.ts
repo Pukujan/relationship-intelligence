@@ -33,6 +33,7 @@ import {
 } from "./connectors.js";
 import { handleRagQuery, proxyCopilot } from "./copilotProxy.js";
 import { type Env, readEnv } from "./env.js";
+import { deliverApprovedSend } from "./gmailSend.js";
 import { fetchPrincipal, OctoError } from "./octo.js";
 import { handleProfileRoutes } from "./profile.js";
 import { handleScheduleRoutes } from "./schedules.js";
@@ -1147,37 +1148,50 @@ export async function handleRequest(
         return;
       }
       if (path === "/app-api/decision" && req.method === "POST") {
-        sendJson(
-          res,
-          200,
-          await decideApproval(
+        const decided = await decideApproval(
+          config,
+          token,
+          requested,
+          principal,
+          workspaces,
+          {
+            approvalId: String(body.approvalId),
+            decision: body.decision === "approved" ? "approved" : "declined",
+            declinePath:
+              body.declinePath === "re_plan" ||
+              body.declinePath === "snooze" ||
+              body.declinePath === "stop"
+                ? body.declinePath
+                : undefined,
+            note: typeof body.note === "string" ? body.note : undefined,
+            editedAction:
+              typeof body.editedAction === "string"
+                ? body.editedAction
+                : undefined,
+          },
+          {
+            canDecideOthers: requireRole(role, "operator"),
+            octoContainerId: octoWorkspaceId,
+            role,
+          },
+        );
+        // RI-0022: an approved "send" proposal delivers through the decider's
+        // own Gmail connector, scope-gated. Every other decision is unchanged.
+        const approvalDoc = (decided.approval ?? {}) as Record<string, unknown>;
+        if (body.decision === "approved" && approvalDoc.kind === "send") {
+          const delivery = await deliverApprovedSend(
             config,
             token,
+            octoWorkspaceId,
             requested,
-            principal,
-            workspaces,
-            {
-              approvalId: String(body.approvalId),
-              decision: body.decision === "approved" ? "approved" : "declined",
-              declinePath:
-                body.declinePath === "re_plan" ||
-                body.declinePath === "snooze" ||
-                body.declinePath === "stop"
-                  ? body.declinePath
-                  : undefined,
-              note: typeof body.note === "string" ? body.note : undefined,
-              editedAction:
-                typeof body.editedAction === "string"
-                  ? body.editedAction
-                  : undefined,
-            },
-            {
-              canDecideOthers: requireRole(role, "operator"),
-              octoContainerId: octoWorkspaceId,
-              role,
-            },
-          ),
-        );
+            approvalDoc,
+            principal.id,
+            env,
+          );
+          sendJson(res, 200, { ...decided, delivery });
+          return;
+        }
+        sendJson(res, 200, decided);
         return;
       }
       if (path === "/app-api/proposal" && req.method === "POST") {
