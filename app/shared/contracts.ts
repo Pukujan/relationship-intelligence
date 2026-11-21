@@ -140,6 +140,8 @@ export const ProvenanceSchema = z.object({
   org: z.string().optional(),
   title: z.string().optional(),
   strength: z.string().optional(),
+  /** How the owner knows the person, on MET claims ("met at GIS Day ..."). */
+  basis: z.string().optional(),
   seedId: z.string().optional(),
   reason: z.string().optional(),
   status: ClaimStatusSchema.optional(),

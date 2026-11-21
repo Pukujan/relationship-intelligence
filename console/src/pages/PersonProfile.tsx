@@ -1,24 +1,28 @@
+import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
-  Building2,
+  Award,
+  BookOpen,
+  Briefcase,
   CalendarDays,
   Check,
-  Database,
-  Globe,
+  ExternalLink,
+  GraduationCap,
   Mail,
   MapPin,
-  Phone,
+  MessageSquareText,
+  NotebookPen,
   Sparkles,
-  StickyNote,
+  UserRound,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
 import {
-  activityForPerson,
   agentById,
+  activityForPerson,
   approvalsForPerson,
   companyById,
   eventsForPerson,
@@ -28,39 +32,152 @@ import {
   personById,
   projectsForPerson,
   relativeTime,
-  shortDate,
-  strengthLabel,
 } from "@/data/derive";
+import { buildProfile, type EventLogEntry, type ProfileEntry } from "@/lib/profileSections";
 import { useOrchestrator } from "@/components/copilot/OrchestratorProvider";
 import { useApprovalDecision } from "@/hooks/useApprovalDecision";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import {
   EmptyState,
-  EvidenceRow,
   KindBadge,
-  PageHeader,
   PersonAvatar,
   RiskBadge,
-  SectionHeader,
-  StrengthMeter,
 } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import type { ClaimSource } from "@/data/types";
 
-const sourceIcons: Record<ClaimSource["kind"], typeof Mail> = {
-  email: Mail,
-  call: Phone,
-  note: StickyNote,
-  web: Globe,
-  event: CalendarDays,
-  crm: Database,
+const monthYear = (value?: string) =>
+  value
+    ? new Date(value).toLocaleDateString("en-US", { month: "short", year: "numeric" })
+    : "";
+
+const dayMonthYear = (value?: string) =>
+  value
+    ? new Date(value).toLocaleDateString("en-US", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : "";
+
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
 };
 
-const confidenceClass = {
-  high: "border-run/25 bg-run/10 text-run",
-  medium: "border-border bg-surface-2 text-muted-foreground",
-  low: "border-warn/25 bg-warn/10 text-warn",
-} as const;
+/** One LinkedIn-style card: a titled panel with an optional header action. */
+const ProfileCard = ({
+  title,
+  action,
+  children,
+  className,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) => (
+  <section className={cn("panel p-5 sm:p-6", className)} aria-label={title}>
+    <div className="mb-3 flex items-center justify-between gap-3">
+      <h2 className="text-[16px] font-semibold tracking-[-0.01em]">{title}</h2>
+      {action}
+    </div>
+    {children}
+  </section>
+);
+
+/** What fills an empty section. Never sample data. */
+const EmptyLine = ({ children }: { children: ReactNode }) => (
+  <p className="rounded-lg border border-dashed border-border/70 px-3 py-3 text-[12px] leading-relaxed text-muted-foreground">
+    {children}
+  </p>
+);
+
+const SourceLink = ({ entry }: { entry: ProfileEntry }) =>
+  entry.sourceUrl ? (
+    <a
+      href={entry.sourceUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="focus-ring inline-flex items-center gap-1 rounded text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+    >
+      {entry.sourceLabel ?? hostOf(entry.sourceUrl)}
+      <ExternalLink className="h-3 w-3" />
+    </a>
+  ) : null;
+
+/** A row in Experience, Education, Projects or Credentials. */
+const EntryList = ({
+  entries,
+  icon: Icon,
+}: {
+  entries: ProfileEntry[];
+  icon: typeof Briefcase;
+}) => (
+  <ul className="divide-y divide-border/60">
+    {entries.map((entry) => (
+      <li key={entry.id} className="flex gap-3 py-3 first:pt-0 last:pb-0">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border/70 bg-surface-2 text-muted-foreground">
+          <Icon className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[14px] font-semibold leading-snug">{entry.title}</p>
+          {entry.subtitle ? (
+            <p className="mt-0.5 text-[13px] text-foreground/80">{entry.subtitle}</p>
+          ) : null}
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px] text-muted-foreground">
+            {entry.date ? <span>Recorded {monthYear(entry.date)}</span> : null}
+            {entry.date && entry.sourceUrl ? <span aria-hidden>·</span> : null}
+            <SourceLink entry={entry} />
+          </div>
+        </div>
+      </li>
+    ))}
+  </ul>
+);
+
+/** Long log text, clamped to four lines with a toggle. */
+const ClampText = ({ text }: { text: string }) => {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 280;
+  return (
+    <div className="mt-1">
+      <p
+        className={cn(
+          "text-[12.5px] leading-relaxed text-foreground/80",
+          long && !open && "line-clamp-4",
+        )}
+      >
+        {text}
+      </p>
+      {long ? (
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="focus-ring mt-0.5 rounded text-[11.5px] font-medium text-muted-foreground hover:text-foreground"
+          aria-expanded={open}
+        >
+          {open ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  );
+};
+
+const eventLogIcon: Record<EventLogEntry["kind"], typeof CalendarDays> = {
+  event: CalendarDays,
+  met: UserRound,
+  log: MessageSquareText,
+  note: NotebookPen,
+};
+
+const UnverifiedTag = () => (
+  <span className="rounded border border-warn/30 bg-warn/10 px-1 py-px text-[9.5px] font-medium text-warn">
+    your note · unverified
+  </span>
+);
 
 const PersonProfile = () => {
   const { personId } = useParams();
@@ -70,17 +187,9 @@ const PersonProfile = () => {
 
   if (status === "loading") {
     return (
-      <div className="space-y-4">
-        <div className="h-4 w-28 rounded bg-surface-2" />
-        <div className="h-28 rounded-xl border border-border/60 bg-surface-1" />
-        <div className="grid gap-3 sm:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <div
-              key={index}
-              className="h-20 rounded-xl border border-border/60 bg-surface-1"
-            />
-          ))}
-        </div>
+      <div className="mx-auto max-w-[1128px] space-y-4">
+        <div className="h-72 rounded-xl border border-border/60 bg-surface-1" />
+        <div className="h-40 rounded-xl border border-border/60 bg-surface-1" />
         <div className="h-56 rounded-xl border border-border/60 bg-surface-1" />
       </div>
     );
@@ -122,295 +231,440 @@ const PersonProfile = () => {
   }
 
   const company = companyById(world, person.companyId);
-  const approvals = approvalsForPerson(world, person.id);
-  const history = activityForPerson(world, person.id).slice(0, 8);
   const events = eventsForPerson(world, person.id);
-  const related = peopleForCompany(world, person.companyId).filter(
-    (item) => item.id !== person.id,
-  );
+  const profile = buildProfile({
+    name: person.name,
+    role: person.role,
+    companyName: company?.name,
+    claims: person.claims,
+    events,
+  });
+  const approvals = approvalsForPerson(world, person.id);
+  const activity = activityForPerson(world, person.id).slice(0, 6);
+  const related = person.companyId
+    ? peopleForCompany(world, person.companyId).filter((item) => item.id !== person.id)
+    : [];
   const projects = projectsForPerson(world, person.id);
   const milestones = milestonesForPerson(world, person.id);
-  const sourced = person.claims.filter((claim) => claim.status === "sourced");
-  const unverified = person.claims.filter(
-    (claim) => claim.status === "unverified",
-  );
+  const firstName = person.name.split(" ")[0];
+  const email = person.email || profile.email;
+  const lastTouch =
+    Date.parse(person.lastContact) > 0 ? relativeTime(person.lastContact) : "No contact logged";
+
+  const introPaths = world.people
+    .filter((candidate) => candidate.id !== person.id)
+    .map((candidate) => {
+      const edges: string[] = [];
+      if (person.companyId && candidate.companyId === person.companyId) {
+        edges.push(`Same company (${company?.name ?? "org"})`);
+      }
+      const sharedEvent = events.find((ev) => ev.attendeeIds.includes(candidate.id));
+      if (sharedEvent) edges.push(`Event: ${sharedEvent.name}`);
+      const sharedProject = projects.find((proj) => proj.personIds.includes(candidate.id));
+      if (sharedProject) edges.push(`Project: ${sharedProject.name}`);
+      return { candidate, edges };
+    })
+    .filter((item) => item.edges.length > 0)
+    .sort((a, b) => b.candidate.strength - a.candidate.strength)
+    .slice(0, 4);
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        back={{ label: "People", href: "/people" }}
-        eyebrow={
-          <span className="inline-flex items-center gap-1.5">
-            <Building2 className="h-3 w-3" />
-            {company?.name ?? "Independent"} · {company?.sector}
-          </span>
-        }
-        title={
-          <span className="flex flex-wrap items-center gap-3">
-            {person.name}
-            <span className="rounded-full border border-border/70 bg-surface-2 px-2 py-0.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              {strengthLabel(person)} · {person.strength}
-            </span>
-          </span>
-        }
-        description={person.summary}
-        actions={
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 gap-1.5 rounded-lg text-[12px]"
-              onClick={() => openCopilot(`Research ${person.name} for me`, { kind: "person", id: person.id })}
-            >
-              <Sparkles className="h-3.5 w-3.5 text-primary" />
-              Ask Atlas
-            </Button>
-            <Button
-              size="sm"
-              className="h-9 gap-1.5 rounded-lg text-[12px]"
-              onClick={() => openCopilot(`Draft a note to ${person.name}`, { kind: "person", id: person.id })}
-            >
-              <Mail className="h-3.5 w-3.5" />
-              Draft follow-up
-            </Button>
-          </>
-        }
-      />
+    <div className="mx-auto w-full max-w-[1128px] space-y-4 pb-8">
+      <Link
+        to="/people"
+        className="focus-ring inline-flex items-center gap-1 rounded text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        ← People
+      </Link>
 
-      <div className="panel flex flex-wrap items-center gap-4 p-4">
-        <PersonAvatar name={person.name} size="lg" />
-        <div className="min-w-0 flex-1">
-          <p className="text-[13.5px] font-medium">
-            {person.role}
-            {company ? (
-              <>
-                {" "}
-                at{" "}
-                <Link
-                  to={`/people?tab=companies&focus=${company.id}`}
-                  className="focus-ring rounded underline decoration-border underline-offset-4 hover:decoration-foreground/40"
-                >
-                  {company.name}
-                </Link>
-              </>
-            ) : null}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <MapPin className="h-3 w-3" />
-              {person.location} · {person.timezone}
-            </span>
-            <span className="text-border">·</span>
-            <a
-              href={`mailto:${person.email}`}
-              className="focus-ring rounded transition-colors hover:text-foreground"
-            >
-              {person.email}
-            </a>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {person.tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-full border border-border/70 bg-surface-2 px-2 py-0.5 text-[10px] text-muted-foreground"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-5">
-          <div>
-            <p className="eyebrow">Strength</p>
-            <div className="mt-1 flex items-center gap-2">
-              <StrengthMeter value={person.strength} />
-              <span className="num text-[16px] font-semibold">
-                {person.strength}
-              </span>
-            </div>
-          </div>
-          <div>
-            <p className="eyebrow">Last contact</p>
-            <p className="mt-1 text-[12.5px] font-medium">
-              {relativeTime(person.lastContact)}
-            </p>
-          </div>
-          <div>
-            <p className="eyebrow">Sourced facts</p>
-            <p className="num mt-1 text-[16px] font-semibold">
-              {sourced.length}
-              <span className="text-[11px] font-normal text-muted-foreground">
-                /{person.claims.length}
-              </span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <div className="space-y-4">
-          <section className="panel p-4">
-            <SectionHeader
-              title="Current facts"
-              count={person.claims.length}
-              action={
-                unverified.length ? (
-                  <span className="text-[10.5px] text-warn">
-                    {unverified.length} needs a source
-                  </span>
-                ) : (
-                  <span className="text-[10.5px] text-muted-foreground">
-                    all sourced
-                  </span>
-                )
-              }
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0 space-y-4">
+          {/* Top card: banner, avatar, name, headline */}
+          <section className="panel overflow-hidden" aria-label={`${person.name} profile`}>
+            <div
+              className="h-24 sm:h-36"
+              aria-hidden
+              style={{
+                background:
+                  "radial-gradient(120% 140% at 12% 0%, hsl(var(--primary) / 0.38), transparent 55%), radial-gradient(110% 130% at 88% 10%, hsl(var(--agent-indigo) / 0.34), transparent 60%), linear-gradient(135deg, hsl(var(--surface-3)), hsl(var(--surface-1)))",
+              }}
             />
-            <div className="mt-3 space-y-2">
-              {person.claims.map((claim) => {
-                const Icon = sourceIcons[claim.source.kind];
-                const isUnverified = claim.status === "unverified";
-                return (
-                  <div
-                    key={claim.id}
-                    className={cn(
-                      "rounded-lg border p-3",
-                      isUnverified
-                        ? "border-dashed border-warn/35 bg-warn/[0.04]"
-                        : "border-border/60 bg-background/40",
+            <div className="px-5 pb-5 sm:px-6 sm:pb-6">
+              <PersonAvatar
+                name={person.name}
+                size="lg"
+                className="-mt-12 h-24 w-24 border-4 border-card text-2xl sm:-mt-16 sm:h-32 sm:w-32 sm:text-3xl"
+              />
+              <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <h1 className="text-[22px] font-semibold leading-tight tracking-[-0.01em] sm:text-[26px]">
+                    {person.name}
+                  </h1>
+                  <p className="mt-1 text-[14px] leading-snug text-foreground/90 sm:text-[15px]">
+                    {profile.headline || (
+                      <span className="text-muted-foreground">No headline collected yet</span>
                     )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-[12.5px] leading-relaxed text-foreground/90">
-                        {claim.text}
-                      </p>
-                      <span
-                        className={cn(
-                          "shrink-0 rounded-full border px-1.5 py-0.5 text-[9.5px] font-medium capitalize",
-                          confidenceClass[claim.confidence],
-                        )}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted-foreground">
+                    {person.location ? (
+                      <span className="inline-flex items-center gap-1">
+                        <MapPin className="h-3.5 w-3.5" />
+                        {person.location}
+                      </span>
+                    ) : null}
+                    {person.location && (email || profile.linkedinUrl) ? (
+                      <span aria-hidden>·</span>
+                    ) : null}
+                    {email ? (
+                      <a
+                        href={`mailto:${email}`}
+                        className="focus-ring inline-flex items-center gap-1 rounded font-medium text-primary hover:underline"
                       >
-                        {claim.confidence}
-                      </span>
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10.5px] text-muted-foreground">
-                      <Icon className="h-3 w-3" />
-                      <span className="font-medium text-foreground/70">
-                        {claim.source.label}
-                      </span>
-                      <span className="text-border">·</span>
-                      <span>{shortDate(claim.source.date)}</span>
-                      {isUnverified ? (
-                        <span className="ml-1 rounded border border-warn/30 bg-warn/10 px-1 py-px text-[9px] font-medium text-warn">
-                          not canonical
-                        </span>
-                      ) : null}
-                    </div>
+                        <Mail className="h-3.5 w-3.5" />
+                        Contact info
+                      </a>
+                    ) : null}
+                    {profile.linkedinUrl ? (
+                      <a
+                        href={profile.linkedinUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="focus-ring inline-flex items-center gap-1 rounded font-medium text-primary hover:underline"
+                      >
+                        LinkedIn profile
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    ) : null}
                   </div>
-                );
-              })}
-            </div>
-            <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground/80">
-              Atlas attaches a source to every fact. Unverified claims are held
-              out of anything that sends or publishes.
-            </p>
-          </section>
-
-          <section className="panel p-4">
-            <SectionHeader
-              title="Interaction history"
-              count={history.length}
-              action={
-                <Link
-                  to="/activity"
-                  className="focus-ring rounded text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                  <p className="mt-2 text-[12.5px] text-muted-foreground">
+                    <span className="font-medium capitalize text-foreground/80">{person.warmth}</span>
+                    {" · "}last contact {lastTouch}
+                  </p>
+                </div>
+                {company ? (
+                  <Link
+                    to={`/people?tab=companies&focus=${company.id}`}
+                    className="focus-ring flex shrink-0 items-center gap-2 rounded-md text-[13px] font-medium hover:text-primary sm:max-w-[220px]"
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded border border-border/70 bg-surface-2 text-[11px] font-semibold">
+                      {company.name.slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="truncate">{company.name}</span>
+                  </Link>
+                ) : null}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  className="h-9 gap-1.5 rounded-full px-4 text-[13px]"
+                  onClick={() =>
+                    openCopilot(`Draft a note to ${person.name}`, { kind: "person", id: person.id })
+                  }
                 >
-                  Full timeline
-                </Link>
-              }
-            />
-            {history.length === 0 ? (
-              <EmptyState
-                className="mt-3"
-                icon={CalendarDays}
-                title="No interactions logged"
-                description="Nothing has touched this relationship yet. A first note is the fastest way to start the history."
-                action={
+                  <Mail className="h-4 w-4" />
+                  Draft a message
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-9 gap-1.5 rounded-full px-4 text-[13px]"
+                  onClick={() =>
+                    openCopilot(`Research ${person.name} for me`, { kind: "person", id: person.id })
+                  }
+                >
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  Ask Atlas
+                </Button>
+                {profile.linkedinUrl ? (
                   <Button
                     size="sm"
                     variant="outline"
-                    className="rounded-lg"
-                    onClick={() => openCopilot(`Draft a note to ${person.name}`, { kind: "person", id: person.id })}
+                    className="h-9 gap-1.5 rounded-full px-4 text-[13px]"
+                    asChild
                   >
-                    Draft the first note
+                    <a href={profile.linkedinUrl} target="_blank" rel="noreferrer">
+                      Open on LinkedIn
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
                   </Button>
-                }
-              />
+                ) : null}
+              </div>
+            </div>
+          </section>
+
+          <ProfileCard title="About">
+            {profile.about ? (
+              <p className="whitespace-pre-line text-[14px] leading-relaxed text-foreground/90">
+                {profile.about}
+              </p>
             ) : (
-              <ol className="mt-3 space-y-3">
-                {history.map((entry) => {
+              <EmptyLine>
+                No about text collected yet. It fills in when {firstName}'s public profile summary
+                is saved with a source.
+              </EmptyLine>
+            )}
+          </ProfileCard>
+
+          <ProfileCard
+            title="Activity"
+            action={
+              profile.posts.length ? (
+                <span className="text-[11.5px] text-muted-foreground">
+                  {profile.posts.length} post{profile.posts.length === 1 ? "" : "s"}
+                </span>
+              ) : null
+            }
+          >
+            {profile.posts.length ? (
+              <ul className="grid gap-3 sm:grid-cols-2">
+                {profile.posts.slice(0, 4).map((post) => (
+                  <li
+                    key={post.id}
+                    className="flex flex-col rounded-lg border border-border/60 bg-background/40 p-3"
+                  >
+                    <p className="text-[11.5px] text-muted-foreground">
+                      {post.date ? `Posted ${dayMonthYear(post.date)}` : "Post"}
+                    </p>
+                    <p className="mt-1 line-clamp-3 flex-1 text-[13px] leading-relaxed text-foreground/90">
+                      {post.snippet}
+                    </p>
+                    {post.url ? (
+                      <a
+                        href={post.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="focus-ring mt-2 inline-flex items-center gap-1 self-start rounded text-[12px] font-medium text-primary hover:underline"
+                      >
+                        See post
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyLine>
+                No posts collected yet. Recent posts show here as a short snippet and a link once
+                the LinkedIn collector saves them.
+              </EmptyLine>
+            )}
+          </ProfileCard>
+
+          <ProfileCard title="Experience">
+            {profile.experience.length ? (
+              <EntryList entries={profile.experience} icon={Briefcase} />
+            ) : (
+              <EmptyLine>
+                No sourced roles yet. Jobs show here when a role is saved with a source, such as
+                their LinkedIn page.
+              </EmptyLine>
+            )}
+          </ProfileCard>
+
+          <ProfileCard title="Education">
+            {profile.education.length ? (
+              <EntryList entries={profile.education} icon={GraduationCap} />
+            ) : (
+              <EmptyLine>No education collected yet.</EmptyLine>
+            )}
+          </ProfileCard>
+
+          {profile.projects.length ? (
+            <ProfileCard title="Projects & talks">
+              <EntryList entries={profile.projects} icon={BookOpen} />
+            </ProfileCard>
+          ) : null}
+
+          {profile.credentials.length ? (
+            <ProfileCard title="Licenses & credentials">
+              <EntryList entries={profile.credentials} icon={Award} />
+            </ProfileCard>
+          ) : null}
+
+          <ProfileCard
+            title="Event log"
+            action={
+              <span className="text-[11.5px] text-muted-foreground">
+                {profile.eventLog.length} entr{profile.eventLog.length === 1 ? "y" : "ies"}
+              </span>
+            }
+          >
+            {profile.eventLog.length ? (
+              <ol className="relative space-y-4 border-l border-border/70 pl-5">
+                {profile.eventLog.map((entry) => {
+                  const Icon = eventLogIcon[entry.kind];
+                  const title = entry.eventId ? (
+                    <Link
+                      to={`/events?focus=${entry.eventId}`}
+                      className="focus-ring rounded hover:text-primary"
+                    >
+                      {entry.title}
+                    </Link>
+                  ) : (
+                    entry.title
+                  );
+                  return (
+                    <li key={entry.id} className="relative">
+                      <span className="absolute -left-[31px] top-0 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground">
+                        <Icon className="h-3 w-3" />
+                      </span>
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                        <p className="text-[13.5px] font-semibold leading-snug">{title}</p>
+                        <span className="num shrink-0 text-[11.5px] text-muted-foreground">
+                          {entry.date ? dayMonthYear(entry.date) : "Date not recorded"}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-muted-foreground">
+                        {entry.meta ? <span>{entry.meta}</span> : null}
+                        {entry.place ? (
+                          <span className="inline-flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {entry.place}
+                          </span>
+                        ) : null}
+                        {entry.unverified ? <UnverifiedTag /> : null}
+                      </div>
+                      {entry.detail ? <ClampText text={entry.detail} /> : null}
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : (
+              <EmptyLine>
+                No events or meetings with {firstName} yet. They show here when you log where you
+                met or an event lists them.
+              </EmptyLine>
+            )}
+          </ProfileCard>
+
+          {profile.notes.length ? (
+            <ProfileCard
+              title="Your notes"
+              action={<span className="text-[11.5px] text-warn">unverified</span>}
+            >
+              <ul className="space-y-2">
+                {profile.notes.map((note) => (
+                  <li
+                    key={note.id}
+                    className="rounded-lg border border-dashed border-warn/30 bg-warn/[0.04] px-3 py-2"
+                  >
+                    <p className="text-[12.5px] leading-relaxed text-foreground/85">{note.text}</p>
+                    {note.date ? (
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        {dayMonthYear(note.date)}
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Your own notes. They stay out of the headline, experience and anything that sends.
+              </p>
+            </ProfileCard>
+          ) : null}
+
+          {activity.length ? (
+            <ProfileCard title="Agent activity">
+              <ol className="space-y-3">
+                {activity.map((entry) => {
                   const agent = agentById(world, entry.agentId);
                   return (
                     <li key={entry.id} className="flex gap-2.5">
                       {agent ? <AgentAvatar agent={agent} size="sm" /> : null}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
-                          <p className="text-[12px] font-medium leading-snug">
-                            {entry.title}
-                          </p>
-                          <span className="num shrink-0 text-[10px] text-muted-foreground/70">
+                          <p className="text-[12.5px] font-medium leading-snug">{entry.title}</p>
+                          <span className="num shrink-0 text-[10.5px] text-muted-foreground">
                             {relativeTime(entry.at)}
                           </span>
                         </div>
-                        <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                        <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
                           {entry.detail}
                         </p>
-                        {entry.evidence?.length ? (
-                          <EvidenceRow
-                            evidence={entry.evidence}
-                            limit={1}
-                            className="mt-1.5"
-                          />
-                        ) : null}
                       </div>
                     </li>
                   );
                 })}
               </ol>
+            </ProfileCard>
+          ) : null}
+
+          <ProfileCard
+            title="Sources"
+            action={
+              <span className="text-[11.5px] text-muted-foreground">
+                {profile.sources.length} sourced of {person.claims.length}
+              </span>
+            }
+          >
+            {profile.sources.length ? (
+              <ul className="space-y-1.5">
+                {profile.sources.map((claim) => (
+                  <li
+                    key={claim.id}
+                    className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-[12px]"
+                  >
+                    <span className="min-w-0 flex-1 text-foreground/85">{claim.text}</span>
+                    {claim.source.locator ? (
+                      <a
+                        href={claim.source.locator}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="focus-ring inline-flex shrink-0 items-center gap-1 rounded text-[11px] text-muted-foreground hover:text-foreground"
+                      >
+                        {claim.source.label}
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : (
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {claim.source.label}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyLine>Nothing about {firstName} has a source yet.</EmptyLine>
             )}
-          </section>
+          </ProfileCard>
         </div>
 
-        <div className="space-y-4">
-          <section className="panel p-4">
-            <SectionHeader
-              title="Open decisions"
-              count={approvals.length}
-              action={
-                <Link
-                  to="/approvals"
-                  className="focus-ring rounded text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Inbox
-                </Link>
-              }
-            />
-            {approvals.length === 0 ? (
-              <div className="mt-3 rounded-lg border border-border/60 bg-background/40 p-3">
-                <p className="text-[12px] font-medium">Nothing waiting</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                  No outbound action is pending for {person.name.split(" ")[0]}.
-                  Mira will hold anything new here first.
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mt-2 h-7 rounded-md px-2 text-[11px]"
-                  onClick={() => openCopilot(`Draft a note to ${person.name}`, { kind: "person", id: person.id })}
-                >
-                  <Sparkles className="h-3 w-3 text-primary" />
-                  Draft the next touch
-                </Button>
+        {/* Right rail */}
+        <aside className="min-w-0 space-y-4">
+          <section className="panel p-4" aria-label="Relationship">
+            <h2 className="text-[14px] font-semibold">Relationship</h2>
+            <div className="mt-3 grid grid-cols-2 gap-3 text-[12px]">
+              <div>
+                <p className="eyebrow">Warmth</p>
+                <p className="mt-1 font-medium capitalize">{person.warmth}</p>
               </div>
+              <div>
+                <p className="eyebrow">Stage</p>
+                <p className="mt-1 font-medium first-letter:uppercase">
+                  {profile.stage ?? "Not recorded"}
+                </p>
+              </div>
+              <div className="col-span-2">
+                <p className="eyebrow">Last contact</p>
+                <p className="mt-1 font-medium">{lastTouch}</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel p-4" aria-label="Open decisions">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[14px] font-semibold">Open decisions</h2>
+              <Link
+                to="/approvals"
+                className="focus-ring rounded text-[11.5px] text-muted-foreground hover:text-foreground"
+              >
+                Inbox
+              </Link>
+            </div>
+            {approvals.length === 0 ? (
+              <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
+                Nothing waiting for {firstName}.
+              </p>
             ) : (
               <div className="mt-3 space-y-2">
                 {approvals.map((approval) => (
@@ -425,9 +679,7 @@ const PersonProfile = () => {
                         {relativeTime(approval.createdAt)}
                       </span>
                     </div>
-                    <p className="mt-1.5 text-[12.5px] font-medium leading-snug">
-                      {approval.title}
-                    </p>
+                    <p className="mt-1.5 text-[12.5px] font-medium leading-snug">{approval.title}</p>
                     <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
                       {approval.reason}
                     </p>
@@ -458,64 +710,9 @@ const PersonProfile = () => {
             )}
           </section>
 
-          <section className="panel p-4">
-            <SectionHeader title="Events" count={events.length} />
-            <div className="mt-2.5 space-y-2">
-              {events.map((event) => (
-                <Link
-                  key={event.id}
-                  to={`/events?focus=${event.id}`}
-                  className="focus-ring group flex items-center gap-2.5 rounded-lg border border-border/60 bg-background/40 p-2.5 transition-colors hover:border-border"
-                >
-                  <div className="flex h-9 w-9 shrink-0 flex-col items-center justify-center rounded-md border border-border/70 bg-surface-2">
-                    <span className="num text-[11px] font-semibold leading-none">
-                      {new Date(event.date).getDate()}
-                    </span>
-                    <span className="text-[8px] uppercase tracking-[0.08em] text-muted-foreground">
-                      {new Date(event.date).toLocaleString("en-US", {
-                        month: "short",
-                      })}
-                    </span>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[12px] font-medium">
-                      {event.name}
-                    </p>
-                    <p className="truncate text-[10.5px] text-muted-foreground">
-                      {event.location} ·{" "}
-                      {event.status === "past" ? "past" : "upcoming"}
-                    </p>
-                  </div>
-                  <ArrowRight className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60" />
-                </Link>
-              ))}
-              {events.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">
-                  No events with {person.name.split(" ")[0]} yet.
-                </p>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="panel p-4">
-            <SectionHeader
-              title="Projects & milestones"
-              count={projects.length}
-              action={
-                <Link
-                  to="/projects"
-                  className="focus-ring rounded text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  All projects
-                </Link>
-              }
-            />
-            {projects.length === 0 ? (
-              <p className="mt-2.5 text-[11px] text-muted-foreground">
-                No project references {person.name.split(" ")[0]} yet. Projects
-                and milestones reference people — they never copy them.
-              </p>
-            ) : (
+          {projects.length ? (
+            <section className="panel p-4" aria-label="Projects and milestones">
+              <h2 className="text-[14px] font-semibold">Projects & milestones</h2>
               <div className="mt-2.5 space-y-2">
                 {projects.map((project) => {
                   const projectMilestones = milestones.filter(
@@ -525,7 +722,7 @@ const PersonProfile = () => {
                     <div key={project.id}>
                       <Link
                         to={`/projects/${project.id}`}
-                        className="focus-ring inline-flex items-center gap-1 rounded text-[12px] font-medium transition-colors hover:text-primary"
+                        className="focus-ring inline-flex items-center gap-1 rounded text-[12.5px] font-medium hover:text-primary"
                       >
                         {project.name}
                         <ArrowRight className="h-3 w-3" />
@@ -537,17 +734,8 @@ const PersonProfile = () => {
                             <Link
                               key={milestone.id}
                               to={`/milestones/${milestone.id}`}
-                              className="focus-ring flex items-center gap-2 rounded-md px-1 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
+                              className="focus-ring flex items-center gap-2 rounded-md px-1 py-1 text-[11.5px] text-muted-foreground hover:bg-surface-2 hover:text-foreground"
                             >
-                              <span
-                                className={cn(
-                                  "h-1.5 w-1.5 shrink-0 rounded-full",
-                                  milestone.status === "running" && "bg-run",
-                                  milestone.status === "blocked" && "bg-warn",
-                                  milestone.status === "queued" && "bg-idle",
-                                  milestone.status === "done" && "bg-primary",
-                                )}
-                              />
                               <span className="flex-1 truncate">{milestone.name}</span>
                               <span
                                 className={cn(
@@ -560,132 +748,64 @@ const PersonProfile = () => {
                             </Link>
                           );
                         })}
-                        {projectMilestones.length === 0 ? (
-                          <p className="px-1 text-[10.5px] text-muted-foreground/80">
-                            No milestones reference them in this project yet.
-                          </p>
-                        ) : null}
                       </div>
                     </div>
                   );
                 })}
               </div>
-            )}
-          </section>
+            </section>
+          ) : null}
 
-          <section className="panel p-4">
-            <SectionHeader
-              title="Who can introduce me"
-              count={
-                world.people.filter(
-                  (candidate) =>
-                    candidate.id !== person.id &&
-                    ((person.companyId &&
-                      candidate.companyId === person.companyId) ||
-                      events.some((ev) =>
-                        ev.attendeeIds.includes(candidate.id),
-                      ) ||
-                      projects.some((proj) =>
-                        proj.personIds.includes(candidate.id),
-                      )),
-                ).length
-              }
-            />
-            <p className="mt-1 text-[10.5px] text-muted-foreground">
-              Strength-weighted 1-hop warm connectors from shared company,
-              events, or projects.
-            </p>
-            <div className="mt-2.5 space-y-1.5">
-              {(() => {
-                const introPaths = world.people
-                  .filter((candidate) => candidate.id !== person.id)
-                  .map((candidate) => {
-                    const edges: string[] = [];
-                    if (
-                      person.companyId &&
-                      candidate.companyId === person.companyId
-                    ) {
-                      edges.push(`Same company (${company?.name ?? "org"})`);
-                    }
-                    const sharedEvent = events.find((ev) =>
-                      ev.attendeeIds.includes(candidate.id),
-                    );
-                    if (sharedEvent) edges.push(`Event: ${sharedEvent.name}`);
-                    const sharedProject = projects.find((proj) =>
-                      proj.personIds.includes(candidate.id),
-                    );
-                    if (sharedProject)
-                      edges.push(`Project: ${sharedProject.name}`);
-                    return { candidate, edges };
-                  })
-                  .filter((item) => item.edges.length > 0)
-                  .sort((a, b) => b.candidate.strength - a.candidate.strength)
-                  .slice(0, 4);
-
-                if (introPaths.length === 0) {
-                  return (
-                    <p className="text-[11px] text-muted-foreground">
-                      No sourced 1-hop intro path yet. Ask Atlas to enrich
-                      shared events or org history.
-                    </p>
-                  );
-                }
-                return introPaths.map(({ candidate, edges }) => (
-                  <div
+          <section className="panel p-4" aria-label="Who can introduce me">
+            <h2 className="text-[14px] font-semibold">Who can introduce me</h2>
+            {introPaths.length === 0 ? (
+              <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
+                No shared company, event or project with anyone else yet.
+              </p>
+            ) : (
+              <div className="mt-2.5 space-y-1.5">
+                {introPaths.map(({ candidate, edges }) => (
+                  <Link
                     key={candidate.id}
-                    className="flex items-center gap-2 rounded-lg border border-border/60 bg-background/40 px-2.5 py-2"
+                    to={`/people/${candidate.id}`}
+                    className="focus-ring flex items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-surface-2"
                   >
                     <PersonAvatar name={candidate.name} size="sm" />
                     <div className="min-w-0 flex-1">
-                      <Link
-                        to={`/people/${candidate.id}`}
-                        className="block truncate text-[12px] font-medium hover:text-primary"
-                      >
-                        {candidate.name}
-                      </Link>
-                      <p className="truncate text-[10px] text-muted-foreground">
+                      <p className="truncate text-[12.5px] font-medium">{candidate.name}</p>
+                      <p className="truncate text-[10.5px] text-muted-foreground">
                         {edges.join(" · ")}
                       </p>
                     </div>
-                    <StrengthMeter value={candidate.strength} />
-                  </div>
-                ));
-              })()}
-            </div>
+                  </Link>
+                ))}
+              </div>
+            )}
           </section>
 
-          <section className="panel p-4">
-            <SectionHeader
-              title={`Also at ${company?.name ?? "the company"}`}
-              count={related.length}
-            />
-            <div className="mt-2.5 space-y-1">
-              {related.map((other) => (
-                <Link
-                  key={other.id}
-                  to={`/people/${other.id}`}
-                  className="focus-ring flex items-center gap-2 rounded-md px-1 py-1.5 transition-colors hover:bg-surface-2"
-                >
-                  <PersonAvatar name={other.name} size="sm" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[12px] font-medium">
-                      {other.name}
-                    </p>
-                    <p className="truncate text-[10.5px] text-muted-foreground">
-                      {other.role}
-                    </p>
-                  </div>
-                  <StrengthMeter value={other.strength} />
-                </Link>
-              ))}
-              {related.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">
-                  The only person mapped at this company.
-                </p>
-              ) : null}
-            </div>
-          </section>
-        </div>
+          {related.length ? (
+            <section className="panel p-4" aria-label="Others at the company">
+              <h2 className="text-[14px] font-semibold">
+                More people at {company?.name ?? "this company"}
+              </h2>
+              <div className="mt-2.5 space-y-1">
+                {related.map((other) => (
+                  <Link
+                    key={other.id}
+                    to={`/people/${other.id}`}
+                    className="focus-ring flex items-center gap-2 rounded-md px-1 py-1.5 hover:bg-surface-2"
+                  >
+                    <PersonAvatar name={other.name} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12.5px] font-medium">{other.name}</p>
+                      <p className="truncate text-[10.5px] text-muted-foreground">{other.role}</p>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </aside>
       </div>
     </div>
   );
