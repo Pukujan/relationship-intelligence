@@ -60,14 +60,14 @@ def main() -> int:
             print(f"RED H5 {rid}: receipt outside workspace")
             failures += 1
         outcome = doc.get("outcome")
-        if outcome not in {"success", "partial", "escalated", "failed"}:
+        if outcome not in {"success", "partial", "escalated", "failed", "skipped"}:
             print(f"RED {rid}: invalid outcome {outcome!r}")
             failures += 1
         trace = str(doc.get("traceId", ""))
         if doc.get("status") == "done" and not re.fullmatch(r"[0-9a-f]{32}", trace):
             print(f"RED {rid}: finished receipt without a W3C traceId")
             failures += 1
-        if outcome == "failed":
+        if outcome in {"failed", "skipped"}:
             counts = doc.get("counts") or {}
             if any(counts.get(k, 0) for k in ("notes", "approvals", "drafts")):
                 print(f"RED H3 {rid}: failed receipt claims writes")
