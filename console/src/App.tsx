@@ -34,6 +34,8 @@ import NotFound from "./pages/NotFound";
 import SessionWorkspace from "./components/sessions/SessionWorkspace";
 import Profile from "./pages/Profile";
 import Schedules from "./pages/Schedules";
+import Workflows from "./pages/Workflows";
+import WorkflowEditor from "./pages/WorkflowEditor";
 
 const queryClient = new QueryClient();
 
@@ -71,6 +73,8 @@ const App = () => (
                 <Route path="/copilot" element={<SessionWorkspace />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/schedules" element={<Schedules />} />
+                <Route path="/workflows" element={<Workflows />} />
+                <Route path="/workflows/:id" element={<WorkflowEditor />} />
                 <Route path="/people" element={<People />} />
                 <Route path="/people/:personId" element={<PersonProfile />} />
                 <Route path="/events" element={<Events />} />
