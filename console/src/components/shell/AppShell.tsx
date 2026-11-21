@@ -469,8 +469,15 @@ const ScrollToTop = () => {
   return null;
 };
 
-export const AppShell = () => (
-  <div className="min-h-screen bg-background">
+export const AppShell = () => {
+  // The copilot workspace is a full-height pane: its rail and message list only
+  // scroll inside a bounded box, so on /copilot the shell stops growing with
+  // content and hands the viewport height down to the page. Other pages keep
+  // the document-flow layout.
+  const { pathname } = useLocation();
+  const fullHeight = pathname === "/copilot";
+  return (
+  <div className={fullHeight ? "h-screen overflow-hidden bg-background" : "min-h-screen bg-background"}>
     <a
       href="#main"
       className="sr-only focus:not-sr-only focus:fixed focus:bottom-4 focus:left-4 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground"
@@ -484,9 +491,13 @@ export const AppShell = () => (
       <main
         id="main"
         tabIndex={-1}
-        className="grid-warm min-h-[calc(100vh-3.5rem)] px-3 pb-24 pt-5 outline-none sm:px-5 sm:pt-6 lg:px-8"
+        className={
+          fullHeight
+            ? "grid-warm h-[calc(100vh-3.5rem)] overflow-hidden px-3 pb-24 pt-5 outline-none sm:px-5 sm:pt-6 lg:px-8"
+            : "grid-warm min-h-[calc(100vh-3.5rem)] px-3 pb-24 pt-5 outline-none sm:px-5 sm:pt-6 lg:px-8"
+        }
       >
-        <div className="mx-auto w-full max-w-[1180px]">
+        <div className={fullHeight ? "mx-auto h-full min-h-0 w-full max-w-[1180px]" : "mx-auto w-full max-w-[1180px]"}>
           <Outlet />
         </div>
       </main>
@@ -494,4 +505,5 @@ export const AppShell = () => (
     <AgentCursorOverlay />
     <CopilotDock />
   </div>
-);
+  );
+};

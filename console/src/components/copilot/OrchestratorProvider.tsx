@@ -61,7 +61,7 @@ export interface CheckIn {
 }
 
 interface OrchestratorValue {
-  openCopilot: (seedPrompt?: string) => void;
+  openCopilot: (seedPrompt?: string, scope?: { kind: string; id: string | null }) => void;
   answerFor: (prompt: string) => CopilotAnswer | null;
   call: CallSession;
   callApprovals: Approval[];
@@ -111,8 +111,8 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
 
   // Quick-ask opens or focuses the session workspace with a seeded composer.
   const openCopilot = useCallback(
-    (prompt = "") => {
-      navigate("/copilot", { state: { seed: prompt } });
+    (prompt = "", scope?: { kind: string; id: string | null }) => {
+      navigate("/copilot", { state: { seed: prompt, scope } });
     },
     [navigate],
   );
