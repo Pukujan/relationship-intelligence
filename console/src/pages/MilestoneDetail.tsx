@@ -14,16 +14,16 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
 import {
   agentById,
-  missionStatusMeta,
+  milestoneStatusMeta,
   objectiveById,
   pendingApprovals,
   personById,
-  planForMission,
+  planForMilestone,
   planProgress,
   projectById,
   relativeTime,
   shortDate,
-  tasksForMission,
+  tasksForMilestone,
 } from "@/data/derive";
 import { useOrchestrator } from "@/components/copilot/OrchestratorProvider";
 import { AgentAvatar } from "@/components/AgentAvatar";
@@ -58,8 +58,8 @@ const taskTone: Record<TaskStatus, { label: string; className: string }> = {
   done: { label: "Done", className: "border-primary/30 bg-primary/10 text-primary" },
 };
 
-const MissionDetail = () => {
-  const { missionId } = useParams();
+const MilestoneDetail = () => {
+  const { milestoneId } = useParams();
   const { world, status, error, reload } = useData();
   const { openCopilot } = useOrchestrator();
 
@@ -67,24 +67,24 @@ const MissionDetail = () => {
   if (status === "error" || !world) {
     return (
       <LoadError
-        title="This mission didn't load"
-        description={error ?? "Something went wrong reading the mission."}
+        title="This milestone didn't load"
+        description={error ?? "Something went wrong reading the milestone."}
         onRetry={reload}
       />
     );
   }
 
-  const mission = world.missions.find((item) => item.id === missionId);
-  if (!mission) {
+  const milestone = world.milestones.find((item) => item.id === milestoneId);
+  if (!milestone) {
     return (
       <div className="panel p-6">
         <EmptyState
           icon={CalendarDays}
-          title="Mission not found"
-          description="That mission is not in this workspace. It may have been closed or belongs to another project."
+          title="Milestone not found"
+          description="That milestone is not in this workspace. It may have been closed or belongs to another project."
           action={
             <Button size="sm" className="rounded-lg" asChild>
-              <Link to="/missions">Back to missions</Link>
+              <Link to="/milestones">Back to milestones</Link>
             </Button>
           }
         />
@@ -92,28 +92,28 @@ const MissionDetail = () => {
     );
   }
 
-  const project = projectById(world, mission.projectId);
-  const objective = objectiveById(world, mission.objectiveId);
-  const plan = planForMission(world, mission.id);
-  const tasks = tasksForMission(world, mission.id);
-  const people = mission.personIds
+  const project = projectById(world, milestone.projectId);
+  const objective = objectiveById(world, milestone.objectiveId);
+  const plan = planForMilestone(world, milestone.id);
+  const tasks = tasksForMilestone(world, milestone.id);
+  const people = milestone.personIds
     .map((id) => personById(world, id))
     .filter((person): person is NonNullable<typeof person> => Boolean(person));
-  const event = mission.eventId
-    ? world.events.find((item) => item.id === mission.eventId)
+  const event = milestone.eventId
+    ? world.events.find((item) => item.id === milestone.eventId)
     : undefined;
   const approvals = pendingApprovals(world).filter((approval) =>
-    mission.agentIds.includes(approval.agentId),
+    milestone.agentIds.includes(approval.agentId),
   );
-  const meta = missionStatusMeta[mission.status];
-  const agents = mission.agentIds
+  const meta = milestoneStatusMeta[milestone.status];
+  const agents = milestone.agentIds
     .map((id) => agentById(world, id))
     .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent));
 
   return (
     <div className="space-y-5">
       <PageHeader
-        back={{ label: "Missions", href: "/missions" }}
+        back={{ label: "Milestones", href: "/milestones" }}
         eyebrow={
           <span className="flex flex-wrap items-center gap-1.5 normal-case tracking-normal">
             {project ? (
@@ -135,17 +135,17 @@ const MissionDetail = () => {
             ) : null}
           </span>
         }
-        title={mission.name}
-        description={mission.summary}
+        title={milestone.name}
+        description={milestone.summary}
         actions={
           <Button
             variant="outline"
             size="sm"
             className="h-9 gap-1.5 rounded-lg text-[12px]"
-            onClick={() => openCopilot(`What's the plan for ${mission.name}?`)}
+            onClick={() => openCopilot(`What's the plan for ${milestone.name}?`)}
           >
             <Sparkles className="h-3.5 w-3.5 text-primary" />
-            Ask about this mission
+            Ask about this milestone
           </Button>
         }
       />
@@ -153,11 +153,11 @@ const MissionDetail = () => {
       <div className="flex flex-wrap items-center gap-2">
         <Pill className={meta.className}>{meta.label}</Pill>
         <Pill className="border-border/70 bg-transparent text-muted-foreground">
-          {mission.horizon === "today" ? "Due today" : "This week"}
+          {milestone.horizon === "today" ? "Due today" : "This week"}
         </Pill>
         <Pill className="border-border/70 bg-surface-2 text-muted-foreground">
           <Clock className="h-3 w-3" />
-          {relativeTime(mission.due)} · {shortDate(mission.due)}
+          {relativeTime(milestone.due)} · {shortDate(milestone.due)}
         </Pill>
         <div className="flex items-center gap-1.5">
           {agents.map((agent) => (
@@ -198,14 +198,14 @@ const MissionDetail = () => {
                 className="mt-3"
                 icon={ListChecks}
                 title="No plan drafted yet"
-                description={`${agents[0]?.name ?? "The agent"} drafts the plan when this mission starts. Until then it stays queued.`}
+                description={`${agents[0]?.name ?? "The agent"} drafts the plan when this milestone starts. Until then it stays queued.`}
                 action={
                   <Button
                     size="sm"
                     variant="outline"
                     className="rounded-lg"
                     onClick={() =>
-                      openCopilot(`Draft a plan for ${mission.name}`)
+                      openCopilot(`Draft a plan for ${milestone.name}`)
                     }
                   >
                     Draft the plan
@@ -412,4 +412,4 @@ const MissionDetail = () => {
   );
 };
 
-export default MissionDetail;
+export default MilestoneDetail;

@@ -93,7 +93,7 @@ const Objectives = () => {
       <PageHeader
         eyebrow="Work"
         title="Objectives"
-        description="The measurable outcomes inside every project. Each objective rolls up the missions its agents are executing right now."
+        description="Bounded, measurable goals inside every project — each with a target and a deadline, serving the project's mission. Each objective rolls up the milestones its agents are executing right now."
         actions={
           <Button
             variant="outline"
@@ -125,10 +125,10 @@ const Objectives = () => {
         </span>
         <span className="text-border">·</span>
         <Link
-          to="/missions"
+          to="/milestones"
           className="focus-ring inline-flex items-center gap-1 rounded text-primary transition-colors hover:text-primary/80"
         >
-          See the missions
+          See the milestones
           <ArrowRight className="h-3 w-3" />
         </Link>
       </div>
@@ -186,8 +186,8 @@ const Objectives = () => {
               ) : (
                 <div className="grid gap-2.5 lg:grid-cols-2">
                   {objectives.map((objective) => {
-                    const missions = world.missions.filter(
-                      (mission) => mission.objectiveId === objective.id,
+                    const milestones = world.milestones.filter(
+                      (milestone) => milestone.objectiveId === objective.id,
                     );
                     const focused = focusId === objective.id;
                     return (
@@ -226,29 +226,29 @@ const Objectives = () => {
                         />
 
                         <div className="space-y-1.5">
-                          {missions.length === 0 ? (
+                          {milestones.length === 0 ? (
                             <p className="rounded-lg border border-dashed border-border/70 px-2.5 py-2 text-[11px] text-muted-foreground">
-                              No missions planned yet.
+                              No milestones planned yet.
                             </p>
                           ) : (
-                            missions.map((mission) => (
+                            milestones.map((milestone) => (
                               <Link
-                                key={mission.id}
-                                to={`/missions/${mission.id}`}
+                                key={milestone.id}
+                                to={`/milestones/${milestone.id}`}
                                 className="focus-ring flex items-center gap-2 rounded-md border border-border/60 bg-background/40 px-2.5 py-1.5 text-[11.5px] transition-colors hover:border-border hover:bg-surface-2/60"
                               >
                                 <span
                                   className={cn(
                                     "h-1.5 w-1.5 shrink-0 rounded-full",
-                                    mission.status === "running" && "bg-run",
-                                    mission.status === "blocked" && "bg-warn",
-                                    mission.status === "queued" && "bg-idle",
-                                    mission.status === "done" && "bg-primary",
+                                    milestone.status === "running" && "bg-run",
+                                    milestone.status === "blocked" && "bg-warn",
+                                    milestone.status === "queued" && "bg-idle",
+                                    milestone.status === "done" && "bg-primary",
                                   )}
                                 />
-                                <span className="flex-1 truncate">{mission.name}</span>
+                                <span className="flex-1 truncate">{milestone.name}</span>
                                 <span className="num text-[10px] text-muted-foreground">
-                                  {relativeTime(mission.due)}
+                                  {relativeTime(milestone.due)}
                                 </span>
                               </Link>
                             ))
@@ -257,9 +257,9 @@ const Objectives = () => {
 
                         <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-2 text-[10.5px] text-muted-foreground">
                           <span>
-                            {missions.length} mission
-                            {missions.length === 1 ? "" : "s"} ·{" "}
-                            {missions.filter((m) => m.status === "blocked").length}{" "}
+                            {milestones.length} milestone
+                            {milestones.length === 1 ? "" : "s"} ·{" "}
+                            {milestones.filter((m) => m.status === "blocked").length}{" "}
                             need you
                           </span>
                           {objective.dueDate ? (

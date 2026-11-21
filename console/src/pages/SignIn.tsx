@@ -116,7 +116,7 @@ const SignIn = () => {
             </h1>
             <p className="mt-4 max-w-md text-[13.5px] leading-relaxed text-muted-foreground">
               Mission Control turns your people graph into projects, objectives,
-              and missions your agents can execute — and keeps every outbound
+              and milestones your agents can execute — and keeps every outbound
               move behind your approval.
             </p>
 
@@ -236,7 +236,7 @@ const SignIn = () => {
               <p className="eyebrow">What you'll land on</p>
               <div className="mt-2 space-y-1.5">
                 {[
-                  "3 projects · 6 objectives · 9 missions in motion",
+                  "3 projects · 6 objectives · 9 milestones in motion",
                   "8 decisions waiting in the approval inbox",
                   "18 people, 6 companies, 6 events in the graph",
                 ].map((line) => (

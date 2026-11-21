@@ -199,7 +199,7 @@ const AgentDetail = () => {
           <p className="text-[13px] leading-relaxed text-foreground/85">
             {agent.currentTask
               ? agent.currentTask.title
-              : "No task running. The queue is idle until you assign the next mission."}
+              : "No task running. The queue is idle until you assign the next milestone."}
           </p>
           {agent.currentTask ? (
             <div className="flex items-center gap-2">

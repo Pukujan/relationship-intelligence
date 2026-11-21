@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight, CalendarRange, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
-import { missionsDueToday, relativeTime } from "@/data/derive";
+import { milestonesDueToday, relativeTime } from "@/data/derive";
 import { useOrchestrator } from "@/components/copilot/OrchestratorProvider";
 import {
   EmptyState,
@@ -12,17 +12,17 @@ import {
   PageSkeleton,
   SectionHeader,
 } from "@/components/common";
-import { MissionRow, ScopeBanner } from "@/components/work";
+import { MilestoneRow, ScopeBanner } from "@/components/work";
 import { Button } from "@/components/ui/button";
-import type { MissionStatus } from "@/data/types";
+import type { MilestoneStatus } from "@/data/types";
 
 const horizons = [
-  { id: "all", label: "All missions" },
+  { id: "all", label: "All milestones" },
   { id: "today", label: "Today" },
   { id: "this_week", label: "This week" },
 ] as const;
 
-const statuses: { id: MissionStatus | "all"; label: string }[] = [
+const statuses: { id: MilestoneStatus | "all"; label: string }[] = [
   { id: "all", label: "Every status" },
   { id: "running", label: "Running" },
   { id: "blocked", label: "Needs you" },
@@ -30,7 +30,7 @@ const statuses: { id: MissionStatus | "all"; label: string }[] = [
   { id: "done", label: "Done" },
 ];
 
-const Missions = () => {
+const Milestones = () => {
   const {
     world,
     status,
@@ -42,28 +42,28 @@ const Missions = () => {
   } = useData();
   const { openCopilot } = useOrchestrator();
   const [horizon, setHorizon] = useState<(typeof horizons)[number]["id"]>("all");
-  const [missionStatus, setMissionStatus] = useState<MissionStatus | "all">("all");
+  const [milestoneStatus, setMilestoneStatus] = useState<MilestoneStatus | "all">("all");
 
-  const missions = useMemo(() => {
+  const milestones = useMemo(() => {
     if (!world) return [];
-    return world.missions
+    return world.milestones
       .filter(
-        (mission) =>
-          activeProjectId === "all" || mission.projectId === activeProjectId,
+        (milestone) =>
+          activeProjectId === "all" || milestone.projectId === activeProjectId,
       )
-      .filter((mission) => horizon === "all" || mission.horizon === horizon)
+      .filter((milestone) => horizon === "all" || milestone.horizon === horizon)
       .filter(
-        (mission) => missionStatus === "all" || mission.status === missionStatus,
+        (milestone) => milestoneStatus === "all" || milestone.status === milestoneStatus,
       )
       .sort((a, b) => new Date(a.due).getTime() - new Date(b.due).getTime());
-  }, [world, activeProjectId, horizon, missionStatus]);
+  }, [world, activeProjectId, horizon, milestoneStatus]);
 
   if (status === "loading") return <PageSkeleton rows={5} />;
   if (status === "error" || !world) {
     return (
       <LoadError
-        title="Missions didn't load"
-        description={error ?? "Something went wrong reading the mission board."}
+        title="Milestones didn't load"
+        description={error ?? "Something went wrong reading the milestone board."}
         onRetry={reload}
       />
     );
@@ -72,26 +72,26 @@ const Missions = () => {
   const grouped = world.projects
     .map((project) => ({
       project,
-      missions: missions.filter((mission) => mission.projectId === project.id),
+      milestones: milestones.filter((milestone) => milestone.projectId === project.id),
     }))
-    .filter((group) => group.missions.length > 0);
+    .filter((group) => group.milestones.length > 0);
 
-  const dueToday = missionsDueToday(world).filter(
-    (mission) =>
-      activeProjectId === "all" || mission.projectId === activeProjectId,
+  const dueToday = milestonesDueToday(world).filter(
+    (milestone) =>
+      activeProjectId === "all" || milestone.projectId === activeProjectId,
   ).length;
-  const blocked = world.missions.filter(
-    (mission) =>
-      mission.status === "blocked" &&
-      (activeProjectId === "all" || mission.projectId === activeProjectId),
+  const blocked = world.milestones.filter(
+    (milestone) =>
+      milestone.status === "blocked" &&
+      (activeProjectId === "all" || milestone.projectId === activeProjectId),
   ).length;
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Work"
-        title="Missions"
-        description="A mission is one time-boxed unit an agent executes to advance an objective. Today or this week — never open-ended."
+        title="Milestones"
+        description="A milestone is one bounded, time-boxed unit an agent executes to advance an objective. Today or this week — never open-ended. The project's mission is the enduring why; milestones are the bounded how."
         actions={
           <Button
             variant="outline"
@@ -135,10 +135,10 @@ const Missions = () => {
             <button
               key={item.id}
               type="button"
-              onClick={() => setMissionStatus(item.id)}
+              onClick={() => setMilestoneStatus(item.id)}
               className={cn(
                 "focus-ring rounded-full px-2 py-1 text-[11px] font-medium transition-colors",
-                missionStatus === item.id
+                milestoneStatus === item.id
                   ? "bg-surface-3 text-foreground"
                   : "text-muted-foreground hover:text-foreground",
               )}
@@ -158,12 +158,12 @@ const Missions = () => {
         </span>
       </div>
 
-      {missions.length === 0 ? (
+      {milestones.length === 0 ? (
         <div className="panel p-5">
           <EmptyState
             icon={CalendarRange}
-            title="No missions match this view"
-            description="Try a different horizon or status, or clear the project scope to see every mission in the workspace."
+            title="No milestones match this view"
+            description="Try a different horizon or status, or clear the project scope to see every milestone in the workspace."
             action={
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <Button
@@ -172,7 +172,7 @@ const Missions = () => {
                   className="rounded-lg"
                   onClick={() => {
                     setHorizon("all");
-                    setMissionStatus("all");
+                    setMilestoneStatus("all");
                   }}
                 >
                   Reset filters
@@ -196,7 +196,7 @@ const Missions = () => {
           <section key={group.project.id} className="space-y-2">
             <SectionHeader
               title={group.project.name}
-              count={group.missions.length}
+              count={group.milestones.length}
               action={
                 <Link
                   to={`/projects/${group.project.id}`}
@@ -208,8 +208,8 @@ const Missions = () => {
               }
             />
             <div className="space-y-1.5">
-              {group.missions.map((mission) => (
-                <MissionRow key={mission.id} world={world} mission={mission} />
+              {group.milestones.map((milestone) => (
+                <MilestoneRow key={milestone.id} world={world} milestone={milestone} />
               ))}
             </div>
           </section>
@@ -218,8 +218,8 @@ const Missions = () => {
 
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-surface-1/40 px-3.5 py-2.5 text-[11px] text-muted-foreground">
         <span>
-          {missions.length} mission{missions.length === 1 ? "" : "s"} in this view ·
-          next due {missions[0] ? relativeTime(missions[0].due) : "—"}
+          {milestones.length} milestone{milestones.length === 1 ? "" : "s"} in this view ·
+          next due {milestones[0] ? relativeTime(milestones[0].due) : "—"}
         </span>
         <Link
           to="/plans"
@@ -233,4 +233,4 @@ const Missions = () => {
   );
 };
 
-export default Missions;
+export default Milestones;

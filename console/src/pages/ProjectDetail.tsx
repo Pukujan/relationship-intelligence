@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
 import {
   agentById,
-  missionsForProject,
+  milestonesForProject,
   notesForProject,
   personById,
   projectProgress,
@@ -31,7 +31,7 @@ import {
   PersonAvatar,
   SectionHeader,
 } from "@/components/common";
-import { MissionRow, Pill, ProgressBar } from "@/components/work";
+import { MilestoneRow, Pill, ProgressBar } from "@/components/work";
 import { Button } from "@/components/ui/button";
 
 const statusClass = (status: string) =>
@@ -78,7 +78,7 @@ const ProjectDetail = () => {
   const objectives = world.objectives.filter(
     (objective) => objective.projectId === project.id,
   );
-  const missions = missionsForProject(world, project.id);
+  const milestones = milestonesForProject(world, project.id);
   const notes = notesForProject(world, project.id);
   const company = project.companyIds[0]
     ? world.companies.find((item) => item.id === project.companyIds[0])
@@ -124,7 +124,7 @@ const ProjectDetail = () => {
                 setActiveProject(project.id);
                 toast.success(`Scoped to ${project.name}`, {
                   description:
-                    "Objectives, missions, plans, and the calendar now follow this project.",
+                    "Objectives, milestones, plans, and the calendar now follow this project.",
                 });
               }}
             >
@@ -134,6 +134,27 @@ const ProjectDetail = () => {
           </>
         }
       />
+
+      {project.mission ? (
+        <div className="rounded-xl border border-primary/25 bg-primary/[0.05] px-3.5 py-2.5">
+          <p className="eyebrow text-primary">Mission</p>
+          <p className="mt-1 text-[12.5px] leading-relaxed text-foreground/90">
+            {project.mission}
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-border/70 bg-surface-1/30 px-3.5 py-2.5 text-[11.5px] text-muted-foreground">
+          No mission statement yet — the enduring why this project exists.{" "}
+          <button
+            type="button"
+            onClick={() => openCopilot(`Draft a mission statement for ${project.name}`)}
+            className="focus-ring rounded text-primary underline-offset-2 hover:underline"
+          >
+            Ask the copilot to draft one
+          </button>
+          .
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <Pill className={statusClass(project.status)}>
@@ -149,7 +170,7 @@ const ProjectDetail = () => {
           </Pill>
         ) : null}
         <span className="text-[11px] text-muted-foreground">
-          {objectives.length} objectives · {missions.length} missions ·{" "}
+          {objectives.length} objectives · {milestones.length} milestones ·{" "}
           {people.length} people referenced
         </span>
       </div>
@@ -171,8 +192,8 @@ const ProjectDetail = () => {
             {objectives.length} objective{objectives.length === 1 ? "" : "s"}
           </Link>
           <ArrowRight className="h-3 w-3" />
-          <Link to="/missions" className="focus-ring rounded hover:text-foreground">
-            {missions.length} mission{missions.length === 1 ? "" : "s"}
+          <Link to="/milestones" className="focus-ring rounded hover:text-foreground">
+            {milestones.length} milestone{milestones.length === 1 ? "" : "s"}
           </Link>
           <ArrowRight className="h-3 w-3" />
           <Link to="/plans" className="focus-ring rounded hover:text-foreground">
@@ -184,7 +205,7 @@ const ProjectDetail = () => {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.85fr)]">
         <section className="space-y-3">
           <SectionHeader
-            title="Objectives & missions"
+            title="Objectives & milestones"
             count={objectives.length}
             action={
               <Link
@@ -201,7 +222,7 @@ const ProjectDetail = () => {
               <EmptyState
                 icon={Target}
                 title="No objectives yet"
-                description="This project needs a measurable outcome before missions can be planned against it."
+                description="This project needs a measurable outcome before milestones can be planned against it."
                 action={
                   <Button
                     size="sm"
@@ -215,8 +236,8 @@ const ProjectDetail = () => {
             </div>
           ) : (
             objectives.map((objective) => {
-              const objectiveMissions = missions.filter(
-                (mission) => mission.objectiveId === objective.id,
+              const objectiveMilestones = milestones.filter(
+                (milestone) => milestone.objectiveId === objective.id,
               );
               const tone =
                 objective.status === "at_risk"
@@ -259,13 +280,13 @@ const ProjectDetail = () => {
                     label={`${objective.name} progress`}
                   />
                   <div className="mt-2.5 space-y-1.5">
-                    {objectiveMissions.length === 0 ? (
+                    {objectiveMilestones.length === 0 ? (
                       <p className="rounded-lg border border-dashed border-border/70 px-2.5 py-2 text-[11px] text-muted-foreground">
-                        No mission planned against this objective yet.
+                        No milestone planned against this objective yet.
                       </p>
                     ) : (
-                      objectiveMissions.map((mission) => (
-                        <MissionRow key={mission.id} world={world} mission={mission} showChain={false} />
+                      objectiveMilestones.map((milestone) => (
+                        <MilestoneRow key={milestone.id} world={world} milestone={milestone} showChain={false} />
                       ))
                     )}
                   </div>
@@ -418,12 +439,12 @@ const ProjectDetail = () => {
           {project.name} references {people.length} people from the graph.
         </p>
         <Link
-          to="/missions"
+          to="/milestones"
           className={cn(
             "focus-ring inline-flex items-center gap-1 rounded-md text-[11.5px] text-primary transition-colors hover:text-primary/80",
           )}
         >
-          Open the mission board
+          Open the milestone board
           <ArrowRight className="h-3 w-3" />
         </Link>
       </div>

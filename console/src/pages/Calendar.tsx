@@ -34,7 +34,7 @@ import {
   PageSkeleton,
   SectionHeader,
 } from "@/components/common";
-import { MissionChain, Pill, ScopeBanner } from "@/components/work";
+import { MilestoneChain, Pill, ScopeBanner } from "@/components/work";
 import { UnifiedTimeline } from "@/components/crm/UnifiedTimeline";
 import { AltitudeControl, useAltitude } from "@/components/crm/AltitudeControl";
 import { Button } from "@/components/ui/button";
@@ -99,21 +99,21 @@ const CalendarPage = () => {
       meta: `${event.location} · ${event.attendeeIds.length} people`,
       href: `/events?focus=${event.id}`,
     }));
-    const missions: CalendarItem[] = world.missions
+    const milestones: CalendarItem[] = world.milestones
       .filter(
-        (mission) =>
-          activeProjectId === "all" || mission.projectId === activeProjectId,
+        (milestone) =>
+          activeProjectId === "all" || milestone.projectId === activeProjectId,
       )
-      .map((mission) => {
-        const project = world.projects.find((item) => item.id === mission.projectId);
+      .map((milestone) => {
+        const project = world.projects.find((item) => item.id === milestone.projectId);
         return {
           kind: "mission",
-          id: mission.id,
-          date: mission.due,
-          title: mission.name,
-          meta: `${project?.name ?? "Project"} · ${mission.status}`,
-          href: `/missions/${mission.id}`,
-          status: mission.status,
+          id: milestone.id,
+          date: milestone.due,
+          title: milestone.name,
+          meta: `${project?.name ?? "Project"} · ${milestone.status}`,
+          href: `/milestones/${milestone.id}`,
+          status: milestone.status,
         };
       });
     const meetings: CalendarItem[] = world.notes
@@ -126,7 +126,7 @@ const CalendarPage = () => {
         meta: `${note.personIds.length} people · meeting note`,
         href: `/knowledge/notes?focus=${note.id}`,
       }));
-    return [...events, ...missions, ...meetings].sort(
+    return [...events, ...milestones, ...meetings].sort(
       (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
     );
   }, [world, activeProjectId]);
@@ -164,7 +164,7 @@ const CalendarPage = () => {
       <PageHeader
         eyebrow="Time"
         title="Calendar"
-        description="Events, meetings, and dated missions on one surface. Missions follow the project switcher; the relationship graph stays global."
+        description="Events, meetings, and dated milestones on one surface. Milestones follow the project switcher; the relationship graph stays global."
         actions={
           <>
             <AltitudeControl view="calendar" value={altitude} onChange={setAltitude} />
@@ -337,8 +337,8 @@ const CalendarPage = () => {
           <div className="flex flex-wrap items-center gap-3 border-t border-border/60 bg-surface-1/30 px-3 py-2 text-[10px] text-muted-foreground">
             {[
               ["Event", "bg-primary"],
-              ["Mission", "bg-run"],
-              ["Mission needs you", "bg-warn"],
+              ["Milestone", "bg-run"],
+              ["Milestone needs you", "bg-warn"],
               ["Meeting note", "bg-agent-indigo"],
             ].map(([label, tone]) => (
               <span key={label} className="flex items-center gap-1.5">
@@ -363,7 +363,7 @@ const CalendarPage = () => {
                 className="mt-2.5"
                 icon={CalendarDays}
                 title="Nothing on this day"
-                description="No events, meetings, or missions land here. Pick another day, or ask the copilot to plan something."
+                description="No events, meetings, or milestones land here. Pick another day, or ask the copilot to plan something."
                 action={
                   <Button
                     size="sm"
@@ -413,11 +413,11 @@ const CalendarPage = () => {
                 .filter((item) => new Date(item.date).getTime() >= Date.now())
                 .slice(0, 4)
                 .map((item) => {
-                  const mission =
+                  const milestone =
                     item.kind === "mission"
-                      ? world.missions.find((entry) => entry.id === item.id)
+                      ? world.milestones.find((entry) => entry.id === item.id)
                       : undefined;
-                  const agent = mission ? agentById(world, mission.agentIds[0]) : undefined;
+                  const agent = milestone ? agentById(world, milestone.agentIds[0]) : undefined;
                   return (
                     <Link
                       key={`${item.kind}-${item.id}`}
@@ -432,10 +432,10 @@ const CalendarPage = () => {
                           {item.title}
                         </span>
                       </span>
-                      {mission ? (
-                        <MissionChain
+                      {milestone ? (
+                        <MilestoneChain
                           world={world}
-                          mission={mission}
+                          milestone={milestone}
                           className="mt-0.5"
                           linked={false}
                         />
@@ -475,7 +475,7 @@ const CalendarPage = () => {
               {world.events.length} events
             </Pill>
             <Pill className="border-border/70 bg-surface-2 text-muted-foreground">
-              {world.missions.length} missions
+              {world.milestones.length} milestones
             </Pill>
             <Pill className="border-border/70 bg-surface-2 text-muted-foreground">
               {world.notes.filter((note) => note.kind === "meeting").length}{" "}

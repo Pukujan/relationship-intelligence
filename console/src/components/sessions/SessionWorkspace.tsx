@@ -22,7 +22,7 @@ const scopeLabel = (conversation: Conversation, world: ReturnType<typeof useData
   if (!world || !conversation.scopeId) return "workspace";
   if (conversation.scopeKind === "person") return world.people.find((p) => p.id === conversation.scopeId)?.name ?? "person";
   if (conversation.scopeKind === "project") return world.projects.find((p) => p.id === conversation.scopeId)?.name ?? "project";
-  if (conversation.scopeKind === "mission") return world.missions.find((m) => m.id === conversation.scopeId)?.name ?? "mission";
+  if (conversation.scopeKind === "mission") return world.milestones.find((m) => m.id === conversation.scopeId)?.name ?? "milestone";
   return "workspace";
 };
 
@@ -36,7 +36,7 @@ const scopedDigest = (digest: WorldDigest, conversation: Conversation | null): W
       ...digest,
       people: person ? [person] : [],
       companies: digest.companies.filter((c) => c.id === person?.companyId),
-      missions: digest.missions.filter((m) => m.personIds.includes(id)),
+      milestones: digest.milestones.filter((m) => m.personIds.includes(id)),
       approvals: digest.approvals.filter((a) => a.personId === id),
       goingColdIds: digest.goingColdIds.filter((x) => x === id),
     };
@@ -50,16 +50,16 @@ const scopedDigest = (digest: WorldDigest, conversation: Conversation | null): W
       people,
       companies: digest.companies.filter((c) => project?.companyIds.includes(c.id)),
       objectives: digest.objectives.filter((o) => o.projectId === id),
-      missions: digest.missions.filter((m) => m.projectId === id),
+      milestones: digest.milestones.filter((m) => m.projectId === id),
     };
   }
-  const mission = digest.missions.find((m) => m.id === id);
+  const milestone = digest.milestones.find((m) => m.id === id);
   return {
     ...digest,
-    missions: mission ? [mission] : [],
-    people: digest.people.filter((p) => mission?.personIds.includes(p.id)),
-    objectives: digest.objectives.filter((o) => o.id === mission?.objectiveId),
-    projects: digest.projects.filter((p) => p.id === mission?.projectId),
+    milestones: milestone ? [milestone] : [],
+    people: digest.people.filter((p) => milestone?.personIds.includes(p.id)),
+    objectives: digest.objectives.filter((o) => o.id === milestone?.objectiveId),
+    projects: digest.projects.filter((p) => p.id === milestone?.projectId),
   };
 };
 
@@ -364,7 +364,7 @@ const SessionWorkspace = () => {
               <option value="workspace:">scope: workspace</option>
               {(world?.projects ?? []).map((project) => <option key={project.id} value={`project:${project.id}`}>project: {project.name}</option>)}
               {(world?.people ?? []).slice(0, 12).map((person) => <option key={person.id} value={`person:${person.id}`}>person: {person.name}</option>)}
-              {(world?.missions ?? []).slice(0, 12).map((mission) => <option key={mission.id} value={`mission:${mission.id}`}>mission: {mission.name}</option>)}
+              {(world?.milestones ?? []).slice(0, 12).map((milestone) => <option key={milestone.id} value={`mission:${milestone.id}`}>milestone: {milestone.name}</option>)}
             </select>
           )}
           <button type="button" aria-label="Toggle context panel" onClick={() => setContextOpen((v) => !v)} className="text-muted-foreground hover:text-foreground">

@@ -22,8 +22,8 @@ import {
   approvalsForPerson,
   companyById,
   eventsForPerson,
-  missionStatusMeta,
-  missionsForPerson,
+  milestoneStatusMeta,
+  milestonesForPerson,
   peopleForCompany,
   personById,
   projectsForPerson,
@@ -129,7 +129,7 @@ const PersonProfile = () => {
     (item) => item.id !== person.id,
   );
   const projects = projectsForPerson(world, person.id);
-  const missions = missionsForPerson(world, person.id);
+  const milestones = milestonesForPerson(world, person.id);
   const sourced = person.claims.filter((claim) => claim.status === "sourced");
   const unverified = person.claims.filter(
     (claim) => claim.status === "unverified",
@@ -499,7 +499,7 @@ const PersonProfile = () => {
 
           <section className="panel p-4">
             <SectionHeader
-              title="Projects & missions"
+              title="Projects & milestones"
               count={projects.length}
               action={
                 <Link
@@ -513,13 +513,13 @@ const PersonProfile = () => {
             {projects.length === 0 ? (
               <p className="mt-2.5 text-[11px] text-muted-foreground">
                 No project references {person.name.split(" ")[0]} yet. Projects
-                and missions reference people — they never copy them.
+                and milestones reference people — they never copy them.
               </p>
             ) : (
               <div className="mt-2.5 space-y-2">
                 {projects.map((project) => {
-                  const projectMissions = missions.filter(
-                    (mission) => mission.projectId === project.id,
+                  const projectMilestones = milestones.filter(
+                    (milestone) => milestone.projectId === project.id,
                   );
                   return (
                     <div key={project.id}>
@@ -531,24 +531,24 @@ const PersonProfile = () => {
                         <ArrowRight className="h-3 w-3" />
                       </Link>
                       <div className="mt-1 space-y-1">
-                        {projectMissions.map((mission) => {
-                          const meta = missionStatusMeta[mission.status];
+                        {projectMilestones.map((milestone) => {
+                          const meta = milestoneStatusMeta[milestone.status];
                           return (
                             <Link
-                              key={mission.id}
-                              to={`/missions/${mission.id}`}
+                              key={milestone.id}
+                              to={`/milestones/${milestone.id}`}
                               className="focus-ring flex items-center gap-2 rounded-md px-1 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
                             >
                               <span
                                 className={cn(
                                   "h-1.5 w-1.5 shrink-0 rounded-full",
-                                  mission.status === "running" && "bg-run",
-                                  mission.status === "blocked" && "bg-warn",
-                                  mission.status === "queued" && "bg-idle",
-                                  mission.status === "done" && "bg-primary",
+                                  milestone.status === "running" && "bg-run",
+                                  milestone.status === "blocked" && "bg-warn",
+                                  milestone.status === "queued" && "bg-idle",
+                                  milestone.status === "done" && "bg-primary",
                                 )}
                               />
-                              <span className="flex-1 truncate">{mission.name}</span>
+                              <span className="flex-1 truncate">{milestone.name}</span>
                               <span
                                 className={cn(
                                   "rounded-full border px-1.5 py-px text-[9px]",
@@ -560,9 +560,9 @@ const PersonProfile = () => {
                             </Link>
                           );
                         })}
-                        {projectMissions.length === 0 ? (
+                        {projectMilestones.length === 0 ? (
                           <p className="px-1 text-[10.5px] text-muted-foreground/80">
-                            No missions reference them in this project yet.
+                            No milestones reference them in this project yet.
                           </p>
                         ) : null}
                       </div>

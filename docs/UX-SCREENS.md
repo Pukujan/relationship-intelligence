@@ -35,22 +35,22 @@ Every row links/peeks; nothing is a dead summary.
 ### Today (`/today`)
 | Glance | Brief | Deep |
 |---|---|---|
-| prose sentence ("1 decision waiting, 1 mission due, 1 going cold"); 4 KPI tiles (`Link` cards: approvals / missions today / going cold / agents active) each with a `Sparkline`; **Needs attention** as ≤3 one-line rows (`RollupSignal` flattened: label · detail · link) | + `UnifiedTimeline variant="strip"` (Next 7 days); + three working cards: My approvals (approve/decline inline), Missions due today, Going cold (`StrengthMeter`) | + Your team panel (`AgentCard` grid); + activity/evidence per attention item; + `PortfolioTable` of projects |
-Charts: 4 inline sparklines (Glance); strength meters (Brief); portfolio bars (Deep). Peek: any attention row → mission/person brief. Empty: "Nothing needs you. Ask the copilot to find the next move." + one button.
+| prose sentence ("1 decision waiting, 1 milestone due, 1 going cold"); 4 KPI tiles (`Link` cards: approvals / milestones today / going cold / agents active) each with a `Sparkline`; **Needs attention** as ≤3 one-line rows (`RollupSignal` flattened: label · detail · link) | + `UnifiedTimeline variant="strip"` (Next 7 days); + three working cards: My approvals (approve/decline inline), Milestones due today, Going cold (`StrengthMeter`) | + Your team panel (`AgentCard` grid); + activity/evidence per attention item; + `PortfolioTable` of projects |
+Charts: 4 inline sparklines (Glance); strength meters (Brief); portfolio bars (Deep). Peek: any attention row → milestone/person brief. Empty: "Nothing needs you. Ask the copilot to find the next move." + one button.
 
 ### Approvals (`/approvals`)
 | Glance | Brief | Deep |
 |---|---|---|
-| count + highest-risk one-liner; list of pending as single rows (agent avatar, title, risk `Badge`, age) | + full proposal cards: reason, evidence chips, proposed action, approve/decline | + diff of what approval materializes (mission/plan steps), activity trail, re-plan history |
+| count + highest-risk one-liner; list of pending as single rows (agent avatar, title, risk `Badge`, age) | + full proposal cards: reason, evidence chips, proposed action, approve/decline | + diff of what approval materializes (milestone/plan steps), activity trail, re-plan history |
 Charts: none (decisions are text). Peek: row → proposal sheet. Empty: "Inbox zero. Agents queue nothing without you."
 
 ### Projects (`/projects`) / Project detail (`/projects/:id`)
 | Glance | Brief | Deep |
 |---|---|---|
-| portfolio as rows: name, owner chip, status `StatusPill`, next deadline, one sparkline of mission completion | + `PortfolioTable` (sortable columns) + objective progress bars (`Progress`) | + mission/plan tree, evidence links, activity, delete affordance (role-gated), `UnifiedTimeline` of the project |
+| portfolio as rows: name, owner chip, status `StatusPill`, next deadline, one sparkline of milestone completion | + `PortfolioTable` (sortable columns) + objective progress bars (`Progress`) | + mission statement banner (or a draft-one affordance when absent), milestone/plan tree, evidence links, activity, delete affordance (role-gated), `UnifiedTimeline` of the project |
 Charts: completion sparkline (Glance), progress bars (Brief), timeline (Deep). Header: `New project` at all altitudes; switcher footer + ⌘K too.
 
-### Objectives / Missions / Plans (list + detail)
+### Objectives / Milestones / Plans (list + detail)
 | Glance | Brief | Deep |
 |---|---|---|
 | rows: title, parent project chip, due, status; overdue tinted `warn` | + grouped-by-project sections, owner avatars, step counts | + step checklist with evidence per step, re-plan button (stalled/blocked only), activity |
@@ -59,7 +59,7 @@ Charts: due-date heat strip (Brief, recharts bar of counts/day). Peek everywhere
 ### People (`/people`) / Person profile (`/people/:id`)
 | Glance | Brief | Deep |
 |---|---|---|
-| rows: avatar, name, company, strength meter, days-quiet; going-cold tinted | + filters (company, warmth, tag) + `UnifiedTimeline` of last touches | + claim/evidence list with sources, relationship graph neighbourhood (custom SVG), notes, missions touching them |
+| rows: avatar, name, company, strength meter, days-quiet; going-cold tinted | + filters (company, warmth, tag) + `UnifiedTimeline` of last touches | + claim/evidence list with sources, relationship graph neighbourhood (custom SVG), notes, milestones touching them |
 Charts: `StrengthMeter` (Glance), touch timeline (Brief), graph (Deep). Graph is evidence, not decoration: edges labelled, sources cited.
 
 ### Calendar (`/calendar`) / Events (`/events`)

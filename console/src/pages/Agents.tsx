@@ -14,7 +14,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
-import { agentStats, missionsForAgent, relativeTime } from "@/data/derive";
+import { agentStats, milestonesForAgent, relativeTime } from "@/data/derive";
 import { useOrchestrator } from "@/components/copilot/OrchestratorProvider";
 import { AgentCard } from "@/components/AgentCard";
 import {
@@ -253,7 +253,7 @@ const Agents = () => {
       });
       if (!r.ok) throw new Error("Failed to lock plan");
       toast.success(`Locked: ${title}`, {
-        description: "Materialized Objective + Mission in your workspace.",
+        description: "Materialized Objective + Milestone in your workspace.",
       });
       await loadWorkspaceExtras();
       void reload();
@@ -424,7 +424,7 @@ const Agents = () => {
           <div>
             <p className="text-[13px] font-semibold">Co-Design Draft Plans → Lock</p>
             <p className="text-[11px] text-muted-foreground">
-              Stage multi-step plans with your agents here. Nothing creates missions or tasks until you explicitly click Lock plan.
+              Stage multi-step plans with your agents here. Nothing creates milestones or tasks until you explicitly click Lock plan.
             </p>
           </div>
           <Pill className="border-border bg-surface-2 text-muted-foreground">
@@ -586,10 +586,10 @@ const Agents = () => {
       })}
 
       <section className="space-y-3">
-        <SectionHeader title="Assigned missions" count={world.missions.length} />
+        <SectionHeader title="Assigned milestones" count={world.milestones.length} />
         <div className="grid gap-2 lg:grid-cols-2">
           {world.agents.map((agent) => {
-            const missions = missionsForAgent(world, agent.id);
+            const milestones = milestonesForAgent(world, agent.id);
             const stats = agentStats(world, agent.id);
             return (
               <div key={agent.id} className="panel p-3.5">
@@ -606,29 +606,29 @@ const Agents = () => {
                   </span>
                 </div>
                 <div className="mt-2 space-y-1">
-                  {missions.length === 0 ? (
+                  {milestones.length === 0 ? (
                     <p className="text-[11px] text-muted-foreground">
-                      No missions assigned right now.
+                      No milestones assigned right now.
                     </p>
                   ) : (
-                    missions.map((mission) => (
+                    milestones.map((milestone) => (
                       <Link
-                        key={mission.id}
-                        to={`/missions/${mission.id}`}
+                        key={milestone.id}
+                        to={`/milestones/${milestone.id}`}
                         className="focus-ring flex items-center gap-2 rounded-md px-1 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
                       >
                         <span
                           className={cn(
                             "h-1.5 w-1.5 shrink-0 rounded-full",
-                            mission.status === "running" && "bg-run",
-                            mission.status === "blocked" && "bg-warn",
-                            mission.status === "queued" && "bg-idle",
-                            mission.status === "done" && "bg-primary",
+                            milestone.status === "running" && "bg-run",
+                            milestone.status === "blocked" && "bg-warn",
+                            milestone.status === "queued" && "bg-idle",
+                            milestone.status === "done" && "bg-primary",
                           )}
                         />
-                        <span className="flex-1 truncate">{mission.name}</span>
+                        <span className="flex-1 truncate">{milestone.name}</span>
                         <span className="num text-[10px]">
-                          {relativeTime(mission.due)}
+                          {relativeTime(milestone.due)}
                         </span>
                       </Link>
                     ))

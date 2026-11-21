@@ -107,7 +107,7 @@ export interface WorldShape {
   workspaces: Json[];
   projects: Json[];
   objectives: Json[];
-  missions: Json[];
+  milestones: Json[];
   plans: Json[];
   agents: Json[];
   tasks: Json[];
@@ -202,11 +202,15 @@ function isSuperseding(
   );
 }
 
-/** World collection -> ri_console table. Mirrors console/scripts/bootstrap-octo.mjs. */
+/**
+ * World collection -> ri_console table. Mirrors console/scripts/bootstrap-octo.mjs.
+ * The milestone collection lives in Octo's persisted `mission` table: canonical
+ * schema, not renamed from this adopter.
+ */
 const TABLES: Record<string, string> = {
   projects: "project",
   objectives: "objective",
-  missions: "mission",
+  milestones: "mission",
   plans: "plan",
   agents: "agent",
   tasks: "agent_task",
@@ -957,6 +961,21 @@ async function getDoc(
   return (rows[0]?.doc as Json) ?? null;
 }
 
+/** Map Octo's persisted `missionId` doc key onto the domain's milestoneId. */
+function normalizeMilestoneRef(doc: Json): Json {
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return doc;
+  const record = doc as Record<string, Json>;
+  if (record.milestoneId === undefined && record.missionId !== undefined) {
+    const next: Record<string, Json> = {
+      ...record,
+      milestoneId: record.missionId,
+    };
+    delete next.missionId;
+    return next;
+  }
+  return doc;
+}
+
 /** Ask Octo whether the graph projection is current (PROJECT.md rule 10). */
 async function isGraphStale(
   config: OctoClientConfig,
@@ -1023,7 +1042,7 @@ export async function readWorld(
   const {
     projects = [],
     objectives = [],
-    missions = [],
+    milestones = [],
     plans = [],
     agents = [],
     tasks = [],
@@ -1056,15 +1075,16 @@ export async function readWorld(
     })),
     projects,
     objectives,
-    missions,
-    plans,
+    milestones,
+    // Octo plan/task docs persist the FK as `missionId`; accept both spellings.
+    plans: plans.map((doc) => normalizeMilestoneRef(doc)),
     // Fill the fields the console's agent cards read; see agentShape.ts.
     agents: agents.map((agent) =>
       agent && typeof agent === "object"
         ? completeAgentDoc(agent as Record<string, unknown>)
         : agent,
     ) as Json[],
-    tasks,
+    tasks: tasks.map((doc) => normalizeMilestoneRef(doc)),
     runs,
     approvals,
     activity,
@@ -1126,6 +1146,9 @@ async function applyDesign(
         status: "active",
         owner: principalId,
         summary: design.missionSummary,
+        ...(typeof design.projectMission === "string" && design.projectMission
+          ? { mission: design.projectMission }
+          : {}),
         personIds: [],
         companyIds: [],
         eventIds: [],
@@ -1155,15 +1178,15 @@ async function applyDesign(
     "private",
     octoContainerId,
   );
-  const missionId = randomUUID();
+  const milestoneId = randomUUID();
   await insertDoc(
     config,
     token,
     workspaceId,
     principalId,
-    "missions",
+    "milestones",
     {
-      id: missionId,
+      id: milestoneId,
       objectiveId,
       projectId,
       name: design.missionName,
@@ -1186,7 +1209,8 @@ async function applyDesign(
     "plans",
     {
       id: randomUUID(),
-      missionId,
+      // Persisted Octo doc key stays `missionId` (canonical schema).
+      missionId: milestoneId,
       agentId: (design.agentIds as string[])?.[0] ?? "research",
       title: `Plan — ${String(design.missionName)}`,
       summary: design.rationale,
@@ -1321,7 +1345,7 @@ export async function decideApproval(
   } else if (input.decision === "declined" && declinePath === "snooze") {
     outcome = "Snoozed for 24 hours.";
   } else if (input.decision === "declined") {
-    outcome = "Stopped — no mission or follow-up created.";
+    outcome = "Stopped — no milestone or follow-up created.";
   }
 
   const agent = await getDoc(

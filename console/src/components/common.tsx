@@ -206,7 +206,7 @@ const kindLabels: Record<ApprovalKind, string> = {
   publish: "Publish",
   invite: "Invite",
   commit: "Commit",
-  mission: "Mission",
+  mission: "Milestone",
   replan: "Re-plan",
 };
 

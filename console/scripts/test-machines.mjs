@@ -7,7 +7,7 @@
  *   - a turn cannot stream before scoping completes (and scoping needs a pinned scope)
  *   - ABORT cancels an in-flight turn
  *   - fill-in cannot APPLY without a human APPROVE
- *   - a mission cannot REPLAN while healthily running
+ *   - a milestone cannot REPLAN while healthily running
  *   - an approval cannot be DECIDED by a non-human
  *
  * Usage: node scripts/test-machines.mjs   (exit non-zero on any failure)
@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { createActor } from "xstate";
 import { turnMachine } from "../src/machines/turnMachine.ts";
 import { fillInMachine } from "../src/machines/fillInMachine.ts";
-import { missionMachine, approvalMachine } from "../src/machines/workMachines.ts";
+import { milestoneMachine, approvalMachine } from "../src/machines/workMachines.ts";
 import { isConversationOver, parseVoiceCommand, resolveConfirmation } from "../src/lib/voiceCommands.ts";
 import { resolveThreadEntry } from "../src/lib/threadEntry.ts";
 import { allowed, askWithFailover, authHeaders, parseChain, parseModelJson } from "../server/providers.ts";
@@ -166,21 +166,21 @@ await check("fillIn: APPLY rejected without APPROVE", () => {
 });
 
 /* ---------------------------------------------------------------- */
-/* missionMachine                                                    */
+/* milestoneMachine                                                    */
 /* ---------------------------------------------------------------- */
 
-await check("mission: REPLAN rejected from running", () => {
-  const actor = createActor(missionMachine, { input: { missionId: "m1", quietWindowMs: 60_000 } }).start();
+await check("milestone: REPLAN rejected from running", () => {
+  const actor = createActor(milestoneMachine, { input: { milestoneId: "m1", quietWindowMs: 60_000 } }).start();
   assert.equal(value(actor), "queued");
   actor.send({ type: "START" });
   assert.equal(value(actor), "running");
   actor.send({ type: "REPLAN" });
-  assert.equal(value(actor), "running", "a healthy running mission is never re-planned");
+  assert.equal(value(actor), "running", "a healthy running milestone is never re-planned");
   actor.stop();
 });
 
-await check("mission: REPLAN allowed from blocked", () => {
-  const actor = createActor(missionMachine, { input: { missionId: "m1", quietWindowMs: 60_000 } }).start();
+await check("milestone: REPLAN allowed from blocked", () => {
+  const actor = createActor(milestoneMachine, { input: { milestoneId: "m1", quietWindowMs: 60_000 } }).start();
   actor.send({ type: "START" });
   actor.send({ type: "BLOCK", reason: "waiting on a decision" });
   assert.equal(value(actor), "blocked");
@@ -190,8 +190,8 @@ await check("mission: REPLAN allowed from blocked", () => {
   actor.stop();
 });
 
-await check("mission: quiet window stalls a running mission, then REPLAN recovers", async () => {
-  const actor = createActor(missionMachine, { input: { missionId: "m1", quietWindowMs: 40 } }).start();
+await check("milestone: quiet window stalls a running milestone, then REPLAN recovers", async () => {
+  const actor = createActor(milestoneMachine, { input: { milestoneId: "m1", quietWindowMs: 40 } }).start();
   actor.send({ type: "START" });
   assert.equal(value(actor), "running");
   await sleep(90);
@@ -201,8 +201,8 @@ await check("mission: quiet window stalls a running mission, then REPLAN recover
   actor.stop();
 });
 
-await check("mission: PROGRESS resets the quiet window", async () => {
-  const actor = createActor(missionMachine, { input: { missionId: "m1", quietWindowMs: 70 } }).start();
+await check("milestone: PROGRESS resets the quiet window", async () => {
+  const actor = createActor(milestoneMachine, { input: { milestoneId: "m1", quietWindowMs: 70 } }).start();
   actor.send({ type: "START" });
   await sleep(45);
   actor.send({ type: "PROGRESS" }); // restarts the timer

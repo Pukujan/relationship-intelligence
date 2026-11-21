@@ -4,7 +4,7 @@
  * The browser never holds the model key. It posts a compact world digest with
  * the user's prompt; this server asks the model for a structured answer and
  * validates it before anything reaches the UI. Links and ids are checked
- * against the digest, so a hallucinated person or mission cannot appear in the
+ * against the digest, so a hallucinated person or milestone cannot appear in the
  * console. If the model is unreachable, the client falls back to the local
  * keyword router and labels the answer as an offline simulation.
  *
@@ -120,6 +120,7 @@ const ModelDesignSchema = z.object({
   missionSummary: z.string().min(1).max(2_000),
   projectId: z.string().max(40).nullish(),
   projectName: z.string().max(240).nullish(),
+  projectMission: z.string().max(600).nullish(),
   objectiveName: z.string().min(1).max(400),
   objectiveTarget: z.string().min(1).max(400),
   horizon: z.enum(["today", "this_week"]).default("this_week"),
@@ -148,7 +149,7 @@ interface Digest {
   agents: { id: string }[];
   projects: { id: string; name: string }[];
   objectives: { id: string }[];
-  missions: { id: string }[];
+  milestones: { id: string }[];
   approvals: { id: string }[];
   people: { id: string }[];
   companies: { id: string }[];
@@ -172,7 +173,7 @@ const readDigest = (raw: unknown): Digest => {
       .filter((item) => typeof item.id === "string")
       .map((item) => ({ id: item.id as string, name: String(item.name ?? "") })),
     objectives: ids("objectives").map((id) => ({ id })),
-    missions: ids("missions").map((id) => ({ id })),
+    milestones: ids("milestones").map((id) => ({ id })),
     approvals: ids("approvals").map((id) => ({ id })),
     people: ids("people").map((id) => ({ id })),
     companies: ids("companies").map((id) => ({ id })),
@@ -195,7 +196,7 @@ const digestList = (digest: Digest, kind: z.infer<typeof digestRef>) => {
     case "project":
       return digest.projects;
     case "mission":
-      return digest.missions;
+      return digest.milestones;
     case "objective":
       return digest.objectives;
   }
@@ -219,7 +220,7 @@ const hrefFor = (kind: z.infer<typeof digestRef>, id: string): string => {
     case "project":
       return `/projects/${id}`;
     case "mission":
-      return `/missions/${id}`;
+      return `/milestones/${id}`;
     case "objective":
       return `/objectives?focus=${id}`;
   }
@@ -240,37 +241,45 @@ const labelIn = (digest: unknown, kind: string, id: string): string | undefined 
 const COPILOT_SYSTEM = `You are the orchestrator of "Mission Control", a relationship-intelligence console.
 The user directs a small team of agents (sales, marketing, research) that work a professional
 relationship graph. Answer from the WORLD DIGEST only — never invent people, companies,
-missions, or ids. Trust rules: agents propose, humans decide; nothing sends or publishes without
+milestones, or ids. Trust rules: agents propose, humans decide; nothing sends or publishes without
 approval; unsourced facts must be called out as unverified.
+Work vocabulary: a project's MISSION is its enduring purpose (why it exists, never "done");
+an OBJECTIVE is a bounded, measurable goal inside the project; a MILESTONE is one time-boxed
+unit (today/this week) an agent executes to advance an objective; plans and tasks are its steps.
+Never call a bounded task a mission, and never give a mission a deadline.
 Return ONLY a JSON object shaped like:
 {
   "intentLabel": "short label of what you are doing",
   "summary": "2-4 sentences of plain-language answer grounded in the digest",
   "agents": ["agent ids from the digest, max 4"],
   "steps": [{"label": "what this step does", "agentId": "optional agent id", "detail": "optional short support"}],
-  "links": [{"kind": "person|company|approval|event|agent|project|mission|objective", "id": "an id that exists in the digest"}],
+  "links": [{"kind": "person|company|approval|event|agent|project|milestone|objective", "id": "an id that exists in the digest"}],
   "approvalIds": ["pending approval ids from the digest that relate to the answer"]
 }
 Keep steps between 2 and 5. Write like a calm chief of staff, not a marketing page.`;
 
 const DESIGN_SYSTEM = `You are the research/design mode of "Mission Control", a relationship-intelligence console.
-Given a vague human goal, draft work the team can approve: a mission name, a measurable objective,
-and a plan. Use ONLY the WORLD DIGEST for people, companies, projects, events and agents; never
-invent ids. The human stays in control: everything you produce is a proposal held for approval.
+Given a vague human goal, draft work the team can approve: a milestone name, a bounded measurable
+objective, and a plan. Vocabulary: the project's mission is its enduring purpose; objectives are
+bounded goals; milestones are time-boxed units agents execute. When opening a NEW project, also
+write its mission (projectMission) — the enduring why, no deadline. Use ONLY the WORLD DIGEST for
+people, companies, projects, events and agents; never invent ids. The human stays in control:
+everything you produce is a proposal held for approval.
 Return ONLY a JSON object shaped like:
 {
-  "missionName": "time-boxed unit of work, verb-first",
+  "missionName": "milestone name — one time-boxed unit of work, verb-first (wire key keeps its persisted spelling)",
   "missionSummary": "1-2 sentences on what the agents will do",
   "projectId": "existing project id if this fits an existing project, otherwise omit",
   "projectName": "new project name only when projectId is omitted",
-  "objectiveName": "the outcome, phrased as a change in the world",
+  "projectMission": "enduring purpose of the new project — why it exists, no deadline; omit for existing projects",
+  "objectiveName": "the bounded goal, phrased as a change in the world",
   "objectiveTarget": "the measurable target, e.g. 3 replies this week",
   "horizon": "today|this_week",
   "dueInDays": 1-30,
   "agentIds": ["1-3 agent ids from the digest"],
   "autonomy": "draft|approve|full — recommend approve unless the work is read-only",
   "planSteps": [{"label": "step", "detail": "why/how", "agentId": "optional"}],
-  "rationale": "2-3 sentences: why this mission, why this objective, what is thin",
+  "rationale": "2-3 sentences: why this milestone, why this objective, what is thin",
   "unverified": ["anything the digest cannot support — facts the human should check"]
 }`;
 
@@ -448,7 +457,7 @@ async function handleCopilot(body: unknown) {
     prompt_chars: request.prompt.length,
     principal_id: request.principalId ?? "anonymous",
     digest_people: digest.people.length,
-    digest_missions: digest.missions.length,
+    digest_milestones: digest.milestones.length,
   });
   try {
     const matches = await queryRag(request.prompt);
@@ -602,6 +611,9 @@ async function handleDesign(body: unknown) {
       kind: "mission",
       missionName: clip(design.missionName, 90),
       missionSummary: clip(design.missionSummary, 600),
+      ...(design.projectMission
+        ? { projectMission: clip(design.projectMission, 600) }
+        : {}),
       projectId,
       projectName: projectId
         ? undefined
@@ -640,7 +652,7 @@ Return ONLY a JSON object: {"parts": [ ... ]} where each part is one of:
  {"kind":"sparkline","label":"...","series":[numbers]}
  {"kind":"graph","nodes":[{"id":"digest id","label":"name","kind":"person|company"}],"edges":[{"from":"id","to":"id","label":"relation"}]}
  {"kind":"timeline","entries":[{"at":"ISO date","label":"...","detail":"..."}]}
- {"kind":"proposal","design":{missionName,missionSummary,projectId?,projectName?,objectiveName,objectiveTarget,horizon,dueInDays,agentIds,autonomy,planSteps:[{label,detail,agentId?}],rationale,unverified:[]}}
+ {"kind":"proposal","design":{missionName,missionSummary,projectId?,projectName?,projectMission?,objectiveName,objectiveTarget,horizon,dueInDays,agentIds,autonomy,planSteps:[{label,detail,agentId?}],rationale,unverified:[]}}
  {"kind":"approval","approvalId":"pending approval id from digest"}
  {"kind":"artifact","title":"...","html":"<static html, no scripts>","sources":[{"label":"...","detail":"..."}]}
 Prefer visual parts (table, kpi, sparkline, graph, timeline) over long prose when the data supports them.
