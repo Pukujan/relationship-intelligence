@@ -34,6 +34,7 @@ import {
 } from "./connectors.js";
 import { handleRagQuery, proxyCopilot } from "./copilotProxy.js";
 import { crawlerAuthorized, crawlerIngest, crawlerQueue } from "./crawler.js";
+import { dmAuthorized, dmIngest, readDmBody } from "./dm.js";
 import { type Env, readEnv } from "./env.js";
 import { deliverApprovedSend } from "./gmailSend.js";
 import {
@@ -189,6 +190,39 @@ export async function handleRequest(
       return;
     }
     sendJson(res, 404, { error: "not_found" });
+    return;
+  }
+
+  // DM import (#120): runners post the owner's direct messages here, gated
+  // by their own bearer. Rows and claims are private to the workspace owner.
+  if (path === "/app-api/dm/ingest") {
+    if (!dmAuthorized(req, env.DM_INGEST_TOKEN)) {
+      sendJson(res, 401, { error: "UNAUTHORIZED" });
+      return;
+    }
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "method_not_allowed" });
+      return;
+    }
+    const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 20_000 };
+    const octoToken = process.env.OCTO_API_KEY ?? "";
+    const container = process.env.OCTO_WORKSPACE_ID ?? "";
+    try {
+      const raw = JSON.parse((await readDmBody(req)) || "{}") as unknown;
+      const result = await dmIngest(
+        config,
+        octoToken,
+        container,
+        container,
+        raw,
+      );
+      sendJson(res, result.status, result.body);
+    } catch (error) {
+      sendJson(res, 502, {
+        error: "DM_INGEST_FAILED",
+        detail: error instanceof Error ? error.message : "unknown",
+      });
+    }
     return;
   }
 

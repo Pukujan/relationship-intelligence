@@ -181,7 +181,7 @@ export const isProfileUrl = (url: string): boolean =>
     url,
   );
 
-const normUrl = (url: string): string =>
+export const normUrl = (url: string): string =>
   url.split("?")[0]?.replace(/\/+$/, "").toLowerCase() ?? "";
 
 const visitId = (url: string): string =>
@@ -232,7 +232,7 @@ export async function readCrawlerBody(req: IncomingMessage): Promise<unknown> {
   return text ? JSON.parse(text) : {};
 }
 
-const graph = async (
+export const graph = async (
   config: OctoClientConfig,
   token: string,
   container: string,
@@ -252,7 +252,7 @@ const graph = async (
   return body.rows ?? [];
 };
 
-const epistemic = async (
+export const epistemic = async (
   config: OctoClientConfig,
   token: string,
   container: string,
@@ -272,14 +272,14 @@ const epistemic = async (
   return (await res.json()) as Json;
 };
 
-interface PersonUrl {
+export interface PersonUrl {
   personId: string;
   name: string;
   url: string;
 }
 
 /** People with a sourced linkedin_url FACT, minus retired sample people. */
-async function linkedinPeople(
+export async function linkedinPeople(
   config: OctoClientConfig,
   token: string,
   container: string,

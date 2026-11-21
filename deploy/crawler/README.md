@@ -49,6 +49,22 @@ You do these steps; no agent handles your passwords or keys.
    and sign in to LinkedIn in that browser. The session is saved in the
    `browser-profile` volume and survives restarts.
 
+## LinkedIn DMs (optional)
+
+The same runner can read your LinkedIn messages after each crawl pass and add
+them to each contact's private history (#120). It only reads; it never sends.
+
+1. Pick a long random value and add it to the **app's** env file on the VPS as
+   `DM_INGEST_TOKEN=...`, then redeploy the app.
+2. Add the same value to the crawler env file as `RI_DM_TOKEN=...` and restart
+   the stack with the `up -d --build` command above.
+
+Each pass reads up to 15 conversations that changed since the last pass, 20–40
+seconds apart, and stops at any login wall. Messages are matched to a contact
+only by their LinkedIn profile link; threads with anyone else are stored but
+not attached to a contact. A day's messages show on the contact's event log the
+next day, once the day is complete. Only you can see them.
+
 ## Checking it
 
 ```sh

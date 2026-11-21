@@ -10,7 +10,8 @@
 #   docker compose --env-file /home/ubuntu/apps/relationship-intelligence-crawler.env \
 #     -f deploy/crawler/docker-compose.yml up -d --build
 #
-# The env file holds TS_AUTHKEY, CRAWLER_VIEW_PASSWORD and RI_CRAWL_TOKEN; each
+# The env file holds TS_AUTHKEY, CRAWLER_VIEW_PASSWORD, RI_CRAWL_TOKEN and,
+# for LinkedIn DMs, RI_DM_TOKEN; each
 # container receives only the values it needs. See deploy/crawler/README.md.
 name: relationship-intelligence-crawler
 
@@ -92,6 +93,11 @@ services:
       RI_CRAWL_SERVER: ${RI_CRAWL_SERVER:-https://business.design-bakery.com}
       RI_CDP_URL: http://127.0.0.1:9222
       RI_CRAWL_INTERVAL_SECONDS: ${RI_CRAWL_INTERVAL_SECONDS:-3600}
+      # LinkedIn DM import (#120); empty turns it off. Same value as the
+      # app's DM_INGEST_TOKEN.
+      RI_DM_TOKEN: ${RI_DM_TOKEN:-}
+      # Matches the browser, so message times are read in its zone.
+      TZ: America/New_York
     volumes:
       - crawl-evidence:/data
     logging: *logging

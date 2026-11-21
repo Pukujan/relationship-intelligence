@@ -574,6 +574,24 @@ await check("profile: a person with no claims gets empty sections, never sample 
   }
 });
 
+await check("profile: a private DM day lands in the event log, never in Sources (#120)", () => {
+  const dm = sourcedOf(
+    "c-dm",
+    'Messaged Jane Doe on LinkedIn: 3 messages (2 from them, 1 from you). Last, Jane: "See you Thursday."',
+    "https://www.linkedin.com/messaging/thread/t-1/",
+    { verb: "MESSAGED", source: { label: "linkedin.com", kind: "web", date: "2026-11-20T00:00:00.000Z", locator: "https://www.linkedin.com/messaging/thread/t-1/" } },
+  );
+  const view = buildProfile(profileInput([...profileClaims, dm]));
+  const entry = view.eventLog.find((e) => e.id === "c-dm");
+  assert.ok(entry, "the DM day is in the event log");
+  assert.equal(entry.kind, "log");
+  assert.equal(entry.title, "LinkedIn messages");
+  assert.equal(entry.meta, "3 messages · private");
+  assert.equal(entry.detail, "Jane: See you Thursday.");
+  assert.ok(!view.sources.some((c) => c.id === "c-dm"), "DMs stay out of Sources");
+  assert.ok(!JSON.stringify([view.experience, view.posts, view.about]).includes("Thursday"));
+});
+
 if (failures > 0) {
   console.error(`\n${failures} machine contract test(s) failed.`);
   process.exit(1);
