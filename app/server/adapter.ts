@@ -15,6 +15,7 @@ import { createServer } from "node:http";
 import nodePath from "node:path";
 import { fileURLToPath } from "node:url";
 import { SessionResponseSchema } from "../shared/contracts.js";
+import { agentStatusPatch } from "./agentShape.js";
 import {
   AGENT_TEMPLATES,
   createCustomAgent,
@@ -23,7 +24,6 @@ import {
   lockDraftPlan,
 } from "./agents.js";
 import { handleApiServiceRoutes } from "./apiServices.js";
-import { handleWorkflowRoutes } from "./workflows.js";
 import {
   buildGoogleConnectorAuthUrl,
   type ConnectorProviderId,
@@ -32,8 +32,10 @@ import {
   listUserConnectors,
   saveUserConnector,
 } from "./connectors.js";
-import { proxyCopilot } from "./copilotProxy.js";
+import { handleRagQuery, proxyCopilot } from "./copilotProxy.js";
+import { crawlerAuthorized, crawlerIngest, crawlerQueue } from "./crawler.js";
 import { type Env, readEnv } from "./env.js";
+import { deliverApprovedSend } from "./gmailSend.js";
 import {
   buildProviderAuthUrl,
   exchangeProviderCode,
@@ -68,6 +70,7 @@ import {
   resolvePrincipalWorkspaces,
   resolveTenancy,
 } from "./tenancy.js";
+import { handleWorkflowRoutes } from "./workflows.js";
 import {
   createAppWorkspace,
   inviteWorkspaceMember,
@@ -140,6 +143,63 @@ export async function handleRequest(
 
   // RI-0021: local runner daemon contract (device + session routes).
   if (await handleRunnerRoutes(req, res, url, env)) return;
+  // Slow LinkedIn crawler (RI-0023): gated by a shared bearer, not signed-in
+  // sessions. The local runner runs on the owner's Mac, not in the browser.
+  if (path.startsWith("/app-api/crawler/")) {
+    if (!crawlerAuthorized(req, env.CRAWLER_TOKEN)) {
+      sendJson(res, 401, { error: "UNAUTHORIZED" });
+      return;
+    }
+    const config = { baseUrl: env.OCTO_API_URL, timeoutMs: 20_000 };
+    // The crawler is a service-level worker: it uses the workspace Octo key,
+    // the same way the scheduler does, not a signed-in session token.
+    const octoToken = process.env.OCTO_API_KEY ?? "";
+    const container = process.env.OCTO_WORKSPACE_ID ?? "";
+    const workspace = process.env.OCTO_WORKSPACE_ID ?? "";
+    try {
+      if (path === "/app-api/crawler/queue" && req.method === "GET") {
+        const limit = Math.max(
+          1,
+          Math.min(50, Number(url.searchParams.get("limit") ?? 20)),
+        );
+        sendJson(
+          res,
+          200,
+          await crawlerQueue(config, octoToken, container, workspace, limit),
+        );
+        return;
+      }
+      if (path === "/app-api/crawler/ingest" && req.method === "POST") {
+        const raw = JSON.parse((await readBody(req)) || "{}") as unknown;
+        const result = await crawlerIngest(
+          config,
+          octoToken,
+          container,
+          workspace,
+          raw,
+        );
+        sendJson(res, result.status, result.body);
+        return;
+      }
+    } catch (error) {
+      sendJson(res, 502, {
+        error: "CRAWLER_FAILED",
+        detail: error instanceof Error ? error.message : "unknown",
+      });
+      return;
+    }
+    sendJson(res, 404, { error: "not_found" });
+    return;
+  }
+
+  // RAG stays behind the signed-in adapter. The copilot server holds no Octo
+  // key; it calls this route with the short-lived capability minted for its
+  // request by proxyCopilot (see copilotProxy.ts). Handle it before the /api
+  // proxy so /app-api/rag/query never reaches the loopback copilot server.
+  if (path === "/app-api/rag/query") {
+    await handleRagQuery(req, res, env, url);
+    return;
+  }
 
   // The copilot server's routes. It has no sign-in of its own, so the proxy
   // forwards only for a signed-in session (see copilotProxy.ts).
@@ -1022,13 +1082,15 @@ export async function handleRequest(
           workspaces,
           role,
         };
-        const handled = path.startsWith("/app-api/workflows") || path.startsWith("/app-api/workflow-runs")
-          ? await handleWorkflowRoutes(req, res, url, ctx)
-          : path.startsWith("/app-api/services")
-            ? await handleApiServiceRoutes(req, res, url, ctx)
-            : path.startsWith("/app-api/schedules")
-              ? await handleScheduleRoutes(req, res, url, ctx)
-              : await handleProfileRoutes(req, res, url, ctx);
+        const handled =
+          path.startsWith("/app-api/workflows") ||
+          path.startsWith("/app-api/workflow-runs")
+            ? await handleWorkflowRoutes(req, res, url, ctx)
+            : path.startsWith("/app-api/services")
+              ? await handleApiServiceRoutes(req, res, url, ctx)
+              : path.startsWith("/app-api/schedules")
+                ? await handleScheduleRoutes(req, res, url, ctx)
+                : await handleProfileRoutes(req, res, url, ctx);
         if (handled) return;
       }
       if (path === "/app-api/sessions" && req.method === "GET") {
@@ -1149,37 +1211,50 @@ export async function handleRequest(
         return;
       }
       if (path === "/app-api/decision" && req.method === "POST") {
-        sendJson(
-          res,
-          200,
-          await decideApproval(
+        const decided = await decideApproval(
+          config,
+          token,
+          requested,
+          principal,
+          workspaces,
+          {
+            approvalId: String(body.approvalId),
+            decision: body.decision === "approved" ? "approved" : "declined",
+            declinePath:
+              body.declinePath === "re_plan" ||
+              body.declinePath === "snooze" ||
+              body.declinePath === "stop"
+                ? body.declinePath
+                : undefined,
+            note: typeof body.note === "string" ? body.note : undefined,
+            editedAction:
+              typeof body.editedAction === "string"
+                ? body.editedAction
+                : undefined,
+          },
+          {
+            canDecideOthers: requireRole(role, "operator"),
+            octoContainerId: octoWorkspaceId,
+            role,
+          },
+        );
+        // RI-0022: an approved "send" proposal delivers through the decider's
+        // own Gmail connector, scope-gated. Every other decision is unchanged.
+        const approvalDoc = (decided.approval ?? {}) as Record<string, unknown>;
+        if (body.decision === "approved" && approvalDoc.kind === "send") {
+          const delivery = await deliverApprovedSend(
             config,
             token,
+            octoWorkspaceId,
             requested,
-            principal,
-            workspaces,
-            {
-              approvalId: String(body.approvalId),
-              decision: body.decision === "approved" ? "approved" : "declined",
-              declinePath:
-                body.declinePath === "re_plan" ||
-                body.declinePath === "snooze" ||
-                body.declinePath === "stop"
-                  ? body.declinePath
-                  : undefined,
-              note: typeof body.note === "string" ? body.note : undefined,
-              editedAction:
-                typeof body.editedAction === "string"
-                  ? body.editedAction
-                  : undefined,
-            },
-            {
-              canDecideOthers: requireRole(role, "operator"),
-              octoContainerId: octoWorkspaceId,
-              role,
-            },
-          ),
-        );
+            approvalDoc,
+            principal.id,
+            env,
+          );
+          sendJson(res, 200, { ...decided, delivery });
+          return;
+        }
+        sendJson(res, 200, decided);
         return;
       }
       if (path === "/app-api/proposal" && req.method === "POST") {
@@ -1217,6 +1292,13 @@ export async function handleRequest(
           sendJson(res, 403, { error: "FORBIDDEN_ROLE", required: "operator" });
           return;
         }
+        // `paused` is what the runner obeys (#101); the status mirrors it
+        // for the screen.
+        const statusPatch = agentStatusPatch(body.status);
+        if (!statusPatch) {
+          sendJson(res, 400, { error: "INVALID_STATUS" });
+          return;
+        }
         sendJson(
           res,
           200,
@@ -1227,10 +1309,7 @@ export async function handleRequest(
             principal.id,
             "agents",
             String(body.agentId),
-            {
-              status: body.status,
-              ...(body.status === "paused" ? { currentTask: null } : {}),
-            },
+            statusPatch,
             "shared",
             octoWorkspaceId,
           ),

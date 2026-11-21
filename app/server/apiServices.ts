@@ -9,6 +9,7 @@
  * within the workspace, mirroring schedules.ts ownership and tenancy choke.
  */
 import { randomUUID } from "node:crypto";
+import type { ApiServiceView } from "../shared/contracts.js";
 import type { OctoClientConfig } from "./octo.js";
 import { octoSql } from "./world.js";
 
@@ -83,6 +84,7 @@ async function rawFetch(
 
 const errText = (data: unknown, text: string): string => {
   if (data && typeof data === "object") {
+    // biome-ignore lint/suspicious/noExplicitAny: untyped JSON from an outside service or a SQL row
     const o = data as Record<string, any>;
     return (
       o.error?.message ||
@@ -136,6 +138,7 @@ export async function tinyfishAgent(
     throw new Error(
       `TinyFish run failed (HTTP ${r.status}): ${errText(r.data, r.text)}`,
     );
+  // biome-ignore lint/suspicious/noExplicitAny: untyped JSON from an outside service or a SQL row
   const j = (r.data ?? {}) as Record<string, any>;
   if (j.error)
     throw new Error(
@@ -266,6 +269,7 @@ interface ServiceRow {
   last_test: string | null;
 }
 
+// biome-ignore lint/suspicious/noExplicitAny: untyped JSON from an outside service or a SQL row
 const parseCred = (row: ServiceRow): Record<string, any> => {
   try {
     return JSON.parse(row.cred_json || "{}");
@@ -278,9 +282,9 @@ const maskKey = (v: string) =>
   v && v.length > 8 ? `${v.slice(0, 4)}…${v.slice(-4)}` : v ? "set" : "";
 
 /** Browser-safe view: never carries the raw key or auth headers. */
-export function serviceView(row: ServiceRow) {
+export function serviceView(row: ServiceRow): ApiServiceView {
   const cred = parseCred(row);
-  let lastTest: unknown = null;
+  let lastTest: ApiServiceView["lastTest"] = null;
   try {
     lastTest = row.last_test ? JSON.parse(row.last_test) : null;
   } catch {
@@ -288,10 +292,10 @@ export function serviceView(row: ServiceRow) {
   }
   return {
     id: row.id,
-    provider: row.provider,
+    provider: row.provider as ApiServiceView["provider"],
     name: row.name,
     baseUrl: row.base_url || "",
-    status: row.status,
+    status: row.status as ApiServiceView["status"],
     keyHint: row.provider === "tinyfish" ? maskKey(cred.apiKey || "") : "",
     hasHeaders:
       row.provider === "rest"
@@ -328,6 +332,7 @@ export async function testService(
             "): " +
             errText(r.data, r.text),
         };
+      // biome-ignore lint/suspicious/noExplicitAny: untyped JSON from an outside service or a SQL row
       const bal = (r.data as any)?.balance ?? (r.data as any)?.wallet?.balance;
       return {
         ok: true,

@@ -125,7 +125,7 @@ s, p = call(owner, "POST", f"{BASE}/app-api/projects",
 pid = p.get("id", "")
 sql(f"INSERT INTO ri_console.mission (id, workspace_id, principal_id, visibility, doc) "
     f"VALUES ('holdout-m-{STAMP}', '{WS}', '0db36ada-53a3-454a-a18b-697220bb9cbc', 'shared', "
-    f"'{{\"id\":\"holdout-m-{STAMP}\",\"projectId\":\"{pid}\",\"name\":\"holdout mission\"}}'::jsonb)")
+    f"'{{\"id\":\"holdout-m-{STAMP}\",\"projectId\":\"{pid}\",\"name\":\"holdout milestone\"}}'::jsonb)")
 s, _ = call(owner, "DELETE", f"{BASE}/app-api/projects/{pid}?workspaceId={WS}")
 left = sql(f"SELECT count(*) AS n FROM ri_console.mission WHERE doc->>'projectId' = '{pid}'")
 n = int(left["rows"][0]["n"])
@@ -138,7 +138,7 @@ s, ap = call(owner, "POST", f"{BASE}/app-api/proposal", {
     "proposal": {"agentId": "research", "kind": "mission",
                  "title": f"holdout-approval-{STAMP}", "proposedAction": "x",
                  "reason": "hold-out", "evidence": [], "risk": "low",
-                 "design": {"kind": "mission", "missionName": f"holdout-mission-{STAMP}",
+                 "design": {"kind": "mission", "missionName": f"holdout-milestone-{STAMP}",
                             "missionSummary": "x", "objectiveName": "o", "objectiveTarget": "t",
                             "horizon": "this_week", "dueInDays": 5, "agentIds": ["research"],
                             "autonomy": "approve", "planSteps": [{"label": "a", "detail": "b"}],
@@ -148,10 +148,10 @@ s1, _ = call(owner, "POST", f"{BASE}/app-api/decision",
              {"workspaceId": WS, "approvalId": aid, "decision": "approved", "note": "hold-out"})
 s2, _ = call(owner, "POST", f"{BASE}/app-api/decision",
              {"workspaceId": WS, "approvalId": aid, "decision": "approved", "note": "hold-out twice"})
-cnt = sql(f"SELECT count(*) AS n FROM ri_console.mission WHERE doc->>'name' = 'holdout-mission-{STAMP}'")
+cnt = sql(f"SELECT count(*) AS n FROM ri_console.mission WHERE doc->>'name' = 'holdout-milestone-{STAMP}'")
 n = int(cnt["rows"][0]["n"])
-record("MR7", "I6", "<=1 mission", f"{s1}/{s2}, n={n}", n <= 1)
-sql(f"DELETE FROM ri_console.mission WHERE doc->>'name' = 'holdout-mission-{STAMP}'")
+record("MR7", "I6", "<=1 milestone", f"{s1}/{s2}, n={n}", n <= 1)
+sql(f"DELETE FROM ri_console.mission WHERE doc->>'name' = 'holdout-milestone-{STAMP}'")
 sql(f"DELETE FROM ri_console.approval WHERE id = '{aid}'")
 
 # MR8 — private rows invisible across principals

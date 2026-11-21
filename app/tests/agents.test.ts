@@ -74,7 +74,7 @@ describe("agent templates, custom builder & Draft Plan -> Lock (RI-0019 / #49)",
     }
   });
 
-  it("stages a mutable Draft Plan without creating missions, then locks it into Objective + Mission", async () => {
+  it("stages a mutable Draft Plan without creating milestones, then locks it into Objective + Milestone", async () => {
     const sqlLog: string[] = [];
     let savedDraft: Record<string, unknown> | null = null;
     vi.stubGlobal(

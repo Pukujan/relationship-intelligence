@@ -34,7 +34,7 @@ export const useApprovalDecision = () => {
             ? `${result.agent.name} queued a fresh re-plan proposal.`
             : options?.declinePath === "snooze"
               ? "Snoozed for 24 hours."
-              : `${result.agent.name} stopped this thread — no mission created.`;
+              : `${result.agent.name} stopped this thread — no milestone created.`;
         toast.success(
           decision === "approved"
             ? "Approved"

@@ -12,7 +12,7 @@ import { useNavigate } from "react-router-dom";
 import { agentById, pendingApprovals } from "@/data/derive";
 import { useData } from "@/data/store";
 import type { Approval, Decision } from "@/data/types";
-import { replanAlreadyPending, replanProposalFor, stalledMissions } from "@/lib/intelligence";
+import { replanAlreadyPending, replanProposalFor, stalledMilestones } from "@/lib/intelligence";
 import { planRequest, type CopilotAnswer } from "@/lib/orchestrator";
 
 /**
@@ -122,17 +122,17 @@ export const OrchestratorProvider = ({ children }: { children: ReactNode }) => {
     [world],
   );
 
-  // The iteration loop: every stalled mission without a pending proposal gets
+  // The iteration loop: every stalled milestone without a pending proposal gets
   // exactly one proposed way forward, held for approval. Deterministic, offline-safe.
   const proposedStallsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (status !== "ready" || !world) return;
-    for (const stall of stalledMissions(world)) {
-      if (replanAlreadyPending(world, stall.mission.id)) continue;
-      if (proposedStallsRef.current.has(stall.mission.id)) continue;
-      proposedStallsRef.current.add(stall.mission.id);
+    for (const stall of stalledMilestones(world)) {
+      if (replanAlreadyPending(world, stall.milestone.id)) continue;
+      if (proposedStallsRef.current.has(stall.milestone.id)) continue;
+      proposedStallsRef.current.add(stall.milestone.id);
       void addProposal(replanProposalFor(world, stall)).catch(() => {
-        proposedStallsRef.current.delete(stall.mission.id);
+        proposedStallsRef.current.delete(stall.milestone.id);
       });
     }
   }, [addProposal, status, world]);

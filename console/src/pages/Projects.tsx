@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { invalidate, scopePrefix } from "@/lib/cache";
 import { useData } from "@/data/store";
-import { missionsDueToday } from "@/data/derive";
+import { milestonesDueToday } from "@/data/derive";
 import type { Project } from "@/data/types";
 import { useOrchestrator } from "@/components/copilot/OrchestratorProvider";
 import {
@@ -24,19 +24,19 @@ import { Input } from "@/components/ui/input";
 
 const chain = [
   {
-    label: "Project",
+    label: "Project + mission",
     to: "/projects",
-    detail: "A deal, an event, or an initiative.",
+    detail: "A deal, event, or initiative — and its mission: the enduring why.",
   },
   {
     label: "Objective",
     to: "/objectives",
-    detail: "A measurable outcome inside it.",
+    detail: "A bounded, measurable goal that serves the mission.",
   },
   {
-    label: "Mission",
-    to: "/missions",
-    detail: "A time-boxed unit an agent executes.",
+    label: "Milestone",
+    to: "/milestones",
+    detail: "One time-boxed unit an agent executes this week.",
   },
   {
     label: "Plan + tasks",
@@ -120,7 +120,7 @@ const Projects = () => {
   const deleteProject = async (project: Project) => {
     if (!session) return;
     const confirmed = window.confirm(
-      `Delete "${project.name}" and its objectives, missions and plans?`,
+      `Delete "${project.name}" and its objectives, milestones and plans?`,
     );
     if (!confirmed) return;
     try {
@@ -158,15 +158,15 @@ const Projects = () => {
     );
   }
 
-  const today = missionsDueToday(world);
-  const totalMissions = world.missions.length;
+  const today = milestonesDueToday(world);
+  const totalMilestones = world.milestones.length;
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Work"
         title="Projects"
-        description="Every project is a container for outcomes. Objectives measure them, missions execute them, and the people inside stay in the graph — referenced, never copied."
+        description="Every project carries a mission — the enduring reason it exists. Objectives are bounded goals that serve it, milestones are the time-boxed units agents execute, and the people inside stay in the graph — referenced, never copied."
         actions={
           <>
             <AltitudeControl
@@ -255,7 +255,7 @@ const Projects = () => {
         {[
           { label: "Projects", value: world.projects.length },
           { label: "Objectives", value: world.objectives.length },
-          { label: "Missions", value: totalMissions },
+          { label: "Milestones", value: totalMilestones },
           { label: "Due today", value: today.length, tone: today.length ? "warn" : undefined },
         ].map((metric) => (
           <div key={metric.label} className="bg-card p-3.5">
@@ -323,7 +323,7 @@ const Projects = () => {
           ))}
         </ol>
         <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-          Projects and missions reference people, companies, and events from the
+          Projects and milestones reference people, companies, and events from the
           relationship graph. A person shows up in every project that references
           them — there is only ever one record.
         </p>
@@ -335,7 +335,7 @@ const Projects = () => {
           <EmptyState
             icon={FolderKanban}
             title="No projects yet"
-            description="Projects are the container for objectives and missions. Ask the copilot to open the first one from a relationship that needs work."
+            description="Projects are the container for objectives and milestones. Ask the copilot to open the first one from a relationship that needs work."
             action={
               <Button
                 size="sm"
@@ -351,7 +351,7 @@ const Projects = () => {
       ) : null}
 
       <div className={cn("flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground")}>
-        <span>Objectives are measurable — progress rolls up from their missions.</span>
+        <span>Missions endure; objectives and milestones are bounded — progress rolls up from milestones to objectives.</span>
         <Link
           to="/objectives"
           className="focus-ring rounded text-primary transition-colors hover:text-primary/80"

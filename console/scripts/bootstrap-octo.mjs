@@ -9,7 +9,7 @@
  *
  * Canonical people/companies/claims are NOT seeded here — they live in Octo's
  * epistemic ledger and are read through the graph projection. No demo work is
- * inserted into a real workspace: projects, missions and approvals start
+ * inserted into a real workspace: projects, milestones and approvals start
  * empty and are created through the approval gate.
  *
  *   node scripts/bootstrap-octo.mjs            # dry run
@@ -70,7 +70,7 @@ export const TABLES = {
   activity: "activity",
   projects: "project",
   objectives: "objective",
-  missions: "mission",
+  milestones: "mission", // persisted Octo table name; the console domain calls it milestone
   plans: "plan",
   connectors: "connector",
   mcpServers: "mcp_server",
@@ -137,7 +137,7 @@ const DDL = [
     UNIQUE (workspace_id, principal_id)
   )`,
   // Links from a file metadata row to canonical graph entities (person,
-  // company, project, event, mission). Links reference entities — they never
+  // company, project, event, milestone). Links reference entities — they never
   // copy them. principal_id records who attached the link.
   `CREATE TABLE IF NOT EXISTS ri_console.file_link (
     id TEXT PRIMARY KEY,

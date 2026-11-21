@@ -212,6 +212,98 @@ Blocked/uncertain:
 Next:
 - Merge and deploy, then the owner checks the People page on the live site; file per-workspace privacy for people as its own issue.
 
+### 2026-11-21 01:42:08 UTC — agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1","blocked":[],"changed":["console/src/pages/PersonProfile.tsx, console/src/lib/profileSections.ts (new), app/server/world.ts and app/shared/contracts.ts pass claim verb, attribute and basis through"],"completed":["Contact pages read like a LinkedIn profile (#93): banner, avatar, headline and LinkedIn link, then About, Activity, Experience, Education, an event log, the owner's notes and sources. Only sourced claims feed the profile sections; unverified notes stay flagged as notes."],"decisions":["no new decisions"],"evidence":["All 24 live contacts render every core section with an event log and no unverified note inside a profile section, checked in a local browser against the real ledger read through this branch's world read. Phone width has no sideways scroll. Console typecheck, lint (0 errors), machine tests (7 new profile tests), orphan check and build pass; app types, biome, 71 Vitest tests and build pass."],"evidence_class":"observed","next_action":"Open the pull request for #93 and let CI run; after merge, check a contact page on the deployed console.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T01:42:08Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"fe817bb03a00184344f474168ad63091be8f95884a808c36a3947d11534006bb","request_id":"3d4700b9737649eb9b89214ca1390d60","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- Contact pages read like a LinkedIn profile (#93): banner, avatar, headline and LinkedIn link, then About, Activity, Experience, Education, an event log, the owner's notes and sources. Only sourced claims feed the profile sections; unverified notes stay flagged as notes.
+
+Evidence:
+- All 24 live contacts render every core section with an event log and no unverified note inside a profile section, checked in a local browser against the real ledger read through this branch's world read. Phone width has no sideways scroll. Console typecheck, lint (0 errors), machine tests (7 new profile tests), orphan check and build pass; app types, biome, 71 Vitest tests and build pass.
+
+Decisions:
+- no new decisions
+
+Changed:
+- console/src/pages/PersonProfile.tsx, console/src/lib/profileSections.ts (new), app/server/world.ts and app/shared/contracts.ts pass claim verb, attribute and basis through
+
+Blocked/uncertain:
+- none
+
+Next:
+- Open the pull request for #93 and let CI run; after merge, check a contact page on the deployed console.
+
+### 2026-11-21 02:01:59 UTC — agent:claude-code/0c5c33f5-0cd5-4a9f-8fb4-b82c04581d93
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/0c5c33f5-0cd5-4a9f-8fb4-b82c04581d93","blocked":[],"changed":["console/src/lib/landing.ts (new) picks the first screen; console/src/App.tsx root route and console/src/pages/SignIn.tsx redirect both use it; console/scripts/test-machines.mjs pins both answers"],"completed":["The console opens on the copilot chat after the owner signs in (#96). A signed-in owner who opens the console root or comes back from sign-in lands on /copilot; Today keeps its address and sidebar place, and the demo workspace still opens on Today."],"decisions":["Guests keep Today as their front page, as the brief allowed; only owner sessions land on the chat."],"evidence":["In a local Chromium with the adapter's session answer stubbed as a signed-in owner, /console/ and /console/signin both land on /console/copilot with the chat composer showing, and the sidebar opens Today, Approvals, People, Voice and Copilot with no page errors. Guest sign-in in the browser pane still lands on /console/today. Console typecheck, lint (0 errors), machine tests (2 new landing tests), orphan check and build pass. A real Google sign-in was not run: it needs the owner's own consent."],"next_action":"Open the pull request for #96 and let CI run; after merge, the owner signs in on the deployed console and should land on the chat.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T02:01:59Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"6bcfee51b4ba3ef4b560bf636376bdfba10163bdf597202f073794a199ebb741","request_id":"efd2900efbd7446e9e371cbf34da4faa","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- The console opens on the copilot chat after the owner signs in (#96). A signed-in owner who opens the console root or comes back from sign-in lands on /copilot; Today keeps its address and sidebar place, and the demo workspace still opens on Today.
+
+Evidence:
+- In a local Chromium with the adapter's session answer stubbed as a signed-in owner, /console/ and /console/signin both land on /console/copilot with the chat composer showing, and the sidebar opens Today, Approvals, People, Voice and Copilot with no page errors. Guest sign-in in the browser pane still lands on /console/today. Console typecheck, lint (0 errors), machine tests (2 new landing tests), orphan check and build pass. A real Google sign-in was not run: it needs the owner's own consent.
+
+Decisions:
+- Guests keep Today as their front page, as the brief allowed; only owner sessions land on the chat.
+
+Changed:
+- console/src/lib/landing.ts (new) picks the first screen; console/src/App.tsx root route and console/src/pages/SignIn.tsx redirect both use it; console/scripts/test-machines.mjs pins both answers
+
+Blocked/uncertain:
+- none
+
+Next:
+- Open the pull request for #96 and let CI run; after merge, the owner signs in on the deployed console and should land on the chat.
+
+### 2026-11-21 02:21:15 UTC — agent:claude-code/b8230d8e-5287-4bb1-afbc-6196712a0498
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/b8230d8e-5287-4bb1-afbc-6196712a0498","blocked":["Whether to pause the owner's four agents is decision 1 in #98 and stays with the owner. Pause was not exercised against production."],"changed":["app/server/agentShape.ts adds isAgentPaused and agentStatusPatch; app/server/adapter.ts writes the pause flag and refuses unknown statuses; app/server/executor.ts checks pause at queue, start and save and merges its own fields; console run outcomes gain skipped (types, derive, AgentDetail); tests in app/tests/executor.test.ts, executorMetamorphic.test.ts and executorHarness.ts"],"completed":["Pause in the console now stops the agent runner (#101). Pause writes paused: true with the paused status and Resume clears both; one check, isAgentPaused, counts either field, so rows paused the old way stay paused. The runner checks it when it queues a run, before it calls the model and before it saves what the model returned, and a skipped run leaves a receipt that says the agent was paused."],"decisions":["paused: true is the stored record of a pause because status is also the runner's live state, which is how a run erased a pause. The runner merges only its own fields into an agent row and no longer creates a row for an agent that has none. Scheduled research runs as Atlas, so it is skipped while Atlas is paused; pausing the schedule still stops it for good."],"evidence":["Twelve new executor tests cover both pause shapes: never queued, a run queued before the pause is closed without a model call, a pause during the model call saves nothing, a pause landing at the final write or while runs are queued survives, a full tick runs only the unpaused agent, and scheduled research is skipped while Atlas is paused. A new metamorphic property (MR-E6) checks over random agents and answers that both shapes give the same empty result. Undoing each check in turn makes its tests fail. App types, lint, 116 tests and build pass; console typecheck, lint (0 errors), machine tests, orphan check and build pass; planning and continuity validation pass. Checked against the mock Octo only: no production agent row was read or changed."],"next_action":"Open the pull request for #101 and let CI run; after it deploys, Pause on the Agents page should hold through the runner's next tick.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T02:21:15Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"d58f52177c94841f19d146741922610a0449c9d79dec544c22e02fa9094bd44a","request_id":"d92082dc27ab41a58a51cfefb7601438","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- Pause in the console now stops the agent runner (#101). Pause writes paused: true with the paused status and Resume clears both; one check, isAgentPaused, counts either field, so rows paused the old way stay paused. The runner checks it when it queues a run, before it calls the model and before it saves what the model returned, and a skipped run leaves a receipt that says the agent was paused.
+
+Evidence:
+- Twelve new executor tests cover both pause shapes: never queued, a run queued before the pause is closed without a model call, a pause during the model call saves nothing, a pause landing at the final write or while runs are queued survives, a full tick runs only the unpaused agent, and scheduled research is skipped while Atlas is paused. A new metamorphic property (MR-E6) checks over random agents and answers that both shapes give the same empty result. Undoing each check in turn makes its tests fail. App types, lint, 116 tests and build pass; console typecheck, lint (0 errors), machine tests, orphan check and build pass; planning and continuity validation pass. Checked against the mock Octo only: no production agent row was read or changed.
+
+Decisions:
+- paused: true is the stored record of a pause because status is also the runner's live state, which is how a run erased a pause. The runner merges only its own fields into an agent row and no longer creates a row for an agent that has none. Scheduled research runs as Atlas, so it is skipped while Atlas is paused; pausing the schedule still stops it for good.
+
+Changed:
+- app/server/agentShape.ts adds isAgentPaused and agentStatusPatch; app/server/adapter.ts writes the pause flag and refuses unknown statuses; app/server/executor.ts checks pause at queue, start and save and merges its own fields; console run outcomes gain skipped (types, derive, AgentDetail); tests in app/tests/executor.test.ts, executorMetamorphic.test.ts and executorHarness.ts
+
+Blocked/uncertain:
+- Whether to pause the owner's four agents is decision 1 in #98 and stays with the owner. Pause was not exercised against production.
+
+Next:
+- Open the pull request for #101 and let CI run; after it deploys, Pause on the Agents page should hold through the runner's next tick.
+
+### 2026-11-21 02:22:42 UTC — agent:claude-code/b8230d8e-5287-4bb1-afbc-6196712a0498
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/b8230d8e-5287-4bb1-afbc-6196712a0498","blocked":["Whether to pause the owner's four agents is decision 1 in #98 and stays with the owner. Pause was not exercised against production."],"changed":["app/server/agentShape.ts adds isAgentPaused and agentStatusPatch; app/server/adapter.ts writes the pause flag and refuses unknown statuses; app/server/executor.ts checks pause at queue, start and save and merges its own fields; console run outcomes gain skipped (types, derive, AgentDetail); tests in app/tests/executor.test.ts, executorMetamorphic.test.ts and executorHarness.ts"],"completed":["Pause in the console now stops the agent runner (#101), and pull request 102 is open for it. Pause writes paused: true with the paused status and Resume clears both; one check, isAgentPaused, counts either field, so rows paused the old way stay paused. The runner checks it when it queues a run, before it calls the model and before it saves what the model returned, and a skipped run leaves a receipt that says the agent was paused."],"decisions":["paused: true is the stored record of a pause because status is also the runner's live state, which is how a run erased a pause. The runner merges only its own fields into an agent row and no longer creates a row for an agent that has none. Scheduled research runs as Atlas, so it is skipped while Atlas is paused; pausing the schedule still stops it for good."],"evidence":["A paused agent never runs: nineteen new test cases in app/tests/executor.test.ts cover both pause shapes, from queueing through a full runner tick, against the mock Octo database. A new metamorphic property (MR-E6) finds both shapes give zero runs and zero writes over random agents and answers. Undoing each part of the fix makes its tests fail (queue check 3, check before the model 5, check after it 2, old whole-row write at finish 4). App types, lint, 116 tests and build pass; console typecheck, lint (0 errors), machine tests, orphan check and build pass; planning and continuity validation pass. This corrects the earlier checkpoint, which miscounted the new tests as twelve. No production agent row was read or changed."],"next_action":"Pull request 102 merges itself once CI is green; after it deploys, Pause on the Agents page should hold through the runner's next tick.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","supersedes":"d92082dc27ab41a58a51cfefb7601438","task_id":"RI-0002","timestamp":"2026-11-21T02:22:42Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"a4a087a6081bd0bd5ac02f04ea21ad9fd2c2c18c819c72544a8d58de065a9051","request_id":"75dcfd5e96214bed86741124182a8514","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- Pause in the console now stops the agent runner (#101), and pull request 102 is open for it. Pause writes paused: true with the paused status and Resume clears both; one check, isAgentPaused, counts either field, so rows paused the old way stay paused. The runner checks it when it queues a run, before it calls the model and before it saves what the model returned, and a skipped run leaves a receipt that says the agent was paused.
+
+Evidence:
+- A paused agent never runs: nineteen new test cases in app/tests/executor.test.ts cover both pause shapes, from queueing through a full runner tick, against the mock Octo database. A new metamorphic property (MR-E6) finds both shapes give zero runs and zero writes over random agents and answers. Undoing each part of the fix makes its tests fail (queue check 3, check before the model 5, check after it 2, old whole-row write at finish 4). App types, lint, 116 tests and build pass; console typecheck, lint (0 errors), machine tests, orphan check and build pass; planning and continuity validation pass. This corrects the earlier checkpoint, which miscounted the new tests as twelve. No production agent row was read or changed.
+
+Decisions:
+- paused: true is the stored record of a pause because status is also the runner's live state, which is how a run erased a pause. The runner merges only its own fields into an agent row and no longer creates a row for an agent that has none. Scheduled research runs as Atlas, so it is skipped while Atlas is paused; pausing the schedule still stops it for good.
+
+Changed:
+- app/server/agentShape.ts adds isAgentPaused and agentStatusPatch; app/server/adapter.ts writes the pause flag and refuses unknown statuses; app/server/executor.ts checks pause at queue, start and save and merges its own fields; console run outcomes gain skipped (types, derive, AgentDetail); tests in app/tests/executor.test.ts, executorMetamorphic.test.ts and executorHarness.ts
+
+Blocked/uncertain:
+- Whether to pause the owner's four agents is decision 1 in #98 and stays with the owner. Pause was not exercised against production.
+
+Next:
+- Pull request 102 merges itself once CI is green; after it deploys, Pause on the Agents page should hold through the runner's next tick.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.

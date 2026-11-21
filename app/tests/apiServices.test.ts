@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { serviceView } from "../server/apiServices.js";
-import { deriveApiServiceChip, type ApiServiceView } from "../shared/contracts.js";
+import {
+  type ApiServiceView,
+  deriveApiServiceChip,
+} from "../shared/contracts.js";
 
 const row = (over: Record<string, unknown> = {}) => ({
-  id: "svc-1", provider: "tinyfish", name: "TinyFish", base_url: "",
+  id: "svc-1",
+  provider: "tinyfish",
+  name: "TinyFish",
+  base_url: "",
   cred_json: JSON.stringify({ apiKey: "tf_super_secret_key_123456" }),
-  status: "connected", last_test: JSON.stringify({ ok: true, message: "Connected", at: "2026-01-01" }),
+  status: "connected",
+  last_test: JSON.stringify({
+    ok: true,
+    message: "Connected",
+    at: "2026-01-01",
+  }),
   ...over,
 });
 
@@ -17,7 +28,15 @@ describe("api service browser view", () => {
     expect(v.provider).toBe("tinyfish");
   });
   it("reports rest headers without leaking them", () => {
-    const v = serviceView(row({ provider: "rest", base_url: "https://api.x.com", cred_json: JSON.stringify({ headers: { Authorization: "Bearer SECRET_TOKEN_VALUE" } }) }) as never);
+    const v = serviceView(
+      row({
+        provider: "rest",
+        base_url: "https://api.x.com",
+        cred_json: JSON.stringify({
+          headers: { Authorization: "Bearer SECRET_TOKEN_VALUE" },
+        }),
+      }) as never,
+    );
     expect(v.hasHeaders).toBe(true);
     expect(JSON.stringify(v)).not.toContain("SECRET_TOKEN_VALUE");
   });
@@ -28,14 +47,31 @@ describe("api service browser view", () => {
 });
 
 describe("api service chip", () => {
-  const base: ApiServiceView = { id: "x", provider: "tinyfish", name: "n", baseUrl: "", status: "connected", keyHint: "", hasHeaders: false, lastTest: null };
+  const base: ApiServiceView = {
+    id: "x",
+    provider: "tinyfish",
+    name: "n",
+    baseUrl: "",
+    status: "connected",
+    keyHint: "",
+    hasHeaders: false,
+    lastTest: null,
+  };
   it("connected is ok", () => {
     expect(deriveApiServiceChip(base).tone).toBe("ok");
   });
   it("failed test is error", () => {
-    expect(deriveApiServiceChip({ ...base, status: "needs_setup", lastTest: { ok: false, message: "bad" } }).tone).toBe("error");
+    expect(
+      deriveApiServiceChip({
+        ...base,
+        status: "needs_setup",
+        lastTest: { ok: false, message: "bad" },
+      }).tone,
+    ).toBe("error");
   });
   it("untested needs setup is warn", () => {
-    expect(deriveApiServiceChip({ ...base, status: "needs_setup" }).tone).toBe("warn");
+    expect(deriveApiServiceChip({ ...base, status: "needs_setup" }).tone).toBe(
+      "warn",
+    );
   });
 });

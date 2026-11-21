@@ -199,7 +199,7 @@ const AgentDetail = () => {
           <p className="text-[13px] leading-relaxed text-foreground/85">
             {agent.currentTask
               ? agent.currentTask.title
-              : "No task running. The queue is idle until you assign the next mission."}
+              : "No task running. The queue is idle until you assign the next milestone."}
           </p>
           {agent.currentTask ? (
             <div className="flex items-center gap-2">
@@ -364,7 +364,12 @@ const AgentDetail = () => {
             <SectionHeader title="Run history" count={runs.length} />
             <div className="mt-2 divide-y divide-border/60">
               {runs.map((run) => {
-                const tone = outcomeTone[run.outcome];
+                // A receipt with an outcome this build doesn't know must not
+                // take the page down; show it plainly instead.
+                const tone = outcomeTone[run.outcome] ?? {
+                  label: String(run.outcome),
+                  className: "text-muted-foreground border-border/70",
+                };
                 return (
                   <div key={run.id} className="py-3">
                     <div className="flex flex-wrap items-center gap-2">

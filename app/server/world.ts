@@ -10,7 +10,16 @@
  *    carrying a W3C `trace_id` exported to Phoenix when configured.
  */
 import { randomUUID } from "node:crypto";
+import type { Provenance } from "../shared/contracts.js";
+import {
+  BeliefSchema,
+  ClaimRelationSchema,
+  ClaimsAsOfResponseSchema,
+  EvidenceSchema,
+  ProvenanceSchema,
+} from "../shared/contracts.js";
 import { completeAgentDoc } from "./agentShape.js";
+import { completeFileDoc, completeNoteDoc } from "./knowledgeShape.js";
 import type { OctoClientConfig } from "./octo.js";
 import { OctoError } from "./octo.js";
 import { appendLedgerEvent, endSpan, startSpan } from "./telemetry.js";
@@ -34,6 +43,8 @@ type Json = Record<string, unknown>;
 export interface WorldPerson {
   id: string;
   name: string;
+  /** Profile image URL collected from the LinkedIn profile, when visible. */
+  avatarUrl?: string | undefined;
   role: string;
   companyId: string;
   location: string;
@@ -48,9 +59,31 @@ export interface WorldPerson {
     id: string;
     personId: string;
     text: string;
-    source: { label: string; kind: string; date: string };
+    source: {
+      label: string;
+      kind: string;
+      date: string;
+      locator?: string;
+      excerpt?: string;
+    };
     confidence: "high" | "medium" | "low";
     status: "sourced" | "unverified";
+    /** Perspective stances from Octo beliefs; never an approval workflow. */
+    beliefs: {
+      stance: string;
+      perspective?: string;
+      confidence: number | null;
+    }[];
+    /** Content hash of the chosen evidence, when projected by Octo. */
+    contentHash?: string;
+    /** Typed claim status from provenance, when present. */
+    claimStatus?: "SOURCED" | "UNVERIFIED";
+    /** Ledger verb (FACT, WORKS_AT, MET, UNVERIFIED, ...), for profile sections. */
+    verb?: string;
+    /** FACT attribute (public_education, linkedin_url, ...), when present. */
+    attribute?: string;
+    /** How the owner knows the person, on MET claims. */
+    basis?: string;
   }[];
 }
 
@@ -65,12 +98,25 @@ export interface WorldCompany {
   notes: string;
 }
 
+/** Mirrors the console's RelationshipEvent (console/src/data/types.ts). */
+export interface WorldEvent {
+  id: string;
+  name: string;
+  date: string;
+  location: string;
+  type: "conference" | "dinner" | "community" | "demo" | "mixer";
+  attendeeIds: string[];
+  goal: string;
+  agentId: string;
+  status: "upcoming" | "past";
+}
+
 export interface WorldShape {
   organization: Json;
   workspaces: Json[];
   projects: Json[];
   objectives: Json[];
-  missions: Json[];
+  milestones: Json[];
   plans: Json[];
   agents: Json[];
   tasks: Json[];
@@ -79,7 +125,7 @@ export interface WorldShape {
   activity: Json[];
   people: WorldPerson[];
   companies: WorldCompany[];
-  events: Json[];
+  events: WorldEvent[];
   folders: Json[];
   files: Json[];
   notes: Json[];
@@ -88,14 +134,92 @@ export interface WorldShape {
   mcpServers: Json[];
   plugins: Json[];
   smartLists: Json[];
+  /** True when Octo reports the graph projection stale or unavailable. */
+  graphStale: boolean;
   generatedAt: string;
 }
 
-/** World collection -> ri_console table. Mirrors console/scripts/bootstrap-octo.mjs. */
+/**
+ * Evidence returned from Octo's graph projection. Validated against the shared
+ * Evidence contract; `excerpt` covers legacy projections that aliased quote.
+ */
+interface EvidenceRow {
+  claimId: string;
+  locator: string;
+  excerpt: string;
+  quote: string | undefined;
+  contentHash: string | undefined;
+  sourceFileId: string | undefined;
+}
+
+/** Belief row as projected from Octo's beliefs table. */
+interface BeliefRow {
+  claimId: string;
+  stance: string;
+  confidence: number | null;
+  perspective: string | undefined;
+  validFrom: string | null | undefined;
+  validTo: string | null | undefined;
+  recordedAt: string | null | undefined;
+  supersededAt: string | null | undefined;
+}
+
+/** Claim relation row as projected by the Octo graph projector (RELATES edge). */
+interface RelationRow {
+  id?: string;
+  fromClaimId: string;
+  toClaimId: string;
+  relation: string;
+  supersededAt?: string | null;
+}
+
+/** Tolerant parse of a graph provenance value (JSON string or already an object). */
+export function parseProvenance(value: unknown): Provenance {
+  let raw: unknown = value;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const parsed = ProvenanceSchema.safeParse(raw);
+  return parsed.success ? parsed.data : {};
+}
+
+/** True when a claim is a retirement marker (typed status or legacy verb). */
+function isRetirement(provenance: Provenance): boolean {
+  return (
+    provenance.verb === "RETIRED" ||
+    (typeof provenance.verb === "string" &&
+      provenance.verb.toUpperCase() === "RETIRED") ||
+    (typeof provenance.status === "string" &&
+      provenance.status.toUpperCase() === "RETIRED")
+  );
+}
+
+/** True when a claim is a typed corrective/superseding marker. */
+function isSuperseding(
+  provenance: Provenance,
+  relation: string | undefined,
+): boolean {
+  return (
+    relation === "SUPERSEDES" ||
+    (typeof provenance.verb === "string" &&
+      provenance.verb.toUpperCase() === "SUPERSEDES")
+  );
+}
+
+/**
+ * World collection -> ri_console table. Mirrors console/scripts/bootstrap-octo.mjs.
+ * The milestone collection lives in Octo's persisted `mission` table: canonical
+ * schema, not renamed from this adopter.
+ */
 const TABLES: Record<string, string> = {
   projects: "project",
   objectives: "objective",
-  missions: "mission",
+  milestones: "mission",
   plans: "plan",
   agents: "agent",
   tasks: "agent_task",
@@ -211,29 +335,43 @@ const hostOf = (locator: string) => {
 };
 
 /**
- * Entities that have been retired: at least one current claim says RETIRED
- * and no other current claim remains. The ledger never deletes, so retiring a
- * record (seed/retire_samples.py) supersedes its claims and adds a RETIRED
- * one; this is what keeps a retired person or company off the screen.
+ * Entities that have been retired: at least one visible current claim is a
+ * retirement marker (legacy RETIRED verb or typed SUPERSEDES/status) and no
+ * other current claim for that entity remains. The ledger never deletes, so
+ * retiring a record supersedes its claims and adds a retirement marker; this
+ * is what keeps a retired person or company off the screen.
+ *
+ * Scope is applied BEFORE this computation: a private retirement claim from
+ * one principal must never hide a shared entity for another principal.
  */
 export function retiredEntityIds(
   claims: Record<string, unknown>[],
   subjectOf: Map<string, string>,
+  relations: RelationRow[] = [],
+  scope?: CanonicalScope,
 ): Set<string> {
+  const supersedesFrom = new Set(
+    relations
+      .filter((r) => r.relation === "SUPERSEDES" && !r.supersededAt)
+      .map((r) => r.fromClaimId),
+  );
   const retired = new Set<string>();
   const live = new Set<string>();
   for (const claim of claims) {
     if (claim.supersededAt) continue;
     const entityId = subjectOf.get(String(claim.id));
     if (!entityId) continue;
-    let verb: unknown;
-    try {
-      verb = (JSON.parse(String(claim.provenance ?? "{}")) as Json).verb;
-    } catch {
-      verb = undefined;
+    const provenance = parseProvenance(claim.provenance);
+    if (scope && !isClaimVisibleToScope(provenance, scope)) continue;
+    if (
+      isRetirement(provenance) ||
+      isSuperseding(provenance, undefined) ||
+      supersedesFrom.has(String(claim.id))
+    ) {
+      retired.add(entityId);
+    } else {
+      live.add(entityId);
     }
-    if (verb === "RETIRED") retired.add(entityId);
-    else live.add(entityId);
   }
   for (const id of live) retired.delete(id);
   return retired;
@@ -285,77 +423,221 @@ export function isClaimVisibleToScope(
   return scope.isContainerOwner && scope.workspaceId === scope.octoContainerId;
 }
 
+/**
+ * Bitemporal read: GET /api/epistemic/claims-as-of with the caller's session
+ * token. The response is Zod-validated; malformed upstream data never reaches
+ * the people projection.
+ */
+export async function readClaimsAsOf(
+  config: OctoClientConfig,
+  token: string,
+  workspaceId: string,
+  asOfRecorded: string,
+  asOfValid?: string,
+): Promise<Record<string, unknown>[]> {
+  const url = new URL("/api/epistemic/claims-as-of", config.baseUrl);
+  url.searchParams.set("workspaceId", workspaceId);
+  url.searchParams.set("asOfRecorded", asOfRecorded);
+  if (asOfValid) url.searchParams.set("asOfValid", asOfValid);
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    signal: AbortSignal.timeout(config.timeoutMs),
+  });
+  if (!response.ok) {
+    throw new OctoError(
+      response.status,
+      `Octo answered ${response.status} for claims-as-of`,
+    );
+  }
+  const parsed = ClaimsAsOfResponseSchema.safeParse(await response.json());
+  if (!parsed.success) {
+    throw new Error("Octo claims-as-of response failed contract validation");
+  }
+  // Map onto the same row shape the graph claim query produces.
+  return parsed.data.claims.map((claim) => ({
+    id: claim.id,
+    statement: claim.statement,
+    validFrom: claim.validFrom,
+    validTo: claim.validTo ?? null,
+    recordedAt: claim.recordedAt,
+    supersededAt: null,
+    // Provenance is already validated by ClaimSchema; pass the object through
+    // parseProvenance in readCanonical (it accepts objects as well as strings).
+    provenance: claim.provenance,
+  }));
+}
+
 export async function readCanonical(
   config: OctoClientConfig,
   token: string,
   octoContainerId: string,
   scope?: CanonicalScope,
-): Promise<{ people: WorldPerson[]; companies: WorldCompany[] }> {
-  const [entities, claims, subjects, cites, beliefs] = await Promise.all([
-    graph(
-      config,
-      token,
-      octoContainerId,
-      "MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.entityType AS kind",
-    ),
-    graph(
-      config,
-      token,
-      octoContainerId,
-      "MATCH (c:Claim) RETURN c.id AS id, c.statement AS statement, c.validFrom AS validFrom, c.supersededAt AS supersededAt, c.provenance AS provenance",
-    ),
-    graph(
-      config,
-      token,
-      octoContainerId,
-      "MATCH (c:Claim)-[:SUBJECT]->(e:Entity) RETURN c.id AS claimId, e.id AS entityId",
-    ),
-    graph(
-      config,
-      token,
-      octoContainerId,
-      "MATCH (c:Claim)-[:CITES]->(v:Evidence) RETURN c.id AS claimId, v.locator AS locator",
-    ),
-    graph(
-      config,
-      token,
-      octoContainerId,
-      "MATCH (b:Belief)-[:ABOUT]->(c:Claim) RETURN c.id AS claimId, b.confidence AS confidence",
-    ),
-  ]);
+  /** Optional bitemporal claims from readClaimsAsOf; replaces graph claim rows. */
+  claimsOverride?: Record<string, unknown>[],
+): Promise<{
+  people: WorldPerson[];
+  companies: WorldCompany[];
+  events: WorldEvent[];
+}> {
+  const [entities, claims, subjects, cites, beliefs, relations] =
+    await Promise.all([
+      graph(
+        config,
+        token,
+        octoContainerId,
+        "MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.entityType AS kind",
+      ),
+      claimsOverride
+        ? Promise.resolve(claimsOverride)
+        : graph(
+            config,
+            token,
+            octoContainerId,
+            "MATCH (c:Claim) RETURN c.id AS id, c.statement AS statement, c.validFrom AS validFrom, c.validTo AS validTo, c.recordedAt AS recordedAt, c.supersededAt AS supersededAt, c.provenance AS provenance",
+          ),
+      graph(
+        config,
+        token,
+        octoContainerId,
+        "MATCH (c:Claim)-[:SUBJECT]->(e:Entity) RETURN c.id AS claimId, e.id AS entityId",
+      ),
+      graph(
+        config,
+        token,
+        octoContainerId,
+        "MATCH (c:Claim)-[:CITES]->(v:Evidence) RETURN c.id AS claimId, v.id AS evidenceId, v.locator AS locator, v.quote AS quote, v.contentHash AS contentHash, v.sourceFileId AS sourceFileId",
+      ),
+      graph(
+        config,
+        token,
+        octoContainerId,
+        "MATCH (b:Belief)-[:ABOUT]->(c:Claim) RETURN c.id AS claimId, b.id AS beliefId, b.stance AS stance, b.confidence AS confidence, b.validFrom AS validFrom, b.validTo AS validTo, b.recordedAt AS recordedAt, b.supersededAt AS supersededAt",
+      ),
+      graph(
+        config,
+        token,
+        octoContainerId,
+        "MATCH (a:Claim)-[r:RELATES]->(b:Claim) RETURN r.id AS id, a.id AS fromClaimId, b.id AS toClaimId, r.relation AS relation, r.supersededAt AS supersededAt",
+      ),
+    ]);
 
   const subjectOf = new Map<string, string>();
   for (const row of subjects)
     subjectOf.set(String(row.claimId), String(row.entityId));
-  const locatorOf = new Map<string, string>();
-  for (const row of cites)
-    locatorOf.set(String(row.claimId), String(row.locator));
-  const confidenceOfClaim = new Map<string, number>();
-  for (const row of beliefs) {
+
+  const evidenceOf = new Map<string, EvidenceRow>();
+  for (const row of cites) {
+    const parsed = EvidenceSchema.safeParse({
+      ...(row.evidenceId ? { id: String(row.evidenceId) } : {}),
+      locator: row.locator ?? null,
+      quote: row.quote ?? row.excerpt ?? null,
+      contentHash: row.contentHash ?? null,
+      sourceFileId: row.sourceFileId ?? null,
+    });
+    if (!parsed.success) continue;
+    const evidence = parsed.data;
     const id = String(row.claimId);
-    const value = Number(row.confidence);
-    confidenceOfClaim.set(id, Math.max(confidenceOfClaim.get(id) ?? 0, value));
+    const previous = evidenceOf.get(id);
+    const candidate: EvidenceRow = {
+      claimId: id,
+      locator: evidence.locator ?? "",
+      excerpt: evidence.quote ?? "",
+      quote: evidence.quote ?? undefined,
+      contentHash: evidence.contentHash ?? undefined,
+      sourceFileId: evidence.sourceFileId ?? undefined,
+    };
+    // Prefer the most informative evidence row: a locator, then a hash.
+    const rank = (v: EvidenceRow) =>
+      v.locator.length * 2 + (v.excerpt.length > 0 ? 1 : 0);
+    if (!previous || rank(candidate) > rank(previous))
+      evidenceOf.set(id, candidate);
   }
 
-  const retired = retiredEntityIds(claims, subjectOf);
-  const parsedClaimsByEntity = new Map<
-    string,
-    { claim: Json; provenance: Json }[]
-  >();
-  for (const claim of claims) {
+  const beliefsOfClaim = new Map<string, BeliefRow[]>();
+  for (const row of beliefs) {
+    const parsed = BeliefSchema.safeParse({
+      id: String(row.beliefId ?? row.claimId ?? ""),
+      claimId: String(row.claimId),
+      stance: row.stance,
+      confidence: row.confidence ?? null,
+      perspective: row.perspective,
+      validFrom: row.validFrom ?? null,
+      validTo: row.validTo ?? null,
+      recordedAt: row.recordedAt ?? null,
+      supersededAt: row.supersededAt ?? null,
+    });
+    if (!parsed.success) continue;
+    const id = String(row.claimId);
+    const list = beliefsOfClaim.get(id) ?? [];
+    list.push({
+      claimId: id,
+      stance: parsed.data.stance,
+      confidence: parsed.data.confidence ?? null,
+      perspective: parsed.data.perspective,
+      validFrom: parsed.data.validFrom ?? undefined,
+      validTo: parsed.data.validTo ?? undefined,
+      recordedAt: parsed.data.recordedAt ?? undefined,
+      supersededAt: parsed.data.supersededAt ?? undefined,
+    });
+    beliefsOfClaim.set(id, list);
+  }
+
+  const relationsOfClaim = new Map<string, string>();
+  const validRelations: RelationRow[] = [];
+  for (const row of relations) {
+    const parsed = ClaimRelationSchema.safeParse({
+      id: String(row.id ?? ""),
+      fromClaimId: String(row.fromClaimId),
+      toClaimId: String(row.toClaimId),
+      relation: row.relation,
+      supersededAt: row.supersededAt ?? null,
+    });
+    if (!parsed.success) continue;
+    const relation: RelationRow = {
+      id: parsed.data.id,
+      fromClaimId: parsed.data.fromClaimId,
+      toClaimId: parsed.data.toClaimId,
+      relation: parsed.data.relation,
+      supersededAt: parsed.data.supersededAt ?? null,
+    };
+    validRelations.push(relation);
+    if (!relation.supersededAt)
+      relationsOfClaim.set(relation.fromClaimId, relation.relation);
+  }
+
+  const parsedClaims = (claimsOverride ?? claims).map((claim) => ({
+    claim,
+    provenance: parseProvenance(claim.provenance),
+  }));
+
+  // Scope is applied first: retirement/supersession derived from a private
+  // claim must not hide a shared entity from another principal.
+  const scopedClaims = parsedClaims.filter(
+    ({ provenance }) => !scope || isClaimVisibleToScope(provenance, scope),
+  );
+  const retired = retiredEntityIds(
+    scopedClaims.map(({ claim }) => claim),
+    subjectOf,
+    validRelations,
+    scope,
+  );
+
+  const parsedClaimsByEntity = new Map<string, typeof scopedClaims>();
+  const relationByClaim = new Map(relationsOfClaim);
+  for (const entry of scopedClaims) {
+    const { claim, provenance } = entry;
     if (claim.supersededAt) continue;
     const entityId = subjectOf.get(String(claim.id));
     if (!entityId || retired.has(entityId)) continue;
-    let provenance: Json = {};
-    try {
-      provenance = JSON.parse(String(claim.provenance ?? "{}")) as Json;
-    } catch {
-      provenance = {};
-    }
-    if (provenance.verb === "RETIRED") continue;
-    if (scope && !isClaimVisibleToScope(provenance, scope)) continue;
+    if (isRetirement(provenance)) continue;
+    const supersededByRelation =
+      relationByClaim.get(String(claim.id)) === "SUPERSEDES";
+    if (supersededByRelation) continue;
     const list = parsedClaimsByEntity.get(entityId) ?? [];
-    list.push({ claim, provenance });
+    list.push(entry);
     parsedClaimsByEntity.set(entityId, list);
   }
 
@@ -364,6 +646,53 @@ export async function readCanonical(
   );
   const orgBySlug = new Map(orgs.map((e) => [String(e.kind), String(e.id)]));
   const referencedCompanyIds = new Set<string>();
+
+  // Derive person fields from sourced FACT attributes in the ledger. The
+  // owner's imported people carry attribute-tagged facts, not WORKS_AT claims.
+  const factValue = (
+    parsed: typeof scopedClaims,
+    attribute: string,
+  ): string => {
+    const match = parsed.find(
+      ({ provenance }) =>
+        provenance.verb === "FACT" &&
+        provenance.attribute === attribute &&
+        provenance.status !== "UNVERIFIED",
+    );
+    return match ? String(match.claim.statement ?? "") : "";
+  };
+  const suffixAfter = (statement: string, marker: string): string => {
+    const at = statement.toLowerCase().indexOf(marker.toLowerCase());
+    return at < 0 ? "" : statement.slice(at + marker.length).trim();
+  };
+
+  // A claim is sourced only when its typed status is SOURCED and it has real
+  // evidence (a locator or content hash), or when it is a legacy sourced claim
+  // (no typed status) carrying evidence. UNVERIFIED is never sourced, and a
+  // bare locator without a SOURCED status is not enough.
+  const claimStatus = (entry: (typeof scopedClaims)[number]) => {
+    const { claim, provenance } = entry;
+    const evidence = evidenceOf.get(String(claim.id));
+    const hasEvidence = Boolean(
+      evidence?.locator || evidence?.contentHash || evidence?.quote,
+    );
+    const belief = beliefsOfClaim.get(String(claim.id)) ?? [];
+    const disbelieved = belief.some((b) => b.stance === "disbelieves");
+    const unverified =
+      provenance.status === "UNVERIFIED" ||
+      provenance.verb === "UNVERIFIED" ||
+      disbelieved;
+    const sourced =
+      !unverified &&
+      (provenance.status === "SOURCED"
+        ? hasEvidence
+        : provenance.status === undefined && hasEvidence);
+    return {
+      status: (sourced ? "sourced" : "unverified") as "sourced" | "unverified",
+      evidence,
+      belief,
+    };
+  };
 
   const people: WorldPerson[] = [];
   for (const entity of entities) {
@@ -397,8 +726,13 @@ export async function readCanonical(
           ),
         )
       : 999;
-    const mappedClaims = parsed.map(({ claim }) => {
-      const locator = locatorOf.get(String(claim.id));
+    const mappedClaims = parsed.map((entry) => {
+      const { claim } = entry;
+      const { status, evidence, belief } = claimStatus(entry);
+      const locator = evidence?.locator ?? "";
+      const confidenceSource = belief.length
+        ? Math.max(...belief.map((b) => b.confidence ?? 0))
+        : undefined;
       return {
         id: String(claim.id),
         personId,
@@ -407,27 +741,68 @@ export async function readCanonical(
           label: locator ? hostOf(locator) : "Octo ledger",
           kind: locator ? "web" : "note",
           date: String(claim.validFrom ?? ""),
+          ...(locator ? { locator } : {}),
+          ...(evidence?.excerpt ? { excerpt: evidence.excerpt } : {}),
         },
-        confidence: confidenceOf(confidenceOfClaim.get(String(claim.id))),
-        status: (locator ? "sourced" : "unverified") as
-          | "sourced"
-          | "unverified",
+        confidence: confidenceOf(confidenceSource),
+        status,
+        beliefs: belief.map((b) => ({
+          stance: b.stance,
+          ...(b.perspective ? { perspective: b.perspective } : {}),
+          confidence: b.confidence,
+        })),
+        ...(evidence?.contentHash ? { contentHash: evidence.contentHash } : {}),
+        ...(entry.provenance.status
+          ? { claimStatus: entry.provenance.status }
+          : {}),
+        ...(entry.provenance.verb
+          ? { verb: String(entry.provenance.verb) }
+          : {}),
+        ...(entry.provenance.attribute
+          ? { attribute: String(entry.provenance.attribute) }
+          : {}),
+        ...(entry.provenance.basis
+          ? { basis: String(entry.provenance.basis) }
+          : {}),
       };
     });
     const sourced = mappedClaims.find((c) => c.status === "sourced");
+    const roleSummary = factValue(parsed, "public_role_summary");
+    const education = factValue(parsed, "public_education");
+    const credential = factValue(parsed, "public_profile_credential");
+    const role = employment
+      ? String(employment.provenance.title ?? "—")
+      : suffixAfter(roleSummary, ":") || "—";
+    const email =
+      factValue(parsed, "professional_email").match(
+        /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
+      )?.[0] ?? "";
+    // Profile image collected by the slow crawler (RI-0024). A sourced FACT,
+    // never inferred. Empty until a visit actually saw the photo.
+    const avatarUrl = (() => {
+      const value = factValue(parsed, "profile_image");
+      const url = value.match(/https?:\/\/[^\s"']+/i)?.[0] ?? "";
+      return url.startsWith("http") ? url.slice(0, 600) : undefined;
+    })();
+    const tags = [credential, education]
+      .map((value) => suffixAfter(value, ":"))
+      .filter(Boolean);
+    // Never let an UNVERIFIED claim become the person's summary.
+    const summarySource = sourced?.text ?? roleSummary ?? "";
     people.push({
       id: personId,
       name: String(entity.name),
-      role: employment ? String(employment.provenance.title ?? "—") : "—",
+      avatarUrl,
+      role,
       companyId,
-      location: "",
+      location: suffixAfter(factValue(parsed, "location"), ":"),
       timezone: "",
       strength,
       warmth: warmthOf(quietDays),
       lastContact: lastContact || new Date(0).toISOString(),
-      tags: [],
-      summary: sourced?.text ?? mappedClaims[0]?.text ?? "",
-      email: "",
+      tags,
+      summary: summarySource,
+      email,
       claims: mappedClaims,
     });
   }
@@ -452,7 +827,83 @@ export async function readCanonical(
     notes: "",
   }));
 
-  return { people, companies };
+  // Events live in the ledger as `event:<slug>` entities. The loader stored
+  // no date property, but the slug carries the event day for most sources
+  // (…-2026-11-18, …-20261008, 2026-11-13-…). Only emit events whose day can
+  // be read without guessing: the console formats `date` unguarded, and an
+  // invented day would be a fabricated fact. "Where we met" comes from the
+  // owner's self-reported `met at <title>` notes, which are claims on the
+  // person and already pass the visibility filter above.
+  const eventDateFromSlug = (kind: string): string => {
+    const slug = kind.slice("event:".length);
+    const iso = slug.match(/(\d{4})-(\d{2})-(\d{2})/);
+    const compact = slug.match(/(\d{4})(\d{2})(\d{2})/);
+    const parts = iso ?? compact;
+    if (!parts) return "";
+    const [, y, m, d] = parts;
+    const date = new Date(`${y}-${m}-${d}T00:00:00.000Z`);
+    if (
+      Number.isNaN(date.getTime()) ||
+      date.getUTCMonth() + 1 !== Number(m) ||
+      date.getUTCDate() !== Number(d)
+    ) {
+      return "";
+    }
+    return date.toISOString();
+  };
+
+  const eventEntities = entities.filter(
+    (e) => String(e.kind).startsWith("event:") && !retired.has(String(e.id)),
+  );
+  const eventByTitle = new Map<string, string>();
+  for (const e of eventEntities) {
+    if (eventDateFromSlug(String(e.kind))) {
+      eventByTitle.set(String(e.name), String(e.id));
+    }
+  }
+  const attendeesOf = new Map<string, Set<string>>();
+  for (const [personId, parsed] of parsedClaimsByEntity) {
+    for (const { claim, provenance } of parsed) {
+      if (provenance.verb !== "UNVERIFIED") continue;
+      const metAt = String(claim.statement ?? "").match(
+        /\(self reported\) met at\s+(.+)$/i,
+      );
+      if (!metAt) continue;
+      const title = metAt[1];
+      if (!title) continue;
+      const eventId = eventByTitle.get(title.trim());
+      if (!eventId) continue;
+      const set = attendeesOf.get(eventId) ?? new Set<string>();
+      set.add(personId);
+      attendeesOf.set(eventId, set);
+    }
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const events: WorldEvent[] = [];
+  for (const e of eventEntities) {
+    const id = String(e.id);
+    const date = eventDateFromSlug(String(e.kind));
+    if (!date) continue;
+    const attendeeIds = [...(attendeesOf.get(id) ?? [])];
+    // Members only see events tied to people whose claims they can read;
+    // the container owner sees the whole calendar, including upcoming
+    // events nobody has met at yet.
+    if (scope && !scope.isContainerOwner && attendeeIds.length === 0) continue;
+    events.push({
+      id,
+      name: String(e.name),
+      date,
+      location: "",
+      type: "community",
+      attendeeIds,
+      goal: "",
+      agentId: "",
+      status: date.slice(0, 10) < today ? "past" : "upcoming",
+    });
+  }
+  events.sort((a, b) => a.date.localeCompare(b.date));
+
+  return { people, companies, events };
 }
 
 /* ------------------------------------------------------------------ */
@@ -536,6 +987,49 @@ async function getDoc(
   return (rows[0]?.doc as Json) ?? null;
 }
 
+/** Map Octo's persisted `missionId` doc key onto the domain's milestoneId. */
+function normalizeMilestoneRef(doc: Json): Json {
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return doc;
+  const record = doc as Record<string, Json>;
+  if (record.milestoneId === undefined && record.missionId !== undefined) {
+    const next: Record<string, Json> = {
+      ...record,
+      milestoneId: record.missionId,
+    };
+    delete next.missionId;
+    return next;
+  }
+  return doc;
+}
+
+/** Ask Octo whether the graph projection is current (PROJECT.md rule 10). */
+async function isGraphStale(
+  config: OctoClientConfig,
+  token: string,
+  octoContainerId: string,
+): Promise<boolean> {
+  try {
+    const response = await fetch(
+      new URL(
+        `/api/graph/health?workspaceId=${encodeURIComponent(octoContainerId)}`,
+        config.baseUrl,
+      ),
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(config.timeoutMs),
+      },
+    );
+    if (!response.ok) return true;
+    const body = (await response.json()) as Record<string, unknown>;
+    return body.stale === true || body.healthy === false;
+  } catch {
+    return true;
+  }
+}
+
 export async function readWorld(
   config: OctoClientConfig,
   token: string,
@@ -544,20 +1038,37 @@ export async function readWorld(
   workspaces: { id: string; name: string }[],
   octoContainerId = workspaceId,
   role = "member",
+  asOf?: { recorded: string; valid: string | undefined },
 ): Promise<WorldShape> {
-  const [canonical, ops] = await Promise.all([
-    readCanonical(config, token, octoContainerId, {
-      workspaceId,
+  const asOfClaims = asOf
+    ? await readClaimsAsOf(
+        config,
+        token,
+        workspaceId,
+        asOf.recorded,
+        asOf.valid,
+      )
+    : undefined;
+  const [canonical, ops, graphStale] = await Promise.all([
+    readCanonical(
+      config,
+      token,
       octoContainerId,
-      principalId: principal.id,
-      isContainerOwner: role === "owner" && workspaceId === octoContainerId,
-    }),
+      {
+        workspaceId,
+        octoContainerId,
+        principalId: principal.id,
+        isContainerOwner: role === "owner" && workspaceId === octoContainerId,
+      },
+      asOfClaims,
+    ),
     readOps(config, token, workspaceId, principal.id, octoContainerId),
+    isGraphStale(config, token, octoContainerId),
   ]);
   const {
     projects = [],
     objectives = [],
-    missions = [],
+    milestones = [],
     plans = [],
     agents = [],
     tasks = [],
@@ -590,29 +1101,40 @@ export async function readWorld(
     })),
     projects,
     objectives,
-    missions,
-    plans,
+    milestones,
+    // Octo plan/task docs persist the FK as `missionId`; accept both spellings.
+    plans: plans.map((doc) => normalizeMilestoneRef(doc)),
     // Fill the fields the console's agent cards read; see agentShape.ts.
     agents: agents.map((agent) =>
       agent && typeof agent === "object"
         ? completeAgentDoc(agent as Record<string, unknown>)
         : agent,
     ) as Json[],
-    tasks,
+    tasks: tasks.map((doc) => normalizeMilestoneRef(doc)),
     runs,
     approvals,
     activity,
     people: canonical.people,
     companies: canonical.companies,
-    events: [],
+    events: canonical.events,
     folders,
-    files,
-    notes,
+    // Fill the fields the console's knowledge views read; see knowledgeShape.ts.
+    files: files.map((doc) =>
+      doc && typeof doc === "object"
+        ? completeFileDoc(doc as Record<string, unknown>, principal.displayName)
+        : doc,
+    ) as Json[],
+    notes: notes.map((doc) =>
+      doc && typeof doc === "object"
+        ? completeNoteDoc(doc as Record<string, unknown>)
+        : doc,
+    ) as Json[],
     retrospectives,
     connectors,
     mcpServers,
     plugins,
     smartLists,
+    graphStale,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -659,6 +1181,9 @@ async function applyDesign(
         status: "active",
         owner: principalId,
         summary: design.missionSummary,
+        ...(typeof design.projectMission === "string" && design.projectMission
+          ? { mission: design.projectMission }
+          : {}),
         personIds: [],
         companyIds: [],
         eventIds: [],
@@ -688,15 +1213,15 @@ async function applyDesign(
     "private",
     octoContainerId,
   );
-  const missionId = randomUUID();
+  const milestoneId = randomUUID();
   await insertDoc(
     config,
     token,
     workspaceId,
     principalId,
-    "missions",
+    "milestones",
     {
-      id: missionId,
+      id: milestoneId,
       objectiveId,
       projectId,
       name: design.missionName,
@@ -719,7 +1244,8 @@ async function applyDesign(
     "plans",
     {
       id: randomUUID(),
-      missionId,
+      // Persisted Octo doc key stays `missionId` (canonical schema).
+      missionId: milestoneId,
       agentId: (design.agentIds as string[])?.[0] ?? "research",
       title: `Plan — ${String(design.missionName)}`,
       summary: design.rationale,
@@ -854,7 +1380,7 @@ export async function decideApproval(
   } else if (input.decision === "declined" && declinePath === "snooze") {
     outcome = "Snoozed for 24 hours.";
   } else if (input.decision === "declined") {
-    outcome = "Stopped — no mission or follow-up created.";
+    outcome = "Stopped — no milestone or follow-up created.";
   }
 
   const agent = await getDoc(
@@ -1044,4 +1570,28 @@ export async function patchDoc(
     octoContainerId,
   );
   return next;
+}
+
+/** Bitemporal world projection: people reflect claims as of the given instants. */
+export async function readWorldAsOf(
+  config: OctoClientConfig,
+  token: string,
+  workspaceId: string,
+  principal: { id: string; displayName: string },
+  workspaces: { id: string; name: string }[],
+  asOfRecorded: string,
+  asOfValid?: string,
+  octoContainerId = workspaceId,
+  role = "member",
+): Promise<WorldShape> {
+  return readWorld(
+    config,
+    token,
+    workspaceId,
+    principal,
+    workspaces,
+    octoContainerId,
+    role,
+    { recorded: asOfRecorded, valid: asOfValid },
+  );
 }

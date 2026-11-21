@@ -35,6 +35,9 @@ const EnvSchema = z.object({
   PHOENIX_UI_URL: z.string().url().optional(),
   PHOENIX_PROJECT_NAME: z.string().optional(),
   PHOENIX_CAPTURE_CONTENT: z.string().optional(),
+  // Shared bearer for the local slow-crawler runner (RI-0023). Unset disables
+  // the crawler endpoints entirely.
+  CRAWLER_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

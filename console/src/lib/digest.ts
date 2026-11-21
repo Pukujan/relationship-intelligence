@@ -1,5 +1,5 @@
 import { daysQuiet, goingCold, pendingApprovals } from "@/data/derive";
-import type { Mission, World } from "@/data/types";
+import type { Milestone, World } from "@/data/types";
 
 /**
  * A compact snapshot of the world for the copilot server.
@@ -14,6 +14,8 @@ export interface DigestClaim {
   text: string;
   status: "sourced" | "unverified";
   source: string;
+  locator?: string;
+  excerpt?: string;
 }
 
 export interface WorldDigest {
@@ -45,7 +47,7 @@ export interface WorldDigest {
     status: string;
     dueDate?: string;
   }[];
-  missions: {
+  milestones: {
     id: string;
     projectId: string;
     objectiveId: string;
@@ -105,6 +107,8 @@ const claimView = (world: World, personId: string): DigestClaim[] => {
     text: claim.text,
     status: claim.status,
     source: `${claim.source.label} (${claim.source.kind})`,
+    ...(claim.source.locator ? { locator: claim.source.locator } : {}),
+    ...(claim.source.excerpt ? { excerpt: claim.source.excerpt } : {}),
   }));
 };
 
@@ -124,9 +128,9 @@ const relevantPeople = (world: World) => {
       }
     }
   }
-  for (const mission of world.missions) {
-    if (mission.status !== "done") {
-      for (const id of mission.personIds) referenced.add(id);
+  for (const milestone of world.milestones) {
+    if (milestone.status !== "done") {
+      for (const id of milestone.personIds) referenced.add(id);
     }
   }
   for (const project of world.projects) {
@@ -143,8 +147,8 @@ const relevantPeople = (world: World) => {
   return picked.slice(0, 24);
 };
 
-export const missionPlanProgress = (world: World, mission: Mission) => {
-  const plan = world.plans.find((item) => item.missionId === mission.id);
+export const milestonePlanProgress = (world: World, milestone: Milestone) => {
+  const plan = world.plans.find((item) => item.milestoneId === milestone.id);
   if (!plan || plan.steps.length === 0) return null;
   const done = plan.steps.filter((step) => step.status === "done").length;
   return Math.round((done / plan.steps.length) * 100);
@@ -170,8 +174,8 @@ export const buildWorldDigest = (
   for (const project of world.projects) {
     for (const id of project.eventIds) eventIds.add(id);
   }
-  for (const mission of world.missions) {
-    if (mission.eventId) eventIds.add(mission.eventId);
+  for (const milestone of world.milestones) {
+    if (milestone.eventId) eventIds.add(milestone.eventId);
   }
 
   return {
@@ -203,18 +207,18 @@ export const buildWorldDigest = (
       status: objective.status,
       dueDate: objective.dueDate,
     })),
-    missions: world.missions.map((mission) => ({
-      id: mission.id,
-      projectId: mission.projectId,
-      objectiveId: mission.objectiveId,
-      name: mission.name,
-      summary: mission.summary,
-      status: mission.status,
-      horizon: mission.horizon,
-      due: mission.due,
-      agentIds: mission.agentIds,
-      personIds: mission.personIds,
-      planProgress: missionPlanProgress(world, mission),
+    milestones: world.milestones.map((milestone) => ({
+      id: milestone.id,
+      projectId: milestone.projectId,
+      objectiveId: milestone.objectiveId,
+      name: milestone.name,
+      summary: milestone.summary,
+      status: milestone.status,
+      horizon: milestone.horizon,
+      due: milestone.due,
+      agentIds: milestone.agentIds,
+      personIds: milestone.personIds,
+      planProgress: milestonePlanProgress(world, milestone),
     })),
     approvals: world.approvals.map((approval) => ({
       id: approval.id,

@@ -1,17 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { resolveTemplate, evaluateCondition } from "../server/workflows.js";
+import { evaluateCondition, resolveTemplate } from "../server/workflows.js";
 import { WORKFLOW_NODE_DEFS } from "../shared/contracts.js";
 
 describe("workflow template resolution", () => {
-  const ctx = { input: { price: 42, nested: { name: "acme" } }, payload: { value: 7 }, now: "2026-01-01" };
+  const ctx = {
+    input: { price: 42, nested: { name: "acme" } },
+    payload: { value: 7 },
+    now: "2026-01-01",
+  };
   it("preserves type for a whole-value template", () => {
     expect(resolveTemplate("{{input.price}}", ctx)).toBe(42);
   });
   it("interpolates into a string", () => {
-    expect(resolveTemplate("price is {{input.price}} today", ctx)).toBe("price is 42 today");
+    expect(resolveTemplate("price is {{input.price}} today", ctx)).toBe(
+      "price is 42 today",
+    );
   });
   it("reads nested paths and payload", () => {
-    expect(resolveTemplate("{{input.nested.name}}/{{payload.value}}", ctx)).toBe("acme/7");
+    expect(
+      resolveTemplate("{{input.nested.name}}/{{payload.value}}", ctx),
+    ).toBe("acme/7");
   });
   it("renders missing paths as empty", () => {
     expect(resolveTemplate("x{{input.missing}}y", ctx)).toBe("xy");

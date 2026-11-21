@@ -115,10 +115,12 @@ const personTones = [
 
 export const PersonAvatar = ({
   name,
+  imageUrl,
   size = "md",
   className,
 }: {
   name: string;
+  imageUrl?: string | undefined;
   size?: "xs" | "sm" | "md" | "lg";
   className?: string;
 }) => {
@@ -133,6 +135,21 @@ export const PersonAvatar = ({
     md: "h-9 w-9 text-[11px]",
     lg: "h-14 w-14 text-base",
   } as const;
+  if (imageUrl) {
+    return (
+      <img
+        src={imageUrl}
+        alt={name}
+        referrerPolicy="no-referrer"
+        loading="lazy"
+        className={cn(
+          "shrink-0 rounded-full border object-cover",
+          sizes[size],
+          className,
+        )}
+      />
+    );
+  }
   return (
     <span
       className={cn(
@@ -206,7 +223,7 @@ const kindLabels: Record<ApprovalKind, string> = {
   publish: "Publish",
   invite: "Invite",
   commit: "Commit",
-  mission: "Mission",
+  mission: "Milestone",
   replan: "Re-plan",
 };
 

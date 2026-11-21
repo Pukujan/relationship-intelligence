@@ -4,14 +4,14 @@ import { ArrowRight, CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   agentById,
-  missionStatusMeta,
+  milestoneStatusMeta,
   objectiveById,
   personById,
   projectById,
   projectStatusMeta,
   relativeTime,
 } from "@/data/derive";
-import type { Mission, Project, World } from "@/data/types";
+import type { Milestone, Project, World } from "@/data/types";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { PersonAvatar } from "@/components/common";
 
@@ -165,20 +165,20 @@ export const ProjectLink = ({
   );
 };
 
-export const MissionChain = ({
+export const MilestoneChain = ({
   world,
-  mission,
+  milestone,
   className,
   linked = true,
 }: {
   world: World;
-  mission: Mission;
+  milestone: Milestone;
   className?: string;
   /** Set false when the chain sits inside another link. */
   linked?: boolean;
 }) => {
-  const objective = objectiveById(world, mission.objectiveId);
-  const project = projectById(world, mission.projectId);
+  const objective = objectiveById(world, milestone.objectiveId);
+  const project = projectById(world, milestone.projectId);
   return (
     <span
       className={cn(
@@ -187,7 +187,7 @@ export const MissionChain = ({
       )}
     >
       {linked ? (
-        <ProjectLink world={world} projectId={mission.projectId} />
+        <ProjectLink world={world} projectId={milestone.projectId} />
       ) : (
         <span className="truncate">{project?.name}</span>
       )}
@@ -208,22 +208,22 @@ export const MissionChain = ({
   );
 };
 
-export const MissionRow = ({
+export const MilestoneRow = ({
   world,
-  mission,
+  milestone,
   selected = false,
   showChain = true,
 }: {
   world: World;
-  mission: Mission;
+  milestone: Milestone;
   selected?: boolean;
   showChain?: boolean;
 }) => {
-  const meta = missionStatusMeta[mission.status];
+  const meta = milestoneStatusMeta[milestone.status];
   return (
     <Link
-      to={`/missions/${mission.id}`}
-      aria-label={`Open ${mission.name}`}
+      to={`/milestones/${milestone.id}`}
+      aria-label={`Open ${milestone.name}`}
       className={cn(
         "focus-ring group flex items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors",
         selected
@@ -235,10 +235,10 @@ export const MissionRow = ({
         <span
           className={cn(
             "mt-1 h-1.5 w-1.5 rounded-full",
-            mission.status === "running" && "bg-run animate-live-dot",
-            mission.status === "blocked" && "bg-warn",
-            mission.status === "queued" && "bg-idle",
-            mission.status === "done" && "bg-primary",
+            milestone.status === "running" && "bg-run animate-live-dot",
+            milestone.status === "blocked" && "bg-warn",
+            milestone.status === "queued" && "bg-idle",
+            milestone.status === "done" && "bg-primary",
           )}
           aria-hidden="true"
         />
@@ -246,29 +246,29 @@ export const MissionRow = ({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <p className="max-w-full truncate text-[12.5px] font-medium">
-            {mission.name}
+            {milestone.name}
           </p>
           <Pill className={meta.className}>{meta.label}</Pill>
           <Pill className="border-border/70 bg-transparent text-muted-foreground">
-            {mission.horizon === "today" ? "Today" : "This week"}
+            {milestone.horizon === "today" ? "Today" : "This week"}
           </Pill>
         </div>
         {showChain ? (
-          <MissionChain
+          <MilestoneChain
             world={world}
-            mission={mission}
+            milestone={milestone}
             className="mt-1"
             linked={false}
           />
         ) : (
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-            {mission.summary}
+            {milestone.summary}
           </p>
         )}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1.5">
         <div className="flex items-center -space-x-1">
-          {mission.agentIds.map((agentId) => {
+          {milestone.agentIds.map((agentId) => {
             const agent = agentById(world, agentId);
             if (!agent) return null;
             return <AgentAvatar key={agentId} agent={agent} size="sm" />;
@@ -276,7 +276,7 @@ export const MissionRow = ({
         </div>
         <span className="num flex items-center gap-1 text-[10px] text-muted-foreground">
           <CalendarDays className="h-2.5 w-2.5" />
-          {relativeTime(mission.due)}
+          {relativeTime(milestone.due)}
         </span>
       </div>
       <ArrowRight className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60" />
@@ -296,8 +296,8 @@ export const ProjectCard = ({
   const objectives = world.objectives.filter(
     (objective) => objective.projectId === project.id,
   );
-  const missions = world.missions.filter(
-    (mission) => mission.projectId === project.id,
+  const milestones = world.milestones.filter(
+    (milestone) => milestone.projectId === project.id,
   );
   const progress = objectives.length
     ? Math.round(
@@ -305,7 +305,7 @@ export const ProjectCard = ({
           objectives.length,
       )
     : 0;
-  const next = missions.find((mission) => mission.status !== "done");
+  const next = milestones.find((milestone) => milestone.status !== "done");
   const company = project.companyIds[0]
     ? world.companies.find((item) => item.id === project.companyIds[0])
     : undefined;
@@ -338,6 +338,11 @@ export const ProjectCard = ({
         </Pill>
       </div>
 
+      {project.mission ? (
+        <p className="line-clamp-2 text-[11.5px] italic leading-relaxed text-foreground/80">
+          Mission — {project.mission}
+        </p>
+      ) : null}
       <p className="line-clamp-2 text-[11.5px] leading-relaxed text-muted-foreground">
         {project.summary}
       </p>
@@ -348,7 +353,7 @@ export const ProjectCard = ({
         <div className="flex items-center gap-3 text-[10.5px] text-muted-foreground">
           <span>{objectives.length} objectives</span>
           <span className="text-border">·</span>
-          <span>{missions.length} missions</span>
+          <span>{milestones.length} milestones</span>
         </div>
         <PersonChips
           world={world}

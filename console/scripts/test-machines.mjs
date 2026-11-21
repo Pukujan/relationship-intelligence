@@ -7,7 +7,7 @@
  *   - a turn cannot stream before scoping completes (and scoping needs a pinned scope)
  *   - ABORT cancels an in-flight turn
  *   - fill-in cannot APPLY without a human APPROVE
- *   - a mission cannot REPLAN while healthily running
+ *   - a milestone cannot REPLAN while healthily running
  *   - an approval cannot be DECIDED by a non-human
  *
  * Usage: node scripts/test-machines.mjs   (exit non-zero on any failure)
@@ -16,9 +16,11 @@ import assert from "node:assert/strict";
 import { createActor } from "xstate";
 import { turnMachine } from "../src/machines/turnMachine.ts";
 import { fillInMachine } from "../src/machines/fillInMachine.ts";
-import { missionMachine, approvalMachine } from "../src/machines/workMachines.ts";
+import { milestoneMachine, approvalMachine } from "../src/machines/workMachines.ts";
 import { isConversationOver, parseVoiceCommand, resolveConfirmation } from "../src/lib/voiceCommands.ts";
 import { resolveThreadEntry } from "../src/lib/threadEntry.ts";
+import { landingPath } from "../src/lib/landing.ts";
+import { buildProfile, parseNote, POST_SNIPPET_MAX, snippet, tidy } from "../src/lib/profileSections.ts";
 import { allowed, askWithFailover, authHeaders, parseChain, parseModelJson } from "../server/providers.ts";
 
 let failures = 0;
@@ -166,21 +168,21 @@ await check("fillIn: APPLY rejected without APPROVE", () => {
 });
 
 /* ---------------------------------------------------------------- */
-/* missionMachine                                                    */
+/* milestoneMachine                                                    */
 /* ---------------------------------------------------------------- */
 
-await check("mission: REPLAN rejected from running", () => {
-  const actor = createActor(missionMachine, { input: { missionId: "m1", quietWindowMs: 60_000 } }).start();
+await check("milestone: REPLAN rejected from running", () => {
+  const actor = createActor(milestoneMachine, { input: { milestoneId: "m1", quietWindowMs: 60_000 } }).start();
   assert.equal(value(actor), "queued");
   actor.send({ type: "START" });
   assert.equal(value(actor), "running");
   actor.send({ type: "REPLAN" });
-  assert.equal(value(actor), "running", "a healthy running mission is never re-planned");
+  assert.equal(value(actor), "running", "a healthy running milestone is never re-planned");
   actor.stop();
 });
 
-await check("mission: REPLAN allowed from blocked", () => {
-  const actor = createActor(missionMachine, { input: { missionId: "m1", quietWindowMs: 60_000 } }).start();
+await check("milestone: REPLAN allowed from blocked", () => {
+  const actor = createActor(milestoneMachine, { input: { milestoneId: "m1", quietWindowMs: 60_000 } }).start();
   actor.send({ type: "START" });
   actor.send({ type: "BLOCK", reason: "waiting on a decision" });
   assert.equal(value(actor), "blocked");
@@ -190,8 +192,8 @@ await check("mission: REPLAN allowed from blocked", () => {
   actor.stop();
 });
 
-await check("mission: quiet window stalls a running mission, then REPLAN recovers", async () => {
-  const actor = createActor(missionMachine, { input: { missionId: "m1", quietWindowMs: 40 } }).start();
+await check("milestone: quiet window stalls a running milestone, then REPLAN recovers", async () => {
+  const actor = createActor(milestoneMachine, { input: { milestoneId: "m1", quietWindowMs: 40 } }).start();
   actor.send({ type: "START" });
   assert.equal(value(actor), "running");
   await sleep(90);
@@ -201,8 +203,8 @@ await check("mission: quiet window stalls a running mission, then REPLAN recover
   actor.stop();
 });
 
-await check("mission: PROGRESS resets the quiet window", async () => {
-  const actor = createActor(missionMachine, { input: { missionId: "m1", quietWindowMs: 70 } }).start();
+await check("milestone: PROGRESS resets the quiet window", async () => {
+  const actor = createActor(milestoneMachine, { input: { milestoneId: "m1", quietWindowMs: 70 } }).start();
   actor.send({ type: "START" });
   await sleep(45);
   actor.send({ type: "PROGRESS" }); // restarts the timer
@@ -404,7 +406,7 @@ await check("voice: a short sign-off ends a conversation, a question does not", 
   for (const heard of ["thanks", "Thank you!", "that's all", "stop", "bye", "never mind"]) {
     assert.equal(isConversationOver(heard), true, heard);
   }
-  for (const heard of ["", "who should I thank this week", "stopwatch", "what stops the Halcyon renewal from closing this month"]) {
+  for (const heard of ["", "who should I thank this week", "stopwatch", "what stops the Aster renewal from closing this month"]) {
     assert.equal(isConversationOver(heard), false, heard);
   }
 });
@@ -438,6 +440,138 @@ await check("thread: an unseeded arrival with no threads stays blank", () => {
   assert.equal(entry.activeId, null);
   assert.equal(entry.draft, false);
   assert.equal(entry.seed, "");
+});
+
+/* ---------------------------------------------------------------- */
+/* landing (#96)                                                     */
+/* ---------------------------------------------------------------- */
+
+await check("landing: an owner lands on the copilot chat", () => {
+  assert.equal(landingPath("owner"), "/copilot");
+});
+
+await check("landing: the demo workspace keeps Today as its front page", () => {
+  assert.equal(landingPath("guest"), "/today");
+  assert.equal(landingPath(undefined), "/today");
+});
+
+/* ---------------------------------------------------------------- */
+/* profile sections (#93)                                            */
+/* ---------------------------------------------------------------- */
+
+const claimOf = (id, text, extra = {}) => ({
+  id,
+  personId: "p-1",
+  text,
+  source: { label: "Octo ledger", kind: "note", date: "2026-11-10T00:00:00.000Z" },
+  confidence: "medium",
+  status: "unverified",
+  ...extra,
+});
+const sourcedOf = (id, text, locator, extra = {}) =>
+  claimOf(id, text, {
+    status: "sourced",
+    source: { label: "linkedin.com", kind: "web", date: "2026-11-12T00:00:00.000Z", locator },
+    ...extra,
+  });
+
+const profileClaims = [
+  sourcedOf("c-url", "Jane Doe's LinkedIn profile is https://www.linkedin.com/in/jane-doe", "https://www.linkedin.com/in/jane-doe", { verb: "FACT", attribute: "linkedin_url" }),
+  sourcedOf("c-role", "Jane Doe, public role summary: Product designer at Aster", "https://www.linkedin.com/in/jane-doe", { verb: "FACT", attribute: "public_role_summary" }),
+  sourcedOf("c-edu", "Jane Doe, public education: NYU, MS Integrated Design & Media", "https://www.linkedin.com/in/jane-doe", { verb: "FACT", attribute: "public_education" }),
+  sourcedOf("c-post", `Jane Doe, linkedin post: ${"We shipped the wayfinding pilot today. ".repeat(12)}`, "https://www.linkedin.com/posts/jane-doe-1", { verb: "FACT", attribute: "linkedin_post" }),
+  claimOf("c-met", "Jane Doe knows Pujan (met-once)", { verb: "MET", basis: "Met at GIS Day after the panel" }),
+  claimOf("c-stage", "[UNVERIFIED] Jane Doe: (relationship stage) met in person", { verb: "UNVERIFIED" }),
+  claimOf("c-self", "[UNVERIFIED] Jane Doe: (self reported) Founder at Stealth Co", { verb: "UNVERIFIED" }),
+  claimOf("c-metat", "[UNVERIFIED] Jane Doe: (self reported) met at NYU GIS Day 2026", { verb: "UNVERIFIED" }),
+  claimOf("c-metat2", "[UNVERIFIED] Jane Doe: (self reported) met at A rooftop mixer", { verb: "UNVERIFIED", source: { label: "Octo ledger", kind: "note", date: "2026-10-01T00:00:00.000Z" } }),
+  claimOf("c-log", "[UNVERIFIED] Jane Doe: (private interaction log; email, follow_up, done) Sent the deck. At NYU GIS Day 2026. Next step: intro to MTA.", { verb: "UNVERIFIED", source: { label: "Octo ledger", kind: "note", date: "2026-11-19T00:00:00.000Z" } }),
+  claimOf("c-unv-edu", "Jane Doe, public education: Unverified School", { verb: "FACT", attribute: "public_education" }),
+];
+const profileEvents = [
+  { id: "e-gis", name: "NYU GIS Day 2026", date: "2026-11-18T00:00:00.000Z", location: "", type: "community", attendeeIds: ["p-1"], goal: "", agentId: "", status: "past" },
+];
+const profileInput = (claims = profileClaims) => ({
+  name: "Jane Doe",
+  role: "Product designer at Aster",
+  companyName: "",
+  claims,
+  events: profileEvents,
+});
+
+await check("profile: headline, experience and education read only sourced claims", () => {
+  const view = buildProfile(profileInput());
+  assert.equal(view.headline, "Product designer at Aster");
+  assert.deepEqual(view.experience.map((e) => e.title), ["Product designer at Aster"]);
+  assert.deepEqual(view.education.map((e) => e.title), ["NYU, MS Integrated Design & Media"]);
+  const profileText = JSON.stringify([view.headline, view.about, view.experience, view.education, view.projects, view.credentials, view.posts]);
+  assert.ok(!profileText.includes("Stealth Co"), "an unverified role leaked into the profile");
+  assert.ok(!profileText.includes("Unverified School"), "an unverified education fact leaked into the profile");
+  assert.ok(view.notes.some((n) => n.text.includes("Stealth Co")), "the unverified role is kept as a note");
+});
+
+await check("profile: a post shows a capped snippet, never the whole post", () => {
+  const view = buildProfile(profileInput());
+  assert.equal(view.posts.length, 1);
+  const [post] = view.posts;
+  assert.ok(post.snippet.length <= POST_SNIPPET_MAX, `snippet is ${post.snippet.length} chars`);
+  assert.ok(post.snippet.endsWith("…"));
+  assert.equal(post.url, "https://www.linkedin.com/posts/jane-doe-1");
+  assert.equal(snippet("short text"), "short text");
+});
+
+await check("profile: a met-at note folds into its event; an unmatched one stays a note", () => {
+  const view = buildProfile(profileInput());
+  const gis = view.eventLog.filter((e) => e.title.includes("GIS Day") && e.kind !== "log");
+  assert.equal(gis.length, 1, "the event appears once");
+  assert.equal(gis[0].kind, "event");
+  assert.equal(gis[0].unverified, true, "attendance known only from a note stays unverified");
+  assert.ok(view.eventLog.some((e) => e.kind === "note" && e.title === "Met at A rooftop mixer"));
+});
+
+await check("profile: event log is newest first and parses interaction logs", () => {
+  const view = buildProfile(profileInput());
+  const dated = view.eventLog.filter((e) => e.date).map((e) => e.date);
+  assert.deepEqual(dated, [...dated].sort().reverse());
+  const log = view.eventLog.find((e) => e.kind === "log");
+  assert.equal(log.title, "Sent the deck");
+  assert.equal(log.meta, "email · follow up · done");
+  assert.equal(log.unverified, true);
+  const met = view.eventLog.find((e) => e.kind === "met");
+  assert.equal(met.detail, "Met at GIS Day after the panel");
+  assert.equal(met.meta, "Met in person");
+});
+
+await check("profile: stage and LinkedIn link are lifted out, not listed as notes", () => {
+  const view = buildProfile(profileInput());
+  assert.equal(view.stage, "met in person");
+  assert.equal(view.linkedinUrl, "https://www.linkedin.com/in/jane-doe");
+  assert.ok(!view.notes.some((n) => n.text.includes("relationship stage")));
+  assert.deepEqual(parseNote("[UNVERIFIED] Jane Doe: (documented) Speaks at meetups"), { tag: "documented", body: "Speaks at meetups" });
+  assert.equal(tidy("held self reported"), "held (self-reported)");
+  assert.equal(tidy("(self reported) Founder at X"), "(self-reported) Founder at X");
+  assert.equal(tidy("not a conclusion.. Next topic"), "not a conclusion. Next topic");
+});
+
+await check("profile: claim order never changes the profile (metamorphic)", () => {
+  const base = buildProfile(profileInput());
+  for (let seed = 1; seed <= 6; seed += 1) {
+    const shuffled = [...profileClaims]
+      .map((claim, index) => ({ claim, key: (index * 7 + seed * 13) % profileClaims.length }))
+      .sort((a, b) => a.key - b.key)
+      .map(({ claim }) => claim);
+    assert.deepEqual(buildProfile(profileInput(shuffled)), base);
+  }
+  assert.deepEqual(buildProfile(profileInput([...profileClaims].reverse())), base);
+});
+
+await check("profile: a person with no claims gets empty sections, never sample data", () => {
+  const view = buildProfile({ name: "New Person", role: "—", companyName: "", claims: [], events: [] });
+  assert.equal(view.headline, "");
+  assert.equal(view.about, "");
+  for (const key of ["experience", "education", "projects", "credentials", "posts", "eventLog", "notes", "sources"]) {
+    assert.equal(view[key].length, 0, `${key} should be empty`);
+  }
 });
 
 if (failures > 0) {

@@ -22,7 +22,7 @@ import type {
   Connector,
   ConnectorStatus,
   DecisionInput,
-  MissionDesign,
+  MilestoneDesign,
   NewProposal,
   Note,
   Plugin,
@@ -39,7 +39,7 @@ export interface ApprovalDecisionResult {
   agent: Agent;
   /**
    * Present when the decision changed more than the approval row — an
-   * approved proposal materializes objectives, missions, and plans. The
+   * approved proposal materializes objectives, milestones, and plans. The
    * store adopts this snapshot whole so created work reaches every screen.
    */
   world?: World;
@@ -185,7 +185,7 @@ const demoProfile = (): SelfProfile => ({
     "Every outbound send needs my approval",
     "Warm intros before cold outreach",
   ],
-  goals: ["Save the Halcyon renewal", "Ship the Loomcraft beta"],
+  goals: ["Save the Aster renewal", "Ship the Loomcraft beta"],
   updatedAt: new Date().toISOString(),
 });
 
@@ -203,16 +203,16 @@ interface StoredNote {
 /**
  * Materialize an approved proposal against the world.
  *
- * `mission` designs create the container if needed, then objective, mission,
+ * `milestone` designs create the container if needed, then objective, milestone,
  * and plan — all starting as `queued`/`todo`, because approval starts the
- * work, it does not finish it. `replan` designs adjust the mission they
+ * work, it does not finish it. `replan` designs adjust the milestone they
  * reference: a new deadline, a replacement plan, or an acknowledged
  * escalation. The design is data, so the same shape can later be written to
  * Octo's workspace SQL instead of an in-memory world.
  */
 export const applyApprovedDesign = (
   world: World,
-  design: MissionDesign,
+  design: MilestoneDesign,
   nextId: (prefix: string) => string,
 ): { summary: string; activity: string } => {
   const now = new Date().toISOString();
@@ -228,6 +228,7 @@ export const applyApprovedDesign = (
         status: "active",
         owner: "Alex Rivera",
         summary: design.missionSummary,
+        ...(design.projectMission ? { mission: design.projectMission } : {}),
         personIds: [],
         companyIds: [],
         eventIds: [],
@@ -247,7 +248,7 @@ export const applyApprovedDesign = (
       dueDate: design.due,
     };
     world.objectives = [...world.objectives, objective];
-    const mission = {
+    const milestone = {
       id: nextId("ms-live"),
       objectiveId: objective.id,
       projectId,
@@ -259,10 +260,10 @@ export const applyApprovedDesign = (
       personIds: [],
       due: design.due,
     };
-    world.missions = [...world.missions, mission];
+    world.milestones = [...world.milestones, milestone];
     const plan = {
       id: nextId("plan-live"),
-      missionId: mission.id,
+      milestoneId: milestone.id,
       agentId: design.agentIds[0] ?? "research",
       title: `Plan — ${design.missionName}`,
       summary: design.rationale,
@@ -277,27 +278,29 @@ export const applyApprovedDesign = (
     };
     world.plans = [...world.plans, plan];
     return {
-      summary: `${mission.name} is queued under ${objective.name} with a ${design.planSteps.length}-step plan.`,
-      activity: `Mission created: ${mission.name}`,
+      summary: `${milestone.name} is queued under ${objective.name} with a ${design.planSteps.length}-step plan.`,
+      activity: `Milestone created: ${milestone.name}`,
     };
   }
 
-  const mission = world.missions.find((item) => item.id === design.missionId);
-  if (!mission) {
+  const milestone = world.milestones.find(
+    (item) => item.id === (design.milestoneId ?? design.missionId),
+  );
+  if (!milestone) {
     return {
-      summary: "The mission this replan targeted no longer exists; nothing changed.",
+      summary: "The milestone this replan targeted no longer exists; nothing changed.",
       activity: `Re-plan dropped: ${design.missionName}`,
     };
   }
   if (design.adjustment === "extend") {
-    mission.due = design.due;
+    milestone.due = design.due;
     return {
-      summary: `${mission.name} now runs to ${design.due.slice(0, 10)}; remaining steps keep their owners.`,
-      activity: `Deadline extended: ${mission.name}`,
+      summary: `${milestone.name} now runs to ${design.due.slice(0, 10)}; remaining steps keep their owners.`,
+      activity: `Deadline extended: ${milestone.name}`,
     };
   }
   if (design.adjustment === "replan") {
-    const plan = world.plans.find((item) => item.missionId === mission.id);
+    const plan = world.plans.find((item) => item.milestoneId === milestone.id);
     const steps = design.planSteps.map((step, index) => ({
       id: `step-${index + 1}`,
       label: step.label,
@@ -313,9 +316,9 @@ export const applyApprovedDesign = (
       world.plans = [
         {
           id: nextId("plan-live"),
-          missionId: mission.id,
+          milestoneId: milestone.id,
           agentId: design.agentIds[0] ?? "research",
-          title: `Plan — ${mission.name}`,
+          title: `Plan — ${milestone.name}`,
           summary: design.rationale,
           steps,
           updatedAt: now,
@@ -323,18 +326,18 @@ export const applyApprovedDesign = (
         ...world.plans,
       ];
     }
-    if (mission.status === "queued" || mission.status === "blocked") {
-      mission.status = "running";
+    if (milestone.status === "queued" || milestone.status === "blocked") {
+      milestone.status = "running";
     }
     return {
-      summary: `${mission.name} has a new ${steps.length}-step plan and is running against ${mission.due.slice(0, 10)}.`,
-      activity: `Re-planned: ${mission.name}`,
+      summary: `${milestone.name} has a new ${steps.length}-step plan and is running against ${milestone.due.slice(0, 10)}.`,
+      activity: `Re-planned: ${milestone.name}`,
     };
   }
   // escalate: the approval itself was the decision; the block stays visible.
   return {
-    summary: `Escalation for ${mission.name} accepted — the decision options are logged and the mission stays blocked until input arrives.`,
-    activity: `Escalation approved: ${mission.name}`,
+    summary: `Escalation for ${milestone.name} accepted — the decision options are logged and the milestone stays blocked until input arrives.`,
+    activity: `Escalation approved: ${milestone.name}`,
   };
 };
 

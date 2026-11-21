@@ -6,28 +6,33 @@
 The issue-log shape and lifecycle are defined by the installed OIO ontology. For issue, pull-request, commit, and checkpoint prose, use the pinned CGM human-sounding-writing module: open with a concrete problem and observed result, explain identifiers on first use, distinguish evidence from inference, and state one next action. Link long logs rather than pasting them; never include private absolute paths, credentials, or session cookies. Pull requests use the reader-first template and `Closes #N` only when merge completes the issue; otherwise use `Refs #N`.
 <!-- pcm:issue-log-format:end -->
 
-## State (2026-11-20, `main` at `a180d0f`)
+## State (2026-11-20, `main` at `4d33a09`)
 
-Production is live at `https://business.design-bakery.com/console/` from `octo-vps` (`relationship-intelligence:a180d0fb697e` + `business-ri-cloudflared` on `study-os_edge`; local Mac adapter and tunnel stopped):
-- **PR #44 & PR #45 (#37–#42 / RI-0012..RI-0017, closed):** Single `resolveTenancy` choke, role gates (`owner > admin > operator > member`), atomic `409` double-decide idempotency, UX research memo (`docs/RESEARCH-UX.md`), Approval Do/Don't triage (`stop | re_plan | snooze`), Glance 3-move agenda (`I7`), and 1-hop intro paths on `PersonProfile.tsx`.
-- **PR #46 & PR #51 (#48 closed, #49 open for live OAuth test, #50 closed):** Single-Octo Slack-like workspace model (`ri_console.workspace`, `workspace_member`, `project_member`, `organization`, `app_user`; zero `OCTO_ACCOUNT_KEY`), user-level Google/Zoom connectors + routing rules + sync workers, 4 starter agent templates, custom agent builder, Zone 3 Draft Plans → Lock (`409 ALREADY_LOCKED`), and `ri_console.ledger_event`.
-- **PR #53, #54, #55 (VPS + Komodo cutover):** Resolved `consoleDist` via `import.meta.url` in `app/server/adapter.ts`, bound `0.0.0.0` in production in `app/server/dev.ts`, switched `Dockerfile` to `tsx` + `--config.strict-dep-builds=false`, and added `deploy/docker-compose.vps.yml` + `deploy/vps/autodeploy.sh`. Opened `Pukujan-lab/server-management#98` to register the Komodo stack and 5-minute auto-deploy action.
-- **PR #56 (#50 / RI-0020, closed):** Upgraded `app/server/telemetry.ts` to zero-dep OTLP/HTTP `application/x-protobuf` with automatic Bearer auth (`PHOENIX_API_KEY` or `OCTO_API_KEY`), cleared all 3 Biome warnings, enabled `PHOENIX_COLLECTOR_ENDPOINT` on `octo-vps` (`/app-api/config` returns `phoenixConfigured: true`), and verified live span export + read-back in Octo Phoenix (`https://octodb.design-bakery.com/phoenix/projects/UHJvamVjdDoyMA==`).
+Production is live at `https://business.design-bakery.com/console/` from `octo-vps`; Komodo autodeploy is registered (`Pukujan-lab/server-management#98` merged), so merges to `main` deploy without manual steps (observed with #81):
+- **PR #58–#61:** Sidebar collapsed to five daily surfaces; Voice page listens and speaks with browser speech; Agents page lists installed agents and stops duplicate installs (#61 fixes the saved install shape; 34 tests at that point).
+- **PR #63–#68:** Model providers reached through the Octo vault with Claude in the chain; copilot server runs in production behind a signed-in proxy; copilot closed to accounts with no workspace and to personal-workspace guests.
+- **PR #70–#75:** Talk and the call hold live-model conversations; the owner's relationship records imported and sample people retired (#72); canonical people/companies/private claims scoped per workspace and principal (#74); VPS speech-gateway (Parakeet STT + Kokoro/Pocket-TTS) wired into Voice (#75).
+- **PR #76–#77:** Persistent bottom-right voice + chat dock with animated agent cursor and UI actuation; Today decisions/moves/cold list scoped to the active project.
+- **PR #81 (#80 closed):** Seeded copilot asks open a fresh person-scoped draft thread instead of appending to the active thread; `/copilot` gets a bounded pane so the message list scrolls; 12/12 headless checks, re-run against production guest mode after deploy.
+- **PR #79, #82:** People directory and RAG grounded in sourced ledger evidence; events and where-we-met attendees read from the ledger.
 
-All 20 completed GitHub issues (`#2`–`#7`, `#18`, `#23`–`#27`, `#37`–`#42`, `#48`, `#50`) are closed. `29/29` Vitest tests, `pnpm typecheck`, Biome lint (0 errors, 0 warnings), `console` build, and live VPS tenancy suite (`7 pass, 0 red, 4 skip`) all pass.
+Open: #49 (live Zoom test + installed-agent execution gap; Gmail/Calendar sync observed live by the owner 2026-11-20 19:14), #83 (RI-0021, owner-directed 2026-11-20), #78/#73/#62 pending live closure, #15/#12/#9 (collection program). Evidence labels: test counts and deploy bundle markers measured; a fresh Phoenix read-back was not possible from the owner's Mac today (Cloudflare challenge on the public hostname, SSH publickey denied, tailnet :6006 unreachable) — inference: spans exist server-side because #56 verified export, but today's waterfall is unobserved.
 
 ## Next atomic action
 
-1. **Merge & sync Komodo PR:** Merge `Pukujan-lab/server-management#98` and click **Sync** in Komodo (`http://octo-vps:9120`) so future `main` merges auto-deploy via `deploy/vps/autodeploy.sh`.
-2. **Verify live Google/Zoom connector OAuth (`#49`):** Add `https://business.design-bakery.com/app-api/connectors/oauth/google/callback` to Google Cloud OAuth client (project `47218074770`), run a live Gmail/Calendar/Drive sync in `https://business.design-bakery.com/console/integrations/connectors`, inspect the trace in Octo Phoenix, and close `#49`.
+1. **#83 connector OAuth wiring:** ship Slack/Calendly/Discord/Zoom OAuth + collection slice 2; owner supplies `ZOOM_CLIENT_ID`/`ZOOM_CLIENT_SECRET` on `octo-vps`; then run the live Zoom sync and attach evidence to #49.
+2. **Phoenix read-back:** inspect `connector.sync.*` waterfalls from an owner Phoenix session or on the VPS; attach to #49.
+3. **Agent execution owner:** decide who builds installed-agent execution (the scheduler currently only queues runs).
+4. **Live closures:** owner checks on the deployed console, then close #78, #73, #62.
 
 ## Verification
 
 ```bash
 python .github/scripts/oio_installer.py --target "$PWD" --check
 python scripts/validate_planning.py
-.venv/bin/continuity validate --root "$PWD"
 cd app && pnpm typecheck && pnpm test && pnpm lint
 ```
+
+(`.venv/bin/continuity` is not installed on the owner's Mac as of 2026-11-20; the CI "Planning, ontology, and continuity" gate covers it.)
 
 Stack: certified release train `3446a8024857afb84b7b51d044cefb400131fbf7`.

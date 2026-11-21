@@ -73,85 +73,166 @@ export const CollectionPlanSchema = z.object({
 
 export type CollectionPlan = z.infer<typeof CollectionPlanSchema>;
 
+export * from "./connectorContracts.js";
+
+import type { ConnectorChip } from "./connectorContracts.js";
+
+/* ------------------------------------------------------------------ */
+/* Octo epistemic data contracts (PROJECT.md canonical ledger)         */
+/* ------------------------------------------------------------------ */
+
+/** Controlled relationship vocabulary from docs/PLAN.md:80-102. */
+export const EntityTypeSchema = z.enum([
+  "person",
+  "organization",
+  "project",
+  "event",
+]);
+export type EntityType = z.infer<typeof EntityTypeSchema>;
+
+export const EpistemicEntitySchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  entityType: z.string().min(1),
+});
+export type EpistemicEntity = z.infer<typeof EpistemicEntitySchema>;
+
 /**
- * Shared connector contract (RI-0021). Server returns this shape; console
- * imports it. Do not re-declare connector types locally (SDD R19).
+ * Relationship verbs are typed; legacy ledger rows carry ad-hoc verbs
+ * (FACT, MET, NOTE, RETIRED, ...). Provenance is parsed tolerantly and a
+ * non-vocabulary verb is preserved as a string rather than rejecting the row.
  */
+export const RelationshipVerbSchema = z.enum([
+  "WORKS_AT",
+  "REGISTERED",
+  "RSVPED",
+  "ATTENDED",
+  "SPOKE_AT",
+  "ORGANIZED",
+  "SPONSORED",
+  "MAINTAINS",
+  "CONTRIBUTED_TO",
+  "COLLABORATED_ON",
+  "CONNECTED_TO",
+  "SAME_AS",
+  "DIFFERENT_FROM",
+]);
+export type RelationshipVerb = z.infer<typeof RelationshipVerbSchema>;
 
-export type ConnectorProviderId =
-  | "gmail"
-  | "gcal"
-  | "gdrive"
-  | "zoom"
-  | "calendly"
-  | "linkedin"
-  | "luma"
-  | "slack"
-  | "discord"
-  | "wispr"
-  | "riley";
+export const LegacyVerbSchema = z.string().min(1);
+export type LegacyVerb = z.infer<typeof LegacyVerbSchema>;
 
-export type ConnectorAuthKind =
-  | "google_oauth"
-  | "zoom_oauth"
-  | "provider_oauth"
-  | "local_runner";
+/** Controlled claim statuses. UNVERIFIED claims never become summaries. */
+export const ClaimStatusSchema = z.enum(["SOURCED", "UNVERIFIED"]);
+export type ClaimStatus = z.infer<typeof ClaimStatusSchema>;
 
-export type ConnectorCategory =
-  | "google"
-  | "meetings"
-  | "messaging"
-  | "network"
-  | "voice";
+/** A source record / entity mention is identified by a stable source key. */
+export const SourceRecordIdSchema = z.object({
+  source_system: z.string().min(1),
+  source_record_id: z.string().min(1),
+});
+export type SourceRecordId = z.infer<typeof SourceRecordIdSchema>;
 
-export type RunnerStatus = "unpaired" | "online" | "offline";
+/**
+ * Provenance stored on an Octo claim. All fields are optional so legacy rows
+ * (which only carry {verb, seedId, ...}) keep parsing. `verb` is typed when it
+ * matches the vocabulary and retained as a legacy string otherwise.
+ */
+export const ProvenanceSchema = z.object({
+  verb: z.union([RelationshipVerbSchema, LegacyVerbSchema]).optional(),
+  attribute: z.string().optional(),
+  org: z.string().optional(),
+  title: z.string().optional(),
+  strength: z.string().optional(),
+  /** How the owner knows the person, on MET claims ("met at GIS Day ..."). */
+  basis: z.string().optional(),
+  seedId: z.string().optional(),
+  reason: z.string().optional(),
+  status: ClaimStatusSchema.optional(),
+  source: z.string().optional(),
+  sourceRecord: SourceRecordIdSchema.optional(),
+  workspaceId: z.string().optional(),
+  visibility: z.enum(["shared", "private"]).optional(),
+  principalId: z.string().optional(),
+  ownerId: z.string().optional(),
+  sharedWorkspaces: z.array(z.string()).optional(),
+});
+export type Provenance = z.infer<typeof ProvenanceSchema>;
 
-export interface UserConnectorView {
-  provider: ConnectorProviderId;
-  name: string;
-  category: ConnectorCategory;
-  authKind: ConnectorAuthKind;
-  oauthConfigured: boolean;
-  connectUrl: string | null;
-  status: "connected" | "needs_setup" | "expired";
-  accountEmail: string | null;
-  scopes: string[];
-  description: string;
-  lastSync: string | null;
-  /** local_runner only; null for OAuth kinds. */
-  runnerStatus: RunnerStatus | null;
-  /** local_runner only; null for OAuth kinds. */
-  consentedScopes: string[] | null;
-}
+/** One immutable source reference with an exact locator when available. */
+export const EvidenceSchema = z.object({
+  // Legacy graph projections did not select v.id; tolerate a missing id.
+  id: z.string().min(1).optional(),
+  locator: z.string().nullable().optional(),
+  quote: z.string().nullable().optional(),
+  contentHash: z.string().nullable().optional(),
+  sourceFileId: z.string().nullable().optional(),
+});
+export type Evidence = z.infer<typeof EvidenceSchema>;
 
-/** Prefix for the unconfigured-OAuth label "Add <PREFIX>_CLIENT_ID/SECRET". */
-export const CONNECTOR_CRED_PREFIX: Partial<
-  Record<ConnectorProviderId, string>
-> = {
-  slack: "SLACK",
-  calendly: "CALENDLY",
-  discord: "DISCORD",
-  zoom: "ZOOM",
-};
+/** One perspective's stance on a claim (bitemporal in the ledger). */
+export const BeliefSchema = z.object({
+  id: z.string().min(1),
+  claimId: z.string().min(1),
+  perspectiveId: z.string().min(1).optional(),
+  stance: z.enum(["believes", "disbelieves", "uncertain"]),
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  perspective: z.string().optional(),
+  validFrom: z.string().nullable().optional(),
+  validTo: z.string().nullable().optional(),
+  recordedAt: z.string().nullable().optional(),
+  supersededAt: z.string().nullable().optional(),
+});
+export type Belief = z.infer<typeof BeliefSchema>;
 
-export interface ConnectorChip {
-  label: string;
-  tone: "ok" | "warn" | "error" | "muted";
-}
+/** A typed claim, with optional temporal and provenance fields for legacy rows. */
+export const ClaimSchema = z.object({
+  id: z.string().min(1),
+  subjectEntityId: z.string().nullable().optional(),
+  statement: z.string(),
+  validFrom: z.string().nullable().optional(),
+  validTo: z.string().nullable().optional(),
+  recordedAt: z.string().nullable().optional(),
+  supersededAt: z.string().nullable().optional(),
+  provenance: ProvenanceSchema.default({}),
+});
+export type Claim = z.infer<typeof ClaimSchema>;
 
-/** Chip precedence: expired > device offline > needs setup/unpaired > connected. */
-export function deriveConnectorChip(c: UserConnectorView): ConnectorChip {
-  if (c.status === "expired") return { label: "Re-auth needed", tone: "error" };
-  if (c.authKind === "local_runner") {
-    if (c.runnerStatus === "offline")
-      return { label: "Device offline", tone: "warn" };
-    if (c.runnerStatus === "unpaired" || c.status === "needs_setup")
-      return { label: "Needs setup", tone: "warn" };
-    return { label: "Connected", tone: "ok" };
-  }
-  if (c.status === "connected") return { label: "Connected", tone: "ok" };
-  return { label: "Needs setup", tone: "muted" };
-}
+/** GET /api/epistemic/claims-as-of response (bitemporal query mode 2). */
+export const ClaimsAsOfResponseSchema = z.object({
+  asOfRecorded: z.string(),
+  asOfValid: z.string().nullable(),
+  claims: z.array(ClaimSchema),
+});
+export type ClaimsAsOfResponse = z.infer<typeof ClaimsAsOfResponseSchema>;
+
+/** Claim-to-claim relations, including the typed corrective relation. */
+export const ClaimRelationTypeSchema = z.enum([
+  "SUPPORTS",
+  "CONTRADICTS",
+  "SUPERSEDES",
+  "QUALIFIES",
+  "DERIVED_FROM",
+  "DUPLICATES",
+  "REFINES",
+]);
+export type ClaimRelationType = z.infer<typeof ClaimRelationTypeSchema>;
+
+export const ClaimRelationSchema = z.object({
+  id: z.string().min(1),
+  fromClaimId: z.string().min(1),
+  toClaimId: z.string().min(1),
+  relation: ClaimRelationTypeSchema,
+  recordedAt: z.string().nullable().optional(),
+  supersededAt: z.string().nullable().optional(),
+});
+export type ClaimRelation = z.infer<typeof ClaimRelationSchema>;
+
+/** A correction that closes the claim it supersedes; never a delete. */
+export const SupersedesRelationSchema = ClaimRelationSchema.extend({
+  relation: z.literal("SUPERSEDES"),
+});
+export type SupersedesRelation = z.infer<typeof SupersedesRelationSchema>;
 
 /** Outside-API service connector (RI-0021 extension): TinyFish web agent or
  * generic REST. Browser-safe view — never carries the raw key or headers. */
@@ -170,7 +251,8 @@ export interface ApiServiceView {
 
 export function deriveApiServiceChip(s: ApiServiceView): ConnectorChip {
   if (s.status === "connected") return { label: "Connected", tone: "ok" };
-  if (s.lastTest && !s.lastTest.ok) return { label: "Test failed", tone: "error" };
+  if (s.lastTest && !s.lastTest.ok)
+    return { label: "Test failed", tone: "error" };
   return { label: "Needs setup", tone: "warn" };
 }
 
@@ -239,11 +321,53 @@ export const WORKFLOW_NODE_DEFS: {
   description: string;
   outputs: string[];
 }[] = [
-  { type: "trigger.manual", label: "Manual trigger", category: "trigger", description: "Run on demand.", outputs: ["out"] },
-  { type: "trigger.schedule", label: "Schedule trigger", category: "trigger", description: "Fire on a cadence (daily / weekly / once).", outputs: ["out"] },
-  { type: "action.api_service", label: "API service call", category: "action", description: "Call an attached TinyFish or REST service.", outputs: ["out"] },
-  { type: "action.schedule", label: "Create schedule", category: "action", description: "Create a scheduled research job (cadence + prompt).", outputs: ["out"] },
-  { type: "action.copilot", label: "Copilot step", category: "action", description: "Ask the copilot model to analyze or decide.", outputs: ["out"] },
-  { type: "action.condition", label: "Condition (if)", category: "logic", description: "Branch true / false on a value.", outputs: ["true", "false"] },
-  { type: "action.log", label: "Log / note", category: "logic", description: "Record a message into the run log.", outputs: ["out"] },
+  {
+    type: "trigger.manual",
+    label: "Manual trigger",
+    category: "trigger",
+    description: "Run on demand.",
+    outputs: ["out"],
+  },
+  {
+    type: "trigger.schedule",
+    label: "Schedule trigger",
+    category: "trigger",
+    description: "Fire on a cadence (daily / weekly / once).",
+    outputs: ["out"],
+  },
+  {
+    type: "action.api_service",
+    label: "API service call",
+    category: "action",
+    description: "Call an attached TinyFish or REST service.",
+    outputs: ["out"],
+  },
+  {
+    type: "action.schedule",
+    label: "Create schedule",
+    category: "action",
+    description: "Create a scheduled research job (cadence + prompt).",
+    outputs: ["out"],
+  },
+  {
+    type: "action.copilot",
+    label: "Copilot step",
+    category: "action",
+    description: "Ask the copilot model to analyze or decide.",
+    outputs: ["out"],
+  },
+  {
+    type: "action.condition",
+    label: "Condition (if)",
+    category: "logic",
+    description: "Branch true / false on a value.",
+    outputs: ["true", "false"],
+  },
+  {
+    type: "action.log",
+    label: "Log / note",
+    category: "logic",
+    description: "Record a message into the run log.",
+    outputs: ["out"],
+  },
 ];

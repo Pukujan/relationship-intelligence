@@ -32,7 +32,7 @@ export const KNOWN_ROUTE_PREFIXES = [
   "/approvals",
   "/projects",
   "/objectives",
-  "/missions",
+  "/milestones",
   "/plans",
   "/people",
   "/events",
@@ -80,7 +80,7 @@ export const scopePath = (action: Extract<CopilotAction, { kind: "openScope" }>)
     case "project":
       return `/projects/${action.id}`;
     case "mission":
-      return `/missions/${action.id}`;
+      return `/milestones/${action.id}`;
     case "event":
       return `/events?focus=${action.id}`;
   }
