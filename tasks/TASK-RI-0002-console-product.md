@@ -419,6 +419,29 @@ Blocked/uncertain:
 Next:
 - Owner adds Telegram API id and hash, signs in once, and links chats on the People page; then WhatsApp.
 
+### 2026-11-21 20:01:00 UTC — agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1","blocked":[],"changed":["collector/src/whatsapp.ts and whatsappMap.ts, Baileys 6.7.24 with libsignal pinned to npm 6.0.0, whatsapp service in deploy/crawler"],"completed":["WhatsApp chats couldn't reach the app. A WhatsApp reader now runs as a linked device in the VPS stack, behind the home address, feeding the private DM pipeline and the Conversations to match card."],"decisions":["no new decisions"],"evidence":["Collector: frozen install with the Docker flags, types and 25 tests pass (4 new for WhatsApp mapping). App and console checks unchanged and passing. The reader has not been linked to a real WhatsApp account."],"evidence_class":"observed","next_action":"Owner links WhatsApp once by QR; then Discord.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T20:01:00Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"ae7d201ef1c3f8a32e1a0907db38d70e1be94cc49f2204837612206d290116c9","request_id":"050b4c2a9b2747d1ac2613574304cff4","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- WhatsApp chats couldn't reach the app. A WhatsApp reader now runs as a linked device in the VPS stack, behind the home address, feeding the private DM pipeline and the Conversations to match card.
+
+Evidence:
+- Collector: frozen install with the Docker flags, types and 25 tests pass (4 new for WhatsApp mapping). App and console checks unchanged and passing. The reader has not been linked to a real WhatsApp account.
+
+Decisions:
+- no new decisions
+
+Changed:
+- collector/src/whatsapp.ts and whatsappMap.ts, Baileys 6.7.24 with libsignal pinned to npm 6.0.0, whatsapp service in deploy/crawler
+
+Blocked/uncertain:
+- none
+
+Next:
+- Owner links WhatsApp once by QR; then Discord.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.

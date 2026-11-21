@@ -88,6 +88,32 @@ never sends, and it doesn't mark anything as read.
    match**. Link each one to its contact once, and later messages attach by
    themselves.
 
+## WhatsApp DMs (optional)
+
+WhatsApp runs as `ri-crawler-whatsapp`, a linked device on your account, like
+WhatsApp Web. It shares the crawler's home-address network, so WhatsApp sees
+your home connection. When you link it, WhatsApp sends your recent chats; after
+that, new one-to-one messages arrive as they happen and reach the app every 5
+minutes. Groups are skipped. It never sends anything, doesn't mark messages as
+read, and doesn't show you as online.
+
+1. Make sure `RI_DM_TOKEN` is set (see LinkedIn DMs above).
+2. Link it once. A QR code appears in your terminal; on your phone open
+   WhatsApp → *Settings → Linked devices → Link a device* and scan it:
+
+   ```sh
+   docker compose --env-file /home/ubuntu/apps/relationship-intelligence-crawler.env \
+     -f deploy/crawler/docker-compose.yml run --rm whatsapp \
+     ./node_modules/.bin/tsx src/whatsapp.ts login
+   ```
+
+3. Restart the stack. Chats appear under **People → Conversations to match**.
+   WhatsApp gives a phone number for each chat, so linking a chat records that
+   number on the contact.
+
+If you remove the linked device on your phone, the service stops and logs that
+it needs `login` again.
+
 ## Checking it
 
 ```sh
