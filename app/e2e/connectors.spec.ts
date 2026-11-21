@@ -182,7 +182,7 @@ test("E2E-isolation: B cannot touch A devices or routes (I2)", async ({ browser 
     data: { provider: "linkedin", items: [{ externalId: "b-1", title: "b", detail: "", occurredAt: new Date().toISOString(), matchText: "", scope: "profile:read" }] },
   });
   expect(ingestB.status()).toBe(200);
-  const rowsA = await sql(`SELECT id FROM ri_console.activity WHERE id LIKE ${lit("sync-" + PID_A + "-linkedin-%")}`);
+  const rowsA = await sql(`SELECT id FROM ri_console.activity WHERE id = ${lit("sync-" + PID_A + "-linkedin-a-1")}`);
   expect(rowsA.length).toBe(0);
   const rowsB = await sql(`SELECT principal_id FROM ri_console.activity WHERE id LIKE ${lit("sync-" + PID_B + "-%")}`);
   expect(rowsB.every((r) => r.principal_id === PID_B)).toBe(true);
