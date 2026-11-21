@@ -95,7 +95,7 @@ duplicate them. A person lives in the graph once and appears in every project/mi
 that references them. That is the graph payoff.
 
 **Relationships are a graph, not folders.** People/companies/events are organized with
-tags and saved smart lists ("Going cold", "Halcyon sponsors"), not folder trees. Folders
+tags and saved smart lists ("Going cold", "Aster sponsors"), not folder trees. Folders
 are for work (projects/milestones) and documents, not for people.
 
 **Entry.** A sign-in screen: "Continue with Google" (Octo auth, loads the user's

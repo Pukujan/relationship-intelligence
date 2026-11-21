@@ -70,8 +70,8 @@ const companies: Company[] = [
   },
   {
     id: "c2",
-    name: "Halcyon Health",
-    domain: "halcyon.health",
+    name: "Aster Health",
+    domain: "aster.health",
     sector: "Digital health",
     stage: "Series C",
     headcount: 420,
@@ -290,13 +290,13 @@ const people: Person[] = [
     tags: ["renewal risk", "quiet"],
     summary:
       "Went silent after the pricing thread. Still the decision maker on the renewal.",
-    email: "tobias@halcyon.health",
+    email: "tobias@aster.health",
     claims: [
       claim(
         "cl-p4-1",
         "p4",
         "Tobias went quiet after the pricing thread on the 12th.",
-        "Email — “Halcyon pricing”",
+        "Email — “Aster pricing”",
         "email",
         daysAgo(26),
         "high",
@@ -313,7 +313,7 @@ const people: Person[] = [
       claim(
         "cl-p4-3",
         "p4",
-        "Halcyon's renewal window closes in 18 days.",
+        "Aster's renewal window closes in 18 days.",
         "CRM — renewal record",
         "crm",
         daysAgo(2),
@@ -448,7 +448,7 @@ const people: Person[] = [
     tags: ["dormant", "product"],
     summary:
       "Original product sponsor in the pilot. Has not been contacted in 41 days.",
-    email: "elliot@halcyon.health",
+    email: "elliot@aster.health",
     claims: [
       claim(
         "cl-p8-1",
@@ -561,13 +561,13 @@ const people: Person[] = [
     lastContact: daysAgo(7, 12, 15),
     tags: ["marketing"],
     summary:
-      "Drafting Halcyon's Q4 brand campaign and asked to see the research first.",
-    email: "lena@halcyon.health",
+      "Drafting Aster's Q4 brand campaign and asked to see the research first.",
+    email: "lena@aster.health",
     claims: [
       claim(
         "cl-p11-1",
         "p11",
-        "Lena is drafting Halcyon's Q4 brand campaign.",
+        "Lena is drafting Aster's Q4 brand campaign.",
         "LinkedIn post",
         "web",
         daysAgo(7),
@@ -782,13 +782,13 @@ const people: Person[] = [
     tags: ["people ops"],
     summary:
       "Owns the partner dinner guest list and is hiring across growth and support.",
-    email: "grace@halcyon.health",
+    email: "grace@aster.health",
     claims: [
       claim(
         "cl-p17-1",
         "p17",
         "Grace is hiring 20 people across growth and support.",
-        "Halcyon careers",
+        "Aster careers",
         "web",
         daysAgo(15),
         "medium",
@@ -857,12 +857,12 @@ const events: RelationshipEvent[] = [
   },
   {
     id: "e2",
-    name: "Halcyon Partner Dinner",
+    name: "Aster Partner Dinner",
     date: inDays(3, 19, 0),
     location: "New York",
     type: "dinner",
     attendeeIds: ["p4", "p11", "p17", "p8"],
-    goal: "Save the Halcyon renewal before the Q4 window closes.",
+    goal: "Save the Aster renewal before the Q4 window closes.",
     agentId: "sales",
     status: "upcoming",
   },
@@ -925,7 +925,7 @@ const agents: Agent[] = [
     status: "running",
     autonomy: "approve",
     currentTask: {
-      title: "Drafting the Halcyon renewal follow-up",
+      title: "Drafting the Aster renewal follow-up",
       startedAt: minutesAgo(6),
       progress: 62,
     },
@@ -1029,7 +1029,7 @@ const agents: Agent[] = [
     status: "running",
     autonomy: "full",
     currentTask: {
-      title: "Mapping the Halcyon Health buying committee",
+      title: "Mapping the Aster Health buying committee",
       startedAt: minutesAgo(22),
       progress: 44,
     },
@@ -1076,7 +1076,7 @@ const tasks: AgentTask[] = [
   {
     id: "t1",
     agentId: "sales",
-    title: "Send the Halcyon renewal follow-up",
+    title: "Send the Aster renewal follow-up",
     status: "blocked",
     priority: "high",
     note: "Waiting on your approval",
@@ -1095,7 +1095,7 @@ const tasks: AgentTask[] = [
   {
     id: "t3",
     agentId: "sales",
-    title: "Prep the Halcyon partner dinner brief",
+    title: "Prep the Aster partner dinner brief",
     status: "running",
     priority: "normal",
     progress: 35,
@@ -1152,7 +1152,7 @@ const tasks: AgentTask[] = [
   {
     id: "t10",
     agentId: "research",
-    title: "Map the Halcyon buying committee",
+    title: "Map the Aster buying committee",
     status: "running",
     priority: "high",
     progress: 44,
@@ -1245,7 +1245,7 @@ const runs: AgentRun[] = [
   {
     id: "r2",
     agentId: "research",
-    title: "Halcyon committee map (pass 1)",
+    title: "Aster committee map (pass 1)",
     startedAt: minutesAgo(132),
     durationMin: 12,
     outcome: "partial",
@@ -1346,7 +1346,7 @@ const approvals: Approval[] = [
     id: "a1",
     agentId: "sales",
     kind: "send",
-    title: "Send the Halcyon renewal follow-up",
+    title: "Send the Aster renewal follow-up",
     proposedAction:
       "Hi Tobias — circling back on the renewal conversation from the spring. Since we last spoke your team has grown from six to eleven, and I'd like to bring a short plan for the two new teams. Worth 20 minutes this week?",
     reason:
@@ -1390,7 +1390,7 @@ const approvals: Approval[] = [
     kind: "publish",
     title: "Publish: “Relationship graphs beat CRMs”",
     proposedAction:
-      "Publish a 1,140-word post arguing that a relationship graph is the real system of record. Opens with the Halcyon renewal story (anonymised), cites three sources, and ends with a call to book a walkthrough.",
+      "Publish a 1,140-word post arguing that a relationship graph is the real system of record. Opens with the Aster renewal story (anonymised), cites three sources, and ends with a call to book a walkthrough.",
     reason:
       "Drafted from Tuesday's research run. It is ready except for one market-size claim Atlas could not verify — publishing is your call.",
     evidence: [
@@ -1556,7 +1556,7 @@ const activity: ActivityEntry[] = [
     at: minutesAgo(132),
     agentId: "research",
     type: "research",
-    title: "Mapped four of seven Halcyon roles",
+    title: "Mapped four of seven Aster roles",
     detail:
       "The buying committee is taking shape. Two claims could not be sourced and are flagged for review.",
     companyId: "c2",
@@ -1584,7 +1584,7 @@ const activity: ActivityEntry[] = [
     type: "approval",
     title: "Opened a follow-up approval for Tobias Lindqvist",
     detail:
-      "Reopens the Halcyon thread with the team-growth story rather than price. Waiting on you.",
+      "Reopens the Aster thread with the team-growth story rather than price. Waiting on you.",
     personId: "p4",
     companyId: "c2",
     approvalId: "a1",
@@ -1779,7 +1779,7 @@ const activity: ActivityEntry[] = [
     at: daysAgo(6, 15, 0),
     agentId: "research",
     type: "research",
-    title: "Verified Halcyon's Q3 numbers",
+    title: "Verified Aster's Q3 numbers",
     detail: "Two sources agree on headcount growth; revenue remains unverified.",
     companyId: "c2",
     evidence: [{ label: "Source check", detail: "2 of 3 facts confirmed" }],
@@ -1863,14 +1863,14 @@ const projects: Project[] = [
   {
     id: "pr1",
     workspaceId: "ws-gtm",
-    name: "Halcyon Renewal",
+    name: "Aster Renewal",
     kind: "deal",
     status: "at_risk",
     owner: "Alex Rivera",
     summary:
-      "Save the Halcyon Health renewal before the Q4 window closes. Tobias went quiet after the pricing thread, so the plan reopens with the team-growth story and a named buying committee.",
+      "Save the Aster Health renewal before the Q4 window closes. Tobias went quiet after the pricing thread, so the plan reopens with the team-growth story and a named buying committee.",
     mission:
-      "Make Halcyon Health a durable, expanding customer — not a yearly renewal scramble.",
+      "Make Aster Health a durable, expanding customer — not a yearly renewal scramble.",
     personIds: ["p4", "p8", "p11", "p17"],
     companyIds: ["c2"],
     eventIds: ["e2"],
@@ -1975,7 +1975,7 @@ const milestones: Milestone[] = [
     id: "m1",
     objectiveId: "o1",
     projectId: "pr1",
-    name: "Send the Halcyon renewal follow-up",
+    name: "Send the Aster renewal follow-up",
     summary:
       "Reopen with the team-growth story instead of price. The draft is written and waiting on your approval.",
     horizon: "today",
@@ -1988,7 +1988,7 @@ const milestones: Milestone[] = [
     id: "m2",
     objectiveId: "o1",
     projectId: "pr1",
-    name: "Prep the Halcyon partner dinner brief",
+    name: "Prep the Aster partner dinner brief",
     summary:
       "One page per attendee, one goal per conversation, and a clear ask for the renewal window.",
     horizon: "this_week",
@@ -2002,7 +2002,7 @@ const milestones: Milestone[] = [
     id: "m3",
     objectiveId: "o2",
     projectId: "pr1",
-    name: "Map the last three Halcyon roles",
+    name: "Map the last three Aster roles",
     summary:
       "Four of seven committee roles are sourced. The remaining three need a call, not a scrape.",
     horizon: "this_week",
@@ -2161,7 +2161,7 @@ const plans: Plan[] = [
       {
         id: "pl2-s3",
         label: "Check the guest list with Grace",
-        detail: "She owns the dinner list at Halcyon",
+        detail: "She owns the dinner list at Aster",
         status: "todo",
         agentId: "sales",
       },
@@ -2358,7 +2358,7 @@ const folders: Folder[] = [
   { id: "fd1", name: "Clients", parentId: null },
   { id: "fd2", name: "Playbooks", parentId: null },
   { id: "fd3", name: "Research", parentId: null },
-  { id: "fd4", name: "Halcyon Health", parentId: "fd1" },
+  { id: "fd4", name: "Aster Health", parentId: "fd1" },
   { id: "fd5", name: "Atlas Freight", parentId: "fd1" },
   { id: "fd6", name: "Loomcraft", parentId: "fd1" },
 ];
@@ -2367,7 +2367,7 @@ const files: FileDoc[] = [
   {
     id: "f1",
     folderId: "fd4",
-    name: "Halcyon renewal plan v3",
+    name: "Aster renewal plan v3",
     kind: "doc",
     size: "42 KB",
     updatedAt: daysAgo(2, 9, 40),
@@ -2380,7 +2380,7 @@ const files: FileDoc[] = [
   {
     id: "f2",
     folderId: "fd4",
-    name: "Halcyon buying committee",
+    name: "Aster buying committee",
     kind: "sheet",
     size: "18 KB",
     updatedAt: daysAgo(1, 16, 20),
@@ -2496,7 +2496,7 @@ const files: FileDoc[] = [
 const notes: Note[] = [
   {
     id: "n1",
-    title: "Halcyon renewal call — Tobias Lindqvist",
+    title: "Aster renewal call — Tobias Lindqvist",
     kind: "meeting",
     at: daysAgo(4, 11, 20),
     body:
@@ -2535,13 +2535,13 @@ const notes: Note[] = [
     kind: "note",
     at: daysAgo(6, 9, 0),
     body:
-      "Working notes for the thesis. A CRM stores what you typed. A graph stores who knows whom, how warm the edge is, and when it last moved. The renewal at Halcyon is the proof: the record said 'active', the graph said 'quiet for 26 days and one exec sponsor'.",
+      "Working notes for the thesis. A CRM stores what you typed. A graph stores who knows whom, how warm the edge is, and when it last moved. The renewal at Aster is the proof: the record said 'active', the graph said 'quiet for 26 days and one exec sponsor'.",
     personIds: ["p4", "p2"],
     agentId: "marketing",
   },
   {
     id: "n5",
-    title: "What actually happened in the Halcyon pricing thread",
+    title: "What actually happened in the Aster pricing thread",
     kind: "note",
     at: daysAgo(26, 14, 0),
     body:
@@ -2577,12 +2577,12 @@ const retrospectives: Retrospective[] = [
     summary:
       "The month the team stopped treating the CRM as the source of truth. Two renewals moved, one went quiet, and the graph caught it first.",
     wins: [
-      "Halcyon's buying committee went from 2 to 4 sourced roles without a single scrape.",
+      "Aster's buying committee went from 2 to 4 sourced roles without a single scrape.",
       "Loomcraft Community Night filled to 118 of 120 seats from the community list alone.",
       "Every outbound message that left the workspace was approved by a human.",
     ],
     misses: [
-      "The Halcyon pricing thread led with the number. It cost three weeks of silence.",
+      "The Aster pricing thread led with the number. It cost three weeks of silence.",
       "Atlas's exec sponsor went 58 days without a touch — nobody owned the reminder.",
       "Two of eleven claims in the Q4 draft are still unsourced and should never have reached a draft.",
     ],
@@ -2804,8 +2804,8 @@ const smartLists: SmartList[] = [
   },
   {
     id: "sl2",
-    name: "Halcyon sponsors",
-    description: "Everyone in the Halcyon Health account, renewal window in view.",
+    name: "Aster sponsors",
+    description: "Everyone in the Aster Health account, renewal window in view.",
     rule: { companyId: "c2" },
   },
   {

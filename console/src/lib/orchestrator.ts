@@ -354,7 +354,7 @@ const followUpAnswer = (world: World): CopilotAnswer => {
     summary: stalled.length
       ? `Three relationships are worth your attention this week: ${sentences.join(
           "; ",
-        )}. Mira has already drafted the Halcyon follow-up and is holding it for you. Atlas is re-checking two unverified claims before anything goes out.`
+        )}. Mira has already drafted the Aster follow-up and is holding it for you. Atlas is re-checking two unverified claims before anything goes out.`
       : "Every relationship is inside its reply window. Mira will keep watching and flag the first thread that goes quiet.",
     links: [
       ...stalled.map(personLink),
@@ -477,7 +477,7 @@ const publishAnswer = (world: World): CopilotAnswer => {
 
 const researchAnswer = (world: World): CopilotAnswer => {
   const company =
-    findCompanyMentioned("halcyon", world) ??
+    findCompanyMentioned("aster", world) ??
     companyById(world, "c2") ??
     world.companies[0];
   const people = world.people.filter((person) => person.companyId === company.id);

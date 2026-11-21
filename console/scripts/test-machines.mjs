@@ -404,7 +404,7 @@ await check("voice: a short sign-off ends a conversation, a question does not", 
   for (const heard of ["thanks", "Thank you!", "that's all", "stop", "bye", "never mind"]) {
     assert.equal(isConversationOver(heard), true, heard);
   }
-  for (const heard of ["", "who should I thank this week", "stopwatch", "what stops the Halcyon renewal from closing this month"]) {
+  for (const heard of ["", "who should I thank this week", "stopwatch", "what stops the Aster renewal from closing this month"]) {
     assert.equal(isConversationOver(heard), false, heard);
   }
 });
