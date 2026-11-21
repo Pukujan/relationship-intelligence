@@ -31,7 +31,23 @@ export const CRAWL_DDL = [
     url TEXT NOT NULL,
     status TEXT NOT NULL,
     visited_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    facts_count INTEGER NOT NULL DEFAULT 0
+    facts_count INTEGER NOT NULL DEFAULT 0,
+    connections_count INTEGER NOT NULL DEFAULT 0,
+    posts_count INTEGER NOT NULL DEFAULT 0,
+    image_url TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS ri_console.crawl_observation (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    person_id TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT,
+    url TEXT,
+    detail TEXT,
+    topic TEXT,
+    seed_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
 ];
 
@@ -64,7 +80,98 @@ export const CrawlerIngestSchema = z.object({
         quote: z.string().max(600).optional(),
       }),
     )
-    .max(10)
+    .max(20)
+    .default([]),
+  // Contact info shown on the profile's Contact info overlay, when visible.
+  contact: z
+    .object({
+      email: z.string().max(200).optional(),
+      phone: z.string().max(60).optional(),
+      website: z.string().max(300).optional(),
+      twitter: z.string().max(200).optional(),
+      github: z.string().max(200).optional(),
+    })
+    .default({}),
+  // The profile photo URL used as the person's avatar in the console.
+  imageUrl: z.string().url().max(600).nullable().optional(),
+  // Connections visible on the profile (paginated by the runner).
+  connections: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(160),
+        url: z.string().max(300).optional(),
+        headline: z.string().max(300).optional(),
+      }),
+    )
+    .max(500)
+    .default([]),
+  connectionsComplete: z.boolean().default(false),
+  // Posts from the profile's activity tab, with a coarse topic classification.
+  posts: z
+    .array(
+      z.object({
+        text: z.string().min(1).max(3_000),
+        date: z.string().max(40).optional(),
+        url: z.string().max(300).optional(),
+        topic: z
+          .enum([
+            "product",
+            "hiring",
+            "fundraising",
+            "research",
+            "event",
+            "opinion",
+            "personal",
+            "other",
+          ])
+          .default("other"),
+      }),
+    )
+    .max(100)
+    .default([]),
+  // Companies seen from profile experience and company pages.
+  companies: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(200),
+        url: z.string().max(300).optional(),
+        description: z.string().max(1_000).optional(),
+      }),
+    )
+    .max(50)
+    .default([]),
+  // People this person follows, when visible.
+  follows: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(160),
+        url: z.string().max(300).optional(),
+      }),
+    )
+    .max(300)
+    .default([]),
+  // Home-feed posts collected in the same session (attributed to 'feed').
+  feed: z
+    .array(
+      z.object({
+        author: z.string().min(1).max(160),
+        text: z.string().min(1).max(3_000),
+        url: z.string().max(300).optional(),
+        topic: z
+          .enum([
+            "product",
+            "hiring",
+            "fundraising",
+            "research",
+            "event",
+            "opinion",
+            "personal",
+            "other",
+          ])
+          .default("other"),
+      }),
+    )
+    .max(100)
     .default([]),
 });
 
@@ -83,6 +190,18 @@ const visitId = (url: string): string =>
 const seedIdOf = (attribute: string, statement: string, url: string): string =>
   createHash("sha256")
     .update(`FACT\x00${statement}\x00${attribute}\x00${normUrl(url)}`)
+    .digest("hex")
+    .slice(0, 16);
+
+/** Deterministic id for a graph observation (connection/post/company/follow/feed). */
+const observationSeedId = (
+  kind: string,
+  name: string,
+  detail: string,
+  url: string,
+): string =>
+  createHash("sha256")
+    .update(`${kind}\x00${name}\x00${detail.slice(0, 120)}\x00${normUrl(url)}`)
     .digest("hex")
     .slice(0, 16);
 
@@ -298,6 +417,86 @@ export type IngestResult =
   | { ok: true; status: number; body: Json }
   | { ok: false; status: number; body: Json };
 
+/** Insert one deduplicated graph observation (connection/post/company/follow/feed).
+ * The SQL table is the idempotency guard (PRIMARY KEY + DO NOTHING), so a
+ * replay never duplicates. Facts are claims on the crawled person with the
+ * source URL as evidence; nothing here sends, follows, or posts anything. */
+async function recordObservation(
+  config: OctoClientConfig,
+  token: string,
+  container: string,
+  workspaceId: string,
+  subjectPersonId: string,
+  sourceUrl: string,
+  kind: "connection" | "post" | "company" | "follow" | "feed",
+  item: {
+    name: string;
+    url?: string | undefined;
+    detail?: string | undefined;
+    topic?: string | undefined;
+  },
+  counters: { recorded: number; skipped: number; failed: number },
+): Promise<void> {
+  const seedId = observationSeedId(
+    kind,
+    item.name,
+    item.detail ?? "",
+    sourceUrl,
+  );
+  const id = `obs-${seedId}`;
+  const statement =
+    kind === "connection"
+      ? `${item.name} is a connection of this profile${item.detail ? ` — ${item.detail}` : ""}`
+      : kind === "follow"
+        ? `this profile follows ${item.name}`
+        : kind === "post"
+          ? `${item.name} posted about ${item.topic ?? "other"}: ${(item.detail ?? "").slice(0, 200)}`
+          : kind === "feed"
+            ? `feed post by ${item.name} about ${item.topic ?? "other"}: ${(item.detail ?? "").slice(0, 200)}`
+            : `company: ${item.name}${item.detail ? ` — ${item.detail.slice(0, 200)}` : ""}`;
+  try {
+    const inserted = await octoSql(
+      config,
+      token,
+      container,
+      `INSERT INTO ri_console.crawl_observation
+         (id, workspace_id, person_id, source_url, kind, name, url, detail, topic, seed_id)
+       VALUES (${lit(id)}, ${lit(workspaceId)}, ${lit(subjectPersonId)}, ${lit(sourceUrl)}, ${lit(kind)}, ${lit(item.name)}, ${item.url ? lit(item.url) : "NULL"}, ${item.detail ? lit(item.detail.slice(0, 1000)) : "NULL"}, ${item.topic ? lit(item.topic) : "NULL"}, ${lit(seedId)})
+       ON CONFLICT (id) DO NOTHING RETURNING id`,
+    );
+    if (!inserted.length) {
+      counters.skipped++;
+      return;
+    }
+    const attr =
+      kind === "connection"
+        ? "linkedin_connection"
+        : kind === "follow"
+          ? "linkedin_follow"
+          : kind === "post"
+            ? "linkedin_post_topic"
+            : kind === "feed"
+              ? "feed_post_topic"
+              : "company_page";
+    await epistemic(config, token, container, "claim", {
+      subjectEntityId: subjectPersonId,
+      statement,
+      validFrom: new Date().toISOString().slice(0, 10),
+      recordedAt: new Date().toISOString(),
+      provenance: {
+        verb: "FACT",
+        attribute: attr,
+        seedId,
+        source: "linkedin-slow-crawler",
+        ...(item.topic ? { topic: item.topic } : {}),
+      },
+    });
+    counters.recorded++;
+  } catch {
+    counters.failed++;
+  }
+}
+
 export async function crawlerIngest(
   config: OctoClientConfig,
   token: string,
@@ -344,14 +543,22 @@ export async function crawlerIngest(
   });
   const nowIso = now.toISOString();
   const visitedAt = data.visitedAt ?? nowIso;
-  const upsertVisit = (status: string, factsCount: number) =>
+  const upsertVisit = (
+    status: string,
+    factsCount: number,
+    extra: {
+      connections?: number;
+      posts?: number;
+      imageUrl?: string | null;
+    } = {},
+  ) =>
     octoSql(
       config,
       token,
       container,
-      `INSERT INTO ri_console.crawl_visit (id, workspace_id, person_id, url, status, visited_at, facts_count)
-       VALUES (${lit(visitId(data.url))}, ${lit(workspaceId)}, ${lit(data.personId)}, ${lit(data.url)}, ${lit(status)}, ${lit(visitedAt)}, ${factsCount})
-       ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, visited_at = EXCLUDED.visited_at, facts_count = EXCLUDED.facts_count`,
+      `INSERT INTO ri_console.crawl_visit (id, workspace_id, person_id, url, status, visited_at, facts_count, connections_count, posts_count, image_url)
+       VALUES (${lit(visitId(data.url))}, ${lit(workspaceId)}, ${lit(data.personId)}, ${lit(data.url)}, ${lit(status)}, ${lit(visitedAt)}, ${factsCount}, ${extra.connections ?? 0}, ${extra.posts ?? 0}, ${extra.imageUrl ? lit(extra.imageUrl) : "NULL"})
+       ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, visited_at = EXCLUDED.visited_at, facts_count = EXCLUDED.facts_count, connections_count = EXCLUDED.connections_count, posts_count = EXCLUDED.posts_count, image_url = COALESCE(EXCLUDED.image_url, ri_console.crawl_visit.image_url)`,
     );
 
   if (data.status !== "ok") {
@@ -431,7 +638,172 @@ export async function crawlerIngest(
       failed++;
     }
   }
-  await upsertVisit("ok", recorded);
+
+  // Contact info from the profile's Contact info overlay.
+  const contactFacts: { attribute: string; value: string }[] = [
+    { attribute: "professional_email", value: data.contact.email ?? "" },
+    { attribute: "phone", value: data.contact.phone ?? "" },
+    { attribute: "website", value: data.contact.website ?? "" },
+    { attribute: "twitter", value: data.contact.twitter ?? "" },
+    { attribute: "github", value: data.contact.github ?? "" },
+  ];
+  for (const { attribute, value } of contactFacts) {
+    if (!value) continue;
+    const statement = `${person.name}, ${attribute}: ${value}`;
+    const seedId = seedIdOf(attribute, statement, data.url);
+    if (existing.has(seedId)) {
+      skipped++;
+      continue;
+    }
+    try {
+      const claimRes = (await epistemic(config, token, container, "claim", {
+        subjectEntityId: data.personId,
+        statement,
+        validFrom: visitedAt.slice(0, 10),
+        recordedAt: nowIso,
+        provenance: {
+          verb: "FACT",
+          attribute,
+          seedId,
+          source: "linkedin-slow-crawler",
+        },
+      })) as { claim?: { id?: string } };
+      const claimId = claimRes.claim?.id;
+      if (!claimId) throw new Error("no claim id");
+      const evRes = (await epistemic(config, token, container, "evidence", {
+        locator: data.url,
+        quote: value,
+      })) as { evidence?: { id?: string } };
+      if (evRes.evidence?.id) {
+        await epistemic(config, token, container, "claim_evidence", {
+          claimId,
+          evidenceId: evRes.evidence.id,
+          stance: "supports",
+        });
+      }
+      existing.add(seedId);
+      recorded++;
+    } catch {
+      failed++;
+    }
+  }
+
+  // Profile image: a sourced FACT attribute; world.ts reads it into Person.avatarUrl.
+  if (data.imageUrl) {
+    const statement = `${person.name}, profile image: ${data.imageUrl}`;
+    const seedId = seedIdOf("profile_image", statement, data.url);
+    if (existing.has(seedId)) skipped++;
+    else {
+      try {
+        const claimRes = (await epistemic(config, token, container, "claim", {
+          subjectEntityId: data.personId,
+          statement,
+          validFrom: visitedAt.slice(0, 10),
+          recordedAt: nowIso,
+          provenance: {
+            verb: "FACT",
+            attribute: "profile_image",
+            seedId,
+            source: "linkedin-slow-crawler",
+          },
+        })) as { claim?: { id?: string } };
+        if (claimRes.claim?.id) {
+          const evRes = (await epistemic(config, token, container, "evidence", {
+            locator: data.imageUrl,
+            quote: "profile photo URL",
+          })) as { evidence?: { id?: string } };
+          if (evRes.evidence?.id) {
+            await epistemic(config, token, container, "claim_evidence", {
+              claimId: claimRes.claim.id,
+              evidenceId: evRes.evidence.id,
+              stance: "supports",
+            });
+          }
+          existing.add(seedId);
+          recorded++;
+        } else failed++;
+      } catch {
+        failed++;
+      }
+    }
+  }
+
+  // Connections, posts, companies, follows, feed — deduplicated observations.
+  const counters = { recorded, skipped, failed };
+  for (const c of data.connections) {
+    await recordObservation(
+      config,
+      token,
+      container,
+      workspaceId,
+      data.personId,
+      data.url,
+      "connection",
+      { name: c.name, url: c.url, detail: c.headline },
+      counters,
+    );
+  }
+  for (const p of data.posts) {
+    await recordObservation(
+      config,
+      token,
+      container,
+      workspaceId,
+      data.personId,
+      data.url,
+      "post",
+      { name: "post", detail: p.text, url: p.url, topic: p.topic },
+      counters,
+    );
+  }
+  for (const c of data.companies) {
+    await recordObservation(
+      config,
+      token,
+      container,
+      workspaceId,
+      data.personId,
+      data.url,
+      "company",
+      { name: c.name, url: c.url, detail: c.description },
+      counters,
+    );
+  }
+  for (const f of data.follows) {
+    await recordObservation(
+      config,
+      token,
+      container,
+      workspaceId,
+      data.personId,
+      data.url,
+      "follow",
+      { name: f.name, url: f.url },
+      counters,
+    );
+  }
+  for (const f of data.feed) {
+    await recordObservation(
+      config,
+      token,
+      container,
+      workspaceId,
+      data.personId,
+      data.url,
+      "feed",
+      { name: f.author, detail: f.text, url: f.url, topic: f.topic },
+      counters,
+    );
+  }
+  recorded = counters.recorded;
+  skipped = counters.skipped;
+  failed = counters.failed;
+
+  await upsertVisit("ok", recorded, {
+    connections: data.connections.length,
+    posts: data.posts.length,
+    imageUrl: data.imageUrl ?? null,
+  });
   try {
     await octoSql(
       config,
@@ -445,7 +817,7 @@ export async function crawlerIngest(
            agentId: "research",
            type: "research",
            title: `Crawled ${person.name}'s LinkedIn profile`,
-           detail: `${recorded} new sourced fact(s), ${skipped} already known`,
+           detail: `${recorded} new sourced fact(s)/observation(s), ${skipped} already known; ${data.connections.length} connections, ${data.posts.length} posts, ${data.feed.length} feed items`,
            personId: data.personId,
            outcome: failed > 0 ? "pending" : "ok",
            evidence: [{ label: "linkedin.com", detail: data.url }],
@@ -463,7 +835,18 @@ export async function crawlerIngest(
     eventType: "crawler.ingest",
     entityKind: "crawl_visit",
     entityId: visitId(data.url),
-    payload: { personId: data.personId, recorded, skipped, failed },
+    payload: {
+      personId: data.personId,
+      recorded,
+      skipped,
+      failed,
+      connections: data.connections.length,
+      posts: data.posts.length,
+      companies: data.companies.length,
+      follows: data.follows.length,
+      feed: data.feed.length,
+      image: Boolean(data.imageUrl),
+    },
   });
   await endSpan(span, failed > 0 ? "ERROR" : "OK", {
     recorded,

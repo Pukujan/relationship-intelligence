@@ -43,6 +43,8 @@ type Json = Record<string, unknown>;
 export interface WorldPerson {
   id: string;
   name: string;
+  /** Profile image URL collected from the LinkedIn profile, when visible. */
+  avatarUrl?: string | undefined;
   role: string;
   companyId: string;
   location: string;
@@ -775,6 +777,13 @@ export async function readCanonical(
       factValue(parsed, "professional_email").match(
         /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
       )?.[0] ?? "";
+    // Profile image collected by the slow crawler (RI-0024). A sourced FACT,
+    // never inferred. Empty until a visit actually saw the photo.
+    const avatarUrl = (() => {
+      const value = factValue(parsed, "profile_image");
+      const url = value.match(/https?:\/\/[^\s"']+/i)?.[0] ?? "";
+      return url.startsWith("http") ? url.slice(0, 600) : undefined;
+    })();
     const tags = [credential, education]
       .map((value) => suffixAfter(value, ":"))
       .filter(Boolean);
@@ -783,6 +792,7 @@ export async function readCanonical(
     people.push({
       id: personId,
       name: String(entity.name),
+      avatarUrl,
       role,
       companyId,
       location: suffixAfter(factValue(parsed, "location"), ":"),

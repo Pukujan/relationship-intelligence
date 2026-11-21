@@ -233,6 +233,8 @@ export interface Claim {
 export interface Person {
   id: string;
   name: string;
+  /** Profile image URL collected from the LinkedIn profile, when visible. */
+  avatarUrl?: string | undefined;
   role: string;
   companyId: string;
   location: string;

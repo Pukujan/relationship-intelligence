@@ -96,7 +96,7 @@ const PeopleList = ({ world, personIds }: { world: World; personIds: string[] })
           to={`/people/${person.id}`}
           className="focus-ring flex items-center gap-2 rounded-md px-1 py-1.5 transition-colors hover:bg-surface-2"
         >
-          <PersonAvatar name={person.name} size="sm" />
+          <PersonAvatar name={person.name} imageUrl={person.avatarUrl} size="sm" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[12px] font-medium">{person.name}</span>
             <span className="block truncate text-[10.5px] text-muted-foreground">
