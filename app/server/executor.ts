@@ -124,6 +124,9 @@ export function dueSlot(
   now: Date,
 ): DueSlot | null {
   if (isAgentPaused(agent)) return null;
+  // An invalid clock reading is a no-op, never a crash. Regression: the
+  // metamorphic suite shrunk a tick to new Date(NaN) and toISOString threw.
+  if (Number.isNaN(now.getTime())) return null;
   const cadence =
     agent.cadence === "pre_event" || agent.cadence === "signal"
       ? agent.cadence
@@ -581,7 +584,8 @@ export async function executeRun(
 ): Promise<RunOutcome> {
   const runId = String(runDoc.id);
   const agentId = String(runDoc.agentId);
-  const startedAt = now.toISOString();
+  const runNow = Number.isNaN(now.getTime()) ? new Date() : now;
+  const startedAt = runNow.toISOString();
   // Replay guard (MR-E5): a finished run is never re-executed. The tick only
   // claims queued rows, but a replayed or raced receipt must stay idempotent.
   const existingRows = await sql(
@@ -662,7 +666,7 @@ export async function executeRun(
     const finishedAt = new Date().toISOString();
     const durationMin = Math.max(
       1,
-      Math.round((Date.now() - now.getTime()) / 60_000),
+      Math.round((Date.now() - runNow.getTime()) / 60_000),
     );
     const receipt: Json = {
       ...runDoc,
@@ -792,7 +796,7 @@ export async function executeRun(
       answer,
       digest,
       principalId,
-      now,
+      runNow,
     );
     const outcome: RunOutcome["outcome"] =
       counts.failed > 0
@@ -826,6 +830,7 @@ export async function executeDueRuns(
   ctx: ExecutorCtx,
   now = new Date(),
 ): Promise<RunOutcome[]> {
+  if (Number.isNaN(now.getTime())) return [];
   const world = await withRetry(() =>
     readWorld(
       ctx.config,
