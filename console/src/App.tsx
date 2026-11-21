@@ -7,6 +7,7 @@ import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-
 import { DataProvider, useData } from "@/data/store";
 import { OrchestratorProvider } from "@/components/copilot/OrchestratorProvider";
 import { AppShell } from "@/components/shell/AppShell";
+import { landingPath } from "@/lib/landing";
 import SignIn from "./pages/SignIn";
 import Index from "./pages/Index";
 import AgentDetail from "./pages/AgentDetail";
@@ -44,6 +45,12 @@ const RequireSession = ({ children }: { children: ReactNode }) => {
   return <>{children}</>;
 };
 
+/** The console root opens the session's first screen: the chat for owners (#96). */
+const Landing = () => {
+  const { session } = useData();
+  return <Navigate to={landingPath(session?.mode)} replace />;
+};
+
 /** Bookmarks from before the milestone rename keep working. */
 const LegacyMilestoneRedirect = () => {
   const { missionId } = useParams();
@@ -67,7 +74,7 @@ const App = () => (
                   </RequireSession>
                 }
               >
-                <Route path="/" element={<Index />} />
+                <Route path="/" element={<Landing />} />
                 <Route path="/today" element={<Index />} />
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/agents/:agentId" element={<AgentDetail />} />

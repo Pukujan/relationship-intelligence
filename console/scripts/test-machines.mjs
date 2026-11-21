@@ -19,6 +19,7 @@ import { fillInMachine } from "../src/machines/fillInMachine.ts";
 import { milestoneMachine, approvalMachine } from "../src/machines/workMachines.ts";
 import { isConversationOver, parseVoiceCommand, resolveConfirmation } from "../src/lib/voiceCommands.ts";
 import { resolveThreadEntry } from "../src/lib/threadEntry.ts";
+import { landingPath } from "../src/lib/landing.ts";
 import { buildProfile, parseNote, POST_SNIPPET_MAX, snippet, tidy } from "../src/lib/profileSections.ts";
 import { allowed, askWithFailover, authHeaders, parseChain, parseModelJson } from "../server/providers.ts";
 
@@ -439,6 +440,19 @@ await check("thread: an unseeded arrival with no threads stays blank", () => {
   assert.equal(entry.activeId, null);
   assert.equal(entry.draft, false);
   assert.equal(entry.seed, "");
+});
+
+/* ---------------------------------------------------------------- */
+/* landing (#96)                                                     */
+/* ---------------------------------------------------------------- */
+
+await check("landing: an owner lands on the copilot chat", () => {
+  assert.equal(landingPath("owner"), "/copilot");
+});
+
+await check("landing: the demo workspace keeps Today as its front page", () => {
+  assert.equal(landingPath("guest"), "/today");
+  assert.equal(landingPath(undefined), "/today");
 });
 
 /* ---------------------------------------------------------------- */
