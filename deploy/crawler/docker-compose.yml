@@ -125,8 +125,33 @@ services:
       - telegram-data:/data
     logging: *logging
 
+  # WhatsApp DM import (#120): a linked device on the owner's WhatsApp. It
+  # shares the exit-node namespace, so WhatsApp sees the home address too.
+  # Link once:  docker compose ... run --rm whatsapp \
+  #               ./node_modules/.bin/tsx src/whatsapp.ts login
+  whatsapp:
+    image: ri-crawler-runner:local
+    container_name: ri-crawler-whatsapp
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+        restart: true
+      runner:
+        condition: service_started
+    restart: unless-stopped
+    command: ["./node_modules/.bin/tsx", "src/whatsapp.ts", "run"]
+    environment:
+      RI_DM_TOKEN: ${RI_DM_TOKEN:-}
+      RI_CRAWL_SERVER: ${RI_CRAWL_SERVER:-https://business.design-bakery.com}
+      RI_WA_FLUSH_SECONDS: ${RI_WA_FLUSH_SECONDS:-300}
+    volumes:
+      - whatsapp-data:/data
+    logging: *logging
+
 volumes:
   tailscale-state:
   browser-profile:
   crawl-evidence:
   telegram-data:
+  whatsapp-data:

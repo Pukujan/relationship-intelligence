@@ -1,2 +1,6 @@
 allowBuilds:
   esbuild: true
+overrides:
+  # Baileys asks for libsignal straight from GitHub, which our supply-chain
+  # policy blocks. 6.0.0 on npm is published from that same repository.
+  libsignal: 6.0.0
