@@ -152,3 +152,24 @@ export function deriveConnectorChip(c: UserConnectorView): ConnectorChip {
   if (c.status === "connected") return { label: "Connected", tone: "ok" };
   return { label: "Needs setup", tone: "muted" };
 }
+
+/** Outside-API service connector (RI-0021 extension): TinyFish web agent or
+ * generic REST. Browser-safe view — never carries the raw key or headers. */
+export type ApiServiceProvider = "tinyfish" | "rest";
+
+export interface ApiServiceView {
+  id: string;
+  provider: ApiServiceProvider;
+  name: string;
+  baseUrl: string;
+  status: "connected" | "needs_setup" | "expired" | "error";
+  keyHint: string;
+  hasHeaders: boolean;
+  lastTest: { ok: boolean; message: string; at?: string } | null;
+}
+
+export function deriveApiServiceChip(s: ApiServiceView): ConnectorChip {
+  if (s.status === "connected") return { label: "Connected", tone: "ok" };
+  if (s.lastTest && !s.lastTest.ok) return { label: "Test failed", tone: "error" };
+  return { label: "Needs setup", tone: "warn" };
+}

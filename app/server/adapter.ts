@@ -22,6 +22,7 @@ import {
   listDraftPlans,
   lockDraftPlan,
 } from "./agents.js";
+import { handleApiServiceRoutes } from "./apiServices.js";
 import {
   buildGoogleConnectorAuthUrl,
   type ConnectorProviderId,
@@ -726,6 +727,7 @@ export async function handleRequest(
     path === "/app-api/notes" ||
     path === "/app-api/retros" ||
     path.startsWith("/app-api/schedules") ||
+    path.startsWith("/app-api/services") ||
     path.startsWith("/app-api/projects/");
   if (
     worldRoutes.includes(path) ||
@@ -1017,9 +1019,11 @@ export async function handleRequest(
           workspaces,
           role,
         };
-        const handled = path.startsWith("/app-api/schedules")
-          ? await handleScheduleRoutes(req, res, url, ctx)
-          : await handleProfileRoutes(req, res, url, ctx);
+        const handled = path.startsWith("/app-api/services")
+          ? await handleApiServiceRoutes(req, res, url, ctx)
+          : path.startsWith("/app-api/schedules")
+            ? await handleScheduleRoutes(req, res, url, ctx)
+            : await handleProfileRoutes(req, res, url, ctx);
         if (handled) return;
       }
       if (path === "/app-api/sessions" && req.method === "GET") {
