@@ -71,6 +71,19 @@ export interface WorldCompany {
   notes: string;
 }
 
+/** Mirrors the console's RelationshipEvent (console/src/data/types.ts). */
+export interface WorldEvent {
+  id: string;
+  name: string;
+  date: string;
+  location: string;
+  type: "conference" | "dinner" | "community" | "demo" | "mixer";
+  attendeeIds: string[];
+  goal: string;
+  agentId: string;
+  status: "upcoming" | "past";
+}
+
 export interface WorldShape {
   organization: Json;
   workspaces: Json[];
@@ -85,7 +98,7 @@ export interface WorldShape {
   activity: Json[];
   people: WorldPerson[];
   companies: WorldCompany[];
-  events: Json[];
+  events: WorldEvent[];
   folders: Json[];
   files: Json[];
   notes: Json[];
@@ -305,7 +318,11 @@ export async function readCanonical(
   token: string,
   octoContainerId: string,
   scope?: CanonicalScope,
-): Promise<{ people: WorldPerson[]; companies: WorldCompany[] }> {
+): Promise<{
+  people: WorldPerson[];
+  companies: WorldCompany[];
+  events: WorldEvent[];
+}> {
   const [entities, claims, subjects, cites, beliefs] = await Promise.all([
     graph(
       config,
@@ -514,7 +531,83 @@ export async function readCanonical(
     notes: "",
   }));
 
-  return { people, companies };
+  // Events live in the ledger as `event:<slug>` entities. The loader stored
+  // no date property, but the slug carries the event day for most sources
+  // (…-2026-11-18, …-20261008, 2026-11-13-…). Only emit events whose day can
+  // be read without guessing: the console formats `date` unguarded, and an
+  // invented day would be a fabricated fact. "Where we met" comes from the
+  // owner's self-reported `met at <title>` notes, which are claims on the
+  // person and already pass the visibility filter above.
+  const eventDateFromSlug = (kind: string): string => {
+    const slug = kind.slice("event:".length);
+    const iso = slug.match(/(\d{4})-(\d{2})-(\d{2})/);
+    const compact = slug.match(/(\d{4})(\d{2})(\d{2})/);
+    const parts = iso ?? compact;
+    if (!parts) return "";
+    const [, y, m, d] = parts;
+    const date = new Date(`${y}-${m}-${d}T00:00:00.000Z`);
+    if (
+      Number.isNaN(date.getTime()) ||
+      date.getUTCMonth() + 1 !== Number(m) ||
+      date.getUTCDate() !== Number(d)
+    ) {
+      return "";
+    }
+    return date.toISOString();
+  };
+
+  const eventEntities = entities.filter(
+    (e) => String(e.kind).startsWith("event:") && !retired.has(String(e.id)),
+  );
+  const eventByTitle = new Map<string, string>();
+  for (const e of eventEntities) {
+    if (eventDateFromSlug(String(e.kind))) {
+      eventByTitle.set(String(e.name), String(e.id));
+    }
+  }
+  const attendeesOf = new Map<string, Set<string>>();
+  for (const [personId, parsed] of parsedClaimsByEntity) {
+    for (const { claim, provenance } of parsed) {
+      if (provenance.verb !== "UNVERIFIED") continue;
+      const metAt = String(claim.statement ?? "").match(
+        /\(self reported\) met at\s+(.+)$/i,
+      );
+      if (!metAt) continue;
+      const title = metAt[1];
+      if (!title) continue;
+      const eventId = eventByTitle.get(title.trim());
+      if (!eventId) continue;
+      const set = attendeesOf.get(eventId) ?? new Set<string>();
+      set.add(personId);
+      attendeesOf.set(eventId, set);
+    }
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const events: WorldEvent[] = [];
+  for (const e of eventEntities) {
+    const id = String(e.id);
+    const date = eventDateFromSlug(String(e.kind));
+    if (!date) continue;
+    const attendeeIds = [...(attendeesOf.get(id) ?? [])];
+    // Members only see events tied to people whose claims they can read;
+    // the container owner sees the whole calendar, including upcoming
+    // events nobody has met at yet.
+    if (scope && !scope.isContainerOwner && attendeeIds.length === 0) continue;
+    events.push({
+      id,
+      name: String(e.name),
+      date,
+      location: "",
+      type: "community",
+      attendeeIds,
+      goal: "",
+      agentId: "",
+      status: date.slice(0, 10) < today ? "past" : "upcoming",
+    });
+  }
+  events.sort((a, b) => a.date.localeCompare(b.date));
+
+  return { people, companies, events };
 }
 
 /* ------------------------------------------------------------------ */
@@ -695,7 +788,7 @@ export async function readWorld(
     activity,
     people: canonical.people,
     companies: canonical.companies,
-    events: [],
+    events: canonical.events,
     folders,
     files,
     notes,
