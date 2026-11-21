@@ -11,6 +11,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { completeAgentDoc } from "./agentShape.js";
+import { completeFileDoc, completeNoteDoc } from "./knowledgeShape.js";
 import type { OctoClientConfig } from "./octo.js";
 import { OctoError } from "./octo.js";
 import { appendLedgerEvent, endSpan, startSpan } from "./telemetry.js";
@@ -790,8 +791,17 @@ export async function readWorld(
     companies: canonical.companies,
     events: canonical.events,
     folders,
-    files,
-    notes,
+    // Fill the fields the console's knowledge views read; see knowledgeShape.ts.
+    files: files.map((doc) =>
+      doc && typeof doc === "object"
+        ? completeFileDoc(doc as Record<string, unknown>, principal.displayName)
+        : doc,
+    ) as Json[],
+    notes: notes.map((doc) =>
+      doc && typeof doc === "object"
+        ? completeNoteDoc(doc as Record<string, unknown>)
+        : doc,
+    ) as Json[],
     retrospectives,
     connectors,
     mcpServers,
