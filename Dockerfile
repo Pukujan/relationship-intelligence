@@ -9,6 +9,9 @@ COPY console/pnpm-lock.yaml console/package.json console/
 COPY app/pnpm-lock.yaml app/package.json app/
 RUN pnpm install --dir console --frozen-lockfile --config.strict-dep-builds=false
 COPY console/ console/
+# The console imports shared runtime contracts from app/shared (e.g.
+# connectorContracts) — copy them before the build or rolldown cannot resolve.
+COPY app/shared/ app/shared/
 RUN pnpm --dir console build
 
 FROM node:24-alpine
