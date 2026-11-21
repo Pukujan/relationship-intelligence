@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   WORKFLOW_NODE_DEFS, type WorkflowNodeType, type WorkflowRunView, type ApiServiceView,
-} from "../../../app/shared/contracts";
+} from "../../../app/shared/workflowContracts";
 
 const api = async (path: string, method = "GET", body?: unknown) => {
   const res = await fetch(path, {

@@ -4,7 +4,7 @@ import { Workflow as WorkflowIcon, Play, Plus, Trash2, Pencil } from "lucide-rea
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { PageHeader, SectionHeader, EmptyState } from "@/components/common";
-import { WORKFLOW_NODE_DEFS, type WorkflowView, type WorkflowNode } from "../../../app/shared/contracts";
+import { WORKFLOW_NODE_DEFS, type WorkflowView, type WorkflowNode } from "../../../app/shared/workflowContracts";
 
 const api = async (path: string, method = "GET", body?: unknown) => {
   const res = await fetch(path, {

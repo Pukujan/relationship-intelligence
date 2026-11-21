@@ -16,7 +16,7 @@ import {
   deriveApiServiceChip,
   type ApiServiceView,
   type ApiServiceProvider,
-} from "../../../../app/shared/contracts";
+} from "../../../../app/shared/workflowContracts";
 
 const CHIP_CLASS: Record<string, string> = {
   ok: "border-run/30 bg-run/10 text-run",
