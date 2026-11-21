@@ -177,6 +177,11 @@ const People = () => {
 
   return (
     <div className="space-y-5">
+      {world.graphStale ? (
+        <div className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-[11.5px] text-warn">
+          The relationship graph is stale or unreachable in Octo. Facts below may be out of date.
+        </div>
+      ) : null}
       <PageHeader
         eyebrow="Relationship graph"
         title="People & companies"

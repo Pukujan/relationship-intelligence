@@ -213,3 +213,131 @@ describe("canonical people & private note scoping (#73)", () => {
     }
   });
 });
+
+describe("imported fact fields populate the people directory (#71)", () => {
+  it("derives role, email, tags and summary from sourced FACT attributes", async () => {
+    const mockFetch = vi.fn(
+      async (_url: RequestInfo | URL, init?: RequestInit) => {
+        const { query } = JSON.parse(String(init?.body ?? "{}")) as {
+          query: string;
+        };
+        if (query.includes("MATCH (e:Entity)")) {
+          return new Response(
+            JSON.stringify({
+              rows: [{ id: "p-1", name: "Amber Atkins", kind: "person" }],
+            }),
+            { status: 200 },
+          );
+        }
+        if (query.includes("MATCH (c:Claim) RETURN")) {
+          return new Response(
+            JSON.stringify({
+              rows: [
+                {
+                  id: "c-role",
+                  statement:
+                    "Amber Atkins, public role summary: Community + Partnerships at Knapsack",
+                  validFrom: "2026-10-16",
+                  supersededAt: null,
+                  provenance: JSON.stringify({
+                    verb: "FACT",
+                    attribute: "public_role_summary",
+                    seedId: "role",
+                  }),
+                },
+                {
+                  id: "c-email",
+                  statement:
+                    "Amber Atkins, professional email: amber@knapsack.cloud",
+                  validFrom: "2026-10-16",
+                  supersededAt: null,
+                  provenance: JSON.stringify({
+                    verb: "FACT",
+                    attribute: "professional_email",
+                    seedId: "email",
+                  }),
+                },
+                {
+                  id: "c-edu",
+                  statement:
+                    "Amber Atkins, public education: Hofstra University (profile lists)",
+                  validFrom: "2026-10-16",
+                  supersededAt: null,
+                  provenance: JSON.stringify({
+                    verb: "FACT",
+                    attribute: "public_education",
+                    seedId: "edu",
+                  }),
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (query.includes("[:SUBJECT]")) {
+          return new Response(
+            JSON.stringify({
+              rows: [
+                { claimId: "c-role", entityId: "p-1" },
+                { claimId: "c-email", entityId: "p-1" },
+                { claimId: "c-edu", entityId: "p-1" },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (query.includes("[:CITES]")) {
+          return new Response(
+            JSON.stringify({
+              rows: [
+                {
+                  claimId: "c-role",
+                  locator: "https://www.linkedin.com/in/amber",
+                  excerpt: "Community + Partnerships at Knapsack",
+                },
+                {
+                  claimId: "c-email",
+                  locator: "https://www.linkedin.com/in/amber",
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ rows: [] }), { status: 200 });
+      },
+    );
+    vi.stubGlobal("fetch", mockFetch);
+    try {
+      const view = await readCanonical(
+        { baseUrl: "https://octo.example.test", timeoutMs: 5000 },
+        "tok",
+        CONTAINER,
+        {
+          workspaceId: CONTAINER,
+          octoContainerId: CONTAINER,
+          principalId: OWNER_ID,
+          isContainerOwner: true,
+        } satisfies CanonicalScope,
+      );
+      expect(view.people).toHaveLength(1);
+      const person = view.people[0];
+      if (!person)
+        throw new Error("expected the imported person to be returned");
+      expect(person.role).toBe("Community + Partnerships at Knapsack");
+      expect(person.email).toBe("amber@knapsack.cloud");
+      expect(person.summary).toContain("Community + Partnerships");
+      expect(person.tags).toContain("Hofstra University (profile lists)");
+      expect(person.claims).toHaveLength(3);
+      const roleClaim = person.claims.find((c) => c.id === "c-role");
+      expect(roleClaim?.source.locator).toBe(
+        "https://www.linkedin.com/in/amber",
+      );
+      expect(roleClaim?.source.excerpt).toBe(
+        "Community + Partnerships at Knapsack",
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
