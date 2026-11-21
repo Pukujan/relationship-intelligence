@@ -185,7 +185,7 @@ const demoProfile = (): SelfProfile => ({
     "Every outbound send needs my approval",
     "Warm intros before cold outreach",
   ],
-  goals: ["Save the Halcyon renewal", "Ship the Loomcraft beta"],
+  goals: ["Save the Aster renewal", "Ship the Loomcraft beta"],
   updatedAt: new Date().toISOString(),
 });
 

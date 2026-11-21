@@ -521,7 +521,7 @@ const People = () => {
             </div>
             <button
               type="button"
-              onClick={() => openCopilot("Research Halcyon Health for me")}
+              onClick={() => openCopilot("Which account should I research first, and what should I look for?")}
               className="focus-ring flex w-full items-start gap-2 rounded-xl border border-primary/25 bg-primary/[0.06] px-3 py-2.5 text-left text-[11.5px] text-foreground/90 transition-colors hover:bg-primary/10"
             >
               <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />

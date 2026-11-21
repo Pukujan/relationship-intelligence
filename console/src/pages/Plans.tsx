@@ -83,7 +83,7 @@ const Plans = () => {
             variant="outline"
             size="sm"
             className="h-9 gap-1.5 rounded-lg text-[12px]"
-            onClick={() => openCopilot("What's the plan for the Halcyon renewal?")}
+            onClick={() => openCopilot("Which missions still need a plan, and what would you propose for them?")}
           >
             <Sparkles className="h-3.5 w-3.5 text-primary" />
             Ask about a plan
