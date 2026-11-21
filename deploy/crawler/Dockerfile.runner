@@ -14,7 +14,8 @@ COPY collector/tsconfig.json ./
 COPY collector/src ./src
 COPY deploy/crawler/run-hourly.sh /usr/local/bin/run-hourly.sh
 COPY deploy/crawler/run-telegram.sh /usr/local/bin/run-telegram.sh
-RUN chmod +x /usr/local/bin/run-hourly.sh /usr/local/bin/run-telegram.sh && mkdir -p /data && chown node:node /data
+COPY deploy/crawler/run-discord.sh /usr/local/bin/run-discord.sh
+RUN chmod +x /usr/local/bin/run-hourly.sh /usr/local/bin/run-telegram.sh /usr/local/bin/run-discord.sh && mkdir -p /data && chown node:node /data
 ENV RI_PROOF_ROOT=/data
 USER node
 CMD ["/usr/local/bin/run-hourly.sh"]

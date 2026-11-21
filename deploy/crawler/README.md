@@ -114,6 +114,25 @@ read, and doesn't show you as online.
 If you remove the linked device on your phone, the service stops and logs that
 it needs `login` again.
 
+## Discord DMs (optional)
+
+Discord runs as `ri-crawler-discord` on the home-address network. It reads your
+one-to-one DMs (not servers or group DMs) every 15 minutes through Discord's web
+API with your own account token: the latest 100 messages per DM from the last
+90 days on the first pass, then only newer ones. It waits whenever Discord asks
+it to slow down, and never sends, reacts or marks anything as read.
+
+1. Copy your account token from Discord in a browser (developer tools →
+   Network → any request to `discord.com/api` → the `Authorization` header).
+   Treat it like a password: anyone with it can use your account.
+2. Add it to the crawler env file as `DISCORD_USER_TOKEN=...`, with
+   `RI_DM_TOKEN` set as above, and restart the stack.
+3. DMs appear under **People → Conversations to match**; linking one records
+   that Discord account on the contact.
+
+Changing your Discord password replaces the token, and the service then logs a
+401 until you update it.
+
 ## Checking it
 
 ```sh

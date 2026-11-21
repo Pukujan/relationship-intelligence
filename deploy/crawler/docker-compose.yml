@@ -149,9 +149,33 @@ services:
       - whatsapp-data:/data
     logging: *logging
 
+  # Discord DM import (#120): reads the owner's one-to-one DMs with their own
+  # account token, every 15 minutes, from the home-address namespace.
+  discord:
+    image: ri-crawler-runner:local
+    container_name: ri-crawler-discord
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+        restart: true
+      runner:
+        condition: service_started
+    restart: unless-stopped
+    command: ["/usr/local/bin/run-discord.sh"]
+    environment:
+      RI_DM_TOKEN: ${RI_DM_TOKEN:-}
+      RI_CRAWL_SERVER: ${RI_CRAWL_SERVER:-https://business.design-bakery.com}
+      DISCORD_USER_TOKEN: ${DISCORD_USER_TOKEN:-}
+      RI_DC_INTERVAL_SECONDS: ${RI_DC_INTERVAL_SECONDS:-900}
+    volumes:
+      - discord-data:/data
+    logging: *logging
+
 volumes:
   tailscale-state:
   browser-profile:
   crawl-evidence:
   telegram-data:
   whatsapp-data:
+  discord-data:
