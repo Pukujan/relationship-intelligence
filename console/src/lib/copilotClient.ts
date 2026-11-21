@@ -51,6 +51,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    credentials: "same-origin",
     signal: AbortSignal.timeout(SERVER_TIMEOUT_MS),
   });
   if (!response.ok) {

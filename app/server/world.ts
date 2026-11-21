@@ -10,6 +10,14 @@
  *    carrying a W3C `trace_id` exported to Phoenix when configured.
  */
 import { randomUUID } from "node:crypto";
+import type { Provenance } from "../shared/contracts.js";
+import {
+  BeliefSchema,
+  ClaimRelationSchema,
+  ClaimsAsOfResponseSchema,
+  EvidenceSchema,
+  ProvenanceSchema,
+} from "../shared/contracts.js";
 import { completeAgentDoc } from "./agentShape.js";
 import { completeFileDoc, completeNoteDoc } from "./knowledgeShape.js";
 import type { OctoClientConfig } from "./octo.js";
@@ -58,6 +66,16 @@ export interface WorldPerson {
     };
     confidence: "high" | "medium" | "low";
     status: "sourced" | "unverified";
+    /** Perspective stances from Octo beliefs; never an approval workflow. */
+    beliefs: {
+      stance: string;
+      perspective?: string;
+      confidence: number | null;
+    }[];
+    /** Content hash of the chosen evidence, when projected by Octo. */
+    contentHash?: string;
+    /** Typed claim status from provenance, when present. */
+    claimStatus?: "SOURCED" | "UNVERIFIED";
   }[];
 }
 
@@ -113,11 +131,76 @@ export interface WorldShape {
   generatedAt: string;
 }
 
-/** Evidence returned from Octo's graph projection. */
+/**
+ * Evidence returned from Octo's graph projection. Validated against the shared
+ * Evidence contract; `excerpt` covers legacy projections that aliased quote.
+ */
 interface EvidenceRow {
   claimId: string;
   locator: string;
   excerpt: string;
+  quote: string | undefined;
+  contentHash: string | undefined;
+  sourceFileId: string | undefined;
+}
+
+/** Belief row as projected from Octo's beliefs table. */
+interface BeliefRow {
+  claimId: string;
+  stance: string;
+  confidence: number | null;
+  perspective: string | undefined;
+  validFrom: string | null | undefined;
+  validTo: string | null | undefined;
+  recordedAt: string | null | undefined;
+  supersededAt: string | null | undefined;
+}
+
+/** Claim relation row as projected by the Octo graph projector (RELATES edge). */
+interface RelationRow {
+  id?: string;
+  fromClaimId: string;
+  toClaimId: string;
+  relation: string;
+  supersededAt?: string | null;
+}
+
+/** Tolerant parse of a graph provenance value (JSON string or already an object). */
+export function parseProvenance(value: unknown): Provenance {
+  let raw: unknown = value;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const parsed = ProvenanceSchema.safeParse(raw);
+  return parsed.success ? parsed.data : {};
+}
+
+/** True when a claim is a retirement marker (typed status or legacy verb). */
+function isRetirement(provenance: Provenance): boolean {
+  return (
+    provenance.verb === "RETIRED" ||
+    (typeof provenance.verb === "string" &&
+      provenance.verb.toUpperCase() === "RETIRED") ||
+    (typeof provenance.status === "string" &&
+      provenance.status.toUpperCase() === "RETIRED")
+  );
+}
+
+/** True when a claim is a typed corrective/superseding marker. */
+function isSuperseding(
+  provenance: Provenance,
+  relation: string | undefined,
+): boolean {
+  return (
+    relation === "SUPERSEDES" ||
+    (typeof provenance.verb === "string" &&
+      provenance.verb.toUpperCase() === "SUPERSEDES")
+  );
 }
 
 /** World collection -> ri_console table. Mirrors console/scripts/bootstrap-octo.mjs. */
@@ -240,29 +323,43 @@ const hostOf = (locator: string) => {
 };
 
 /**
- * Entities that have been retired: at least one current claim says RETIRED
- * and no other current claim remains. The ledger never deletes, so retiring a
- * record (seed/retire_samples.py) supersedes its claims and adds a RETIRED
- * one; this is what keeps a retired person or company off the screen.
+ * Entities that have been retired: at least one visible current claim is a
+ * retirement marker (legacy RETIRED verb or typed SUPERSEDES/status) and no
+ * other current claim for that entity remains. The ledger never deletes, so
+ * retiring a record supersedes its claims and adds a retirement marker; this
+ * is what keeps a retired person or company off the screen.
+ *
+ * Scope is applied BEFORE this computation: a private retirement claim from
+ * one principal must never hide a shared entity for another principal.
  */
 export function retiredEntityIds(
   claims: Record<string, unknown>[],
   subjectOf: Map<string, string>,
+  relations: RelationRow[] = [],
+  scope?: CanonicalScope,
 ): Set<string> {
+  const supersedesFrom = new Set(
+    relations
+      .filter((r) => r.relation === "SUPERSEDES" && !r.supersededAt)
+      .map((r) => r.fromClaimId),
+  );
   const retired = new Set<string>();
   const live = new Set<string>();
   for (const claim of claims) {
     if (claim.supersededAt) continue;
     const entityId = subjectOf.get(String(claim.id));
     if (!entityId) continue;
-    let verb: unknown;
-    try {
-      verb = (JSON.parse(String(claim.provenance ?? "{}")) as Json).verb;
-    } catch {
-      verb = undefined;
+    const provenance = parseProvenance(claim.provenance);
+    if (scope && !isClaimVisibleToScope(provenance, scope)) continue;
+    if (
+      isRetirement(provenance) ||
+      isSuperseding(provenance, undefined) ||
+      supersedesFrom.has(String(claim.id))
+    ) {
+      retired.add(entityId);
+    } else {
+      live.add(entityId);
     }
-    if (verb === "RETIRED") retired.add(entityId);
-    else live.add(entityId);
   }
   for (const id of live) retired.delete(id);
   return retired;
@@ -314,93 +411,221 @@ export function isClaimVisibleToScope(
   return scope.isContainerOwner && scope.workspaceId === scope.octoContainerId;
 }
 
+/**
+ * Bitemporal read: GET /api/epistemic/claims-as-of with the caller's session
+ * token. The response is Zod-validated; malformed upstream data never reaches
+ * the people projection.
+ */
+export async function readClaimsAsOf(
+  config: OctoClientConfig,
+  token: string,
+  workspaceId: string,
+  asOfRecorded: string,
+  asOfValid?: string,
+): Promise<Record<string, unknown>[]> {
+  const url = new URL("/api/epistemic/claims-as-of", config.baseUrl);
+  url.searchParams.set("workspaceId", workspaceId);
+  url.searchParams.set("asOfRecorded", asOfRecorded);
+  if (asOfValid) url.searchParams.set("asOfValid", asOfValid);
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    signal: AbortSignal.timeout(config.timeoutMs),
+  });
+  if (!response.ok) {
+    throw new OctoError(
+      response.status,
+      `Octo answered ${response.status} for claims-as-of`,
+    );
+  }
+  const parsed = ClaimsAsOfResponseSchema.safeParse(await response.json());
+  if (!parsed.success) {
+    throw new Error("Octo claims-as-of response failed contract validation");
+  }
+  // Map onto the same row shape the graph claim query produces.
+  return parsed.data.claims.map((claim) => ({
+    id: claim.id,
+    statement: claim.statement,
+    validFrom: claim.validFrom,
+    validTo: claim.validTo ?? null,
+    recordedAt: claim.recordedAt,
+    supersededAt: null,
+    // Provenance is already validated by ClaimSchema; pass the object through
+    // parseProvenance in readCanonical (it accepts objects as well as strings).
+    provenance: claim.provenance,
+  }));
+}
+
 export async function readCanonical(
   config: OctoClientConfig,
   token: string,
   octoContainerId: string,
   scope?: CanonicalScope,
+  /** Optional bitemporal claims from readClaimsAsOf; replaces graph claim rows. */
+  claimsOverride?: Record<string, unknown>[],
 ): Promise<{
   people: WorldPerson[];
   companies: WorldCompany[];
   events: WorldEvent[];
 }> {
-  const [entities, claims, subjects, cites, beliefs] = await Promise.all([
-    graph(
-      config,
-      token,
-      octoContainerId,
-      "MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.entityType AS kind",
-    ),
-    graph(
-      config,
-      token,
-      octoContainerId,
-      "MATCH (c:Claim) RETURN c.id AS id, c.statement AS statement, c.validFrom AS validFrom, c.supersededAt AS supersededAt, c.provenance AS provenance",
-    ),
-    graph(
-      config,
-      token,
-      octoContainerId,
-      "MATCH (c:Claim)-[:SUBJECT]->(e:Entity) RETURN c.id AS claimId, e.id AS entityId",
-    ),
-    graph(
-      config,
-      token,
-      octoContainerId,
-      "MATCH (c:Claim)-[:CITES]->(v:Evidence) RETURN c.id AS claimId, v.locator AS locator, v.quote AS excerpt",
-    ),
-    graph(
-      config,
-      token,
-      octoContainerId,
-      "MATCH (b:Belief)-[:ABOUT]->(c:Claim) RETURN c.id AS claimId, b.confidence AS confidence",
-    ),
-  ]);
+  const [entities, claims, subjects, cites, beliefs, relations] =
+    await Promise.all([
+      graph(
+        config,
+        token,
+        octoContainerId,
+        "MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.entityType AS kind",
+      ),
+      claimsOverride
+        ? Promise.resolve(claimsOverride)
+        : graph(
+            config,
+            token,
+            octoContainerId,
+            "MATCH (c:Claim) RETURN c.id AS id, c.statement AS statement, c.validFrom AS validFrom, c.validTo AS validTo, c.recordedAt AS recordedAt, c.supersededAt AS supersededAt, c.provenance AS provenance",
+          ),
+      graph(
+        config,
+        token,
+        octoContainerId,
+        "MATCH (c:Claim)-[:SUBJECT]->(e:Entity) RETURN c.id AS claimId, e.id AS entityId",
+      ),
+      graph(
+        config,
+        token,
+        octoContainerId,
+        "MATCH (c:Claim)-[:CITES]->(v:Evidence) RETURN c.id AS claimId, v.id AS evidenceId, v.locator AS locator, v.quote AS quote, v.contentHash AS contentHash, v.sourceFileId AS sourceFileId",
+      ),
+      graph(
+        config,
+        token,
+        octoContainerId,
+        "MATCH (b:Belief)-[:ABOUT]->(c:Claim) RETURN c.id AS claimId, b.id AS beliefId, b.stance AS stance, b.confidence AS confidence, b.validFrom AS validFrom, b.validTo AS validTo, b.recordedAt AS recordedAt, b.supersededAt AS supersededAt",
+      ),
+      graph(
+        config,
+        token,
+        octoContainerId,
+        "MATCH (a:Claim)-[r:RELATES]->(b:Claim) RETURN r.id AS id, a.id AS fromClaimId, b.id AS toClaimId, r.relation AS relation, r.supersededAt AS supersededAt",
+      ),
+    ]);
 
   const subjectOf = new Map<string, string>();
   for (const row of subjects)
     subjectOf.set(String(row.claimId), String(row.entityId));
+
   const evidenceOf = new Map<string, EvidenceRow>();
   for (const row of cites) {
+    const parsed = EvidenceSchema.safeParse({
+      ...(row.evidenceId ? { id: String(row.evidenceId) } : {}),
+      locator: row.locator ?? null,
+      quote: row.quote ?? row.excerpt ?? null,
+      contentHash: row.contentHash ?? null,
+      sourceFileId: row.sourceFileId ?? null,
+    });
+    if (!parsed.success) continue;
+    const evidence = parsed.data;
     const id = String(row.claimId);
     const previous = evidenceOf.get(id);
-    if (
-      !previous ||
-      String(row.locator ?? "").length > previous.locator.length
-    ) {
-      evidenceOf.set(id, {
-        claimId: id,
-        locator: String(row.locator ?? ""),
-        excerpt: String(row.excerpt ?? previous?.excerpt ?? ""),
-      });
-    }
-  }
-  const confidenceOfClaim = new Map<string, number>();
-  for (const row of beliefs) {
-    const id = String(row.claimId);
-    const value = Number(row.confidence);
-    confidenceOfClaim.set(id, Math.max(confidenceOfClaim.get(id) ?? 0, value));
+    const candidate: EvidenceRow = {
+      claimId: id,
+      locator: evidence.locator ?? "",
+      excerpt: evidence.quote ?? "",
+      quote: evidence.quote ?? undefined,
+      contentHash: evidence.contentHash ?? undefined,
+      sourceFileId: evidence.sourceFileId ?? undefined,
+    };
+    // Prefer the most informative evidence row: a locator, then a hash.
+    const rank = (v: EvidenceRow) =>
+      v.locator.length * 2 + (v.excerpt.length > 0 ? 1 : 0);
+    if (!previous || rank(candidate) > rank(previous))
+      evidenceOf.set(id, candidate);
   }
 
-  const retired = retiredEntityIds(claims, subjectOf);
-  const parsedClaimsByEntity = new Map<
-    string,
-    { claim: Json; provenance: Json }[]
-  >();
-  for (const claim of claims) {
+  const beliefsOfClaim = new Map<string, BeliefRow[]>();
+  for (const row of beliefs) {
+    const parsed = BeliefSchema.safeParse({
+      id: String(row.beliefId ?? row.claimId ?? ""),
+      claimId: String(row.claimId),
+      stance: row.stance,
+      confidence: row.confidence ?? null,
+      perspective: row.perspective,
+      validFrom: row.validFrom ?? null,
+      validTo: row.validTo ?? null,
+      recordedAt: row.recordedAt ?? null,
+      supersededAt: row.supersededAt ?? null,
+    });
+    if (!parsed.success) continue;
+    const id = String(row.claimId);
+    const list = beliefsOfClaim.get(id) ?? [];
+    list.push({
+      claimId: id,
+      stance: parsed.data.stance,
+      confidence: parsed.data.confidence ?? null,
+      perspective: parsed.data.perspective,
+      validFrom: parsed.data.validFrom ?? undefined,
+      validTo: parsed.data.validTo ?? undefined,
+      recordedAt: parsed.data.recordedAt ?? undefined,
+      supersededAt: parsed.data.supersededAt ?? undefined,
+    });
+    beliefsOfClaim.set(id, list);
+  }
+
+  const relationsOfClaim = new Map<string, string>();
+  const validRelations: RelationRow[] = [];
+  for (const row of relations) {
+    const parsed = ClaimRelationSchema.safeParse({
+      id: String(row.id ?? ""),
+      fromClaimId: String(row.fromClaimId),
+      toClaimId: String(row.toClaimId),
+      relation: row.relation,
+      supersededAt: row.supersededAt ?? null,
+    });
+    if (!parsed.success) continue;
+    const relation: RelationRow = {
+      id: parsed.data.id,
+      fromClaimId: parsed.data.fromClaimId,
+      toClaimId: parsed.data.toClaimId,
+      relation: parsed.data.relation,
+      supersededAt: parsed.data.supersededAt ?? null,
+    };
+    validRelations.push(relation);
+    if (!relation.supersededAt)
+      relationsOfClaim.set(relation.fromClaimId, relation.relation);
+  }
+
+  const parsedClaims = (claimsOverride ?? claims).map((claim) => ({
+    claim,
+    provenance: parseProvenance(claim.provenance),
+  }));
+
+  // Scope is applied first: retirement/supersession derived from a private
+  // claim must not hide a shared entity from another principal.
+  const scopedClaims = parsedClaims.filter(
+    ({ provenance }) => !scope || isClaimVisibleToScope(provenance, scope),
+  );
+  const retired = retiredEntityIds(
+    scopedClaims.map(({ claim }) => claim),
+    subjectOf,
+    validRelations,
+    scope,
+  );
+
+  const parsedClaimsByEntity = new Map<string, typeof scopedClaims>();
+  const relationByClaim = new Map(relationsOfClaim);
+  for (const entry of scopedClaims) {
+    const { claim, provenance } = entry;
     if (claim.supersededAt) continue;
     const entityId = subjectOf.get(String(claim.id));
     if (!entityId || retired.has(entityId)) continue;
-    let provenance: Json = {};
-    try {
-      provenance = JSON.parse(String(claim.provenance ?? "{}")) as Json;
-    } catch {
-      provenance = {};
-    }
-    if (provenance.verb === "RETIRED") continue;
-    if (scope && !isClaimVisibleToScope(provenance, scope)) continue;
+    if (isRetirement(provenance)) continue;
+    const supersededByRelation =
+      relationByClaim.get(String(claim.id)) === "SUPERSEDES";
+    if (supersededByRelation) continue;
     const list = parsedClaimsByEntity.get(entityId) ?? [];
-    list.push({ claim, provenance });
+    list.push(entry);
     parsedClaimsByEntity.set(entityId, list);
   }
 
@@ -413,20 +638,48 @@ export async function readCanonical(
   // Derive person fields from sourced FACT attributes in the ledger. The
   // owner's imported people carry attribute-tagged facts, not WORKS_AT claims.
   const factValue = (
-    parsed: { claim: Json; provenance: Json }[],
+    parsed: typeof scopedClaims,
     attribute: string,
   ): string => {
     const match = parsed.find(
-      ({ claim, provenance }) =>
+      ({ provenance }) =>
         provenance.verb === "FACT" &&
         provenance.attribute === attribute &&
-        Boolean(claim.statement),
+        provenance.status !== "UNVERIFIED",
     );
     return match ? String(match.claim.statement ?? "") : "";
   };
   const suffixAfter = (statement: string, marker: string): string => {
     const at = statement.toLowerCase().indexOf(marker.toLowerCase());
     return at < 0 ? "" : statement.slice(at + marker.length).trim();
+  };
+
+  // A claim is sourced only when its typed status is SOURCED and it has real
+  // evidence (a locator or content hash), or when it is a legacy sourced claim
+  // (no typed status) carrying evidence. UNVERIFIED is never sourced, and a
+  // bare locator without a SOURCED status is not enough.
+  const claimStatus = (entry: (typeof scopedClaims)[number]) => {
+    const { claim, provenance } = entry;
+    const evidence = evidenceOf.get(String(claim.id));
+    const hasEvidence = Boolean(
+      evidence?.locator || evidence?.contentHash || evidence?.quote,
+    );
+    const belief = beliefsOfClaim.get(String(claim.id)) ?? [];
+    const disbelieved = belief.some((b) => b.stance === "disbelieves");
+    const unverified =
+      provenance.status === "UNVERIFIED" ||
+      provenance.verb === "UNVERIFIED" ||
+      disbelieved;
+    const sourced =
+      !unverified &&
+      (provenance.status === "SOURCED"
+        ? hasEvidence
+        : provenance.status === undefined && hasEvidence);
+    return {
+      status: (sourced ? "sourced" : "unverified") as "sourced" | "unverified",
+      evidence,
+      belief,
+    };
   };
 
   const people: WorldPerson[] = [];
@@ -461,9 +714,13 @@ export async function readCanonical(
           ),
         )
       : 999;
-    const mappedClaims = parsed.map(({ claim }) => {
-      const evidence = evidenceOf.get(String(claim.id));
+    const mappedClaims = parsed.map((entry) => {
+      const { claim } = entry;
+      const { status, evidence, belief } = claimStatus(entry);
       const locator = evidence?.locator ?? "";
+      const confidenceSource = belief.length
+        ? Math.max(...belief.map((b) => b.confidence ?? 0))
+        : undefined;
       return {
         id: String(claim.id),
         personId,
@@ -475,10 +732,17 @@ export async function readCanonical(
           ...(locator ? { locator } : {}),
           ...(evidence?.excerpt ? { excerpt: evidence.excerpt } : {}),
         },
-        confidence: confidenceOf(confidenceOfClaim.get(String(claim.id))),
-        status: (locator ? "sourced" : "unverified") as
-          | "sourced"
-          | "unverified",
+        confidence: confidenceOf(confidenceSource),
+        status,
+        beliefs: belief.map((b) => ({
+          stance: b.stance,
+          ...(b.perspective ? { perspective: b.perspective } : {}),
+          confidence: b.confidence,
+        })),
+        ...(evidence?.contentHash ? { contentHash: evidence.contentHash } : {}),
+        ...(entry.provenance.status
+          ? { claimStatus: entry.provenance.status }
+          : {}),
       };
     });
     const sourced = mappedClaims.find((c) => c.status === "sourced");
@@ -495,6 +759,8 @@ export async function readCanonical(
     const tags = [credential, education]
       .map((value) => suffixAfter(value, ":"))
       .filter(Boolean);
+    // Never let an UNVERIFIED claim become the person's summary.
+    const summarySource = sourced?.text ?? roleSummary ?? "";
     people.push({
       id: personId,
       name: String(entity.name),
@@ -506,7 +772,7 @@ export async function readCanonical(
       warmth: warmthOf(quietDays),
       lastContact: lastContact || new Date(0).toISOString(),
       tags,
-      summary: roleSummary || sourced?.text || mappedClaims[0]?.text || "",
+      summary: summarySource,
       email,
       claims: mappedClaims,
     });
@@ -728,14 +994,30 @@ export async function readWorld(
   workspaces: { id: string; name: string }[],
   octoContainerId = workspaceId,
   role = "member",
+  asOf?: { recorded: string; valid: string | undefined },
 ): Promise<WorldShape> {
+  const asOfClaims = asOf
+    ? await readClaimsAsOf(
+        config,
+        token,
+        workspaceId,
+        asOf.recorded,
+        asOf.valid,
+      )
+    : undefined;
   const [canonical, ops, graphStale] = await Promise.all([
-    readCanonical(config, token, octoContainerId, {
-      workspaceId,
+    readCanonical(
+      config,
+      token,
       octoContainerId,
-      principalId: principal.id,
-      isContainerOwner: role === "owner" && workspaceId === octoContainerId,
-    }),
+      {
+        workspaceId,
+        octoContainerId,
+        principalId: principal.id,
+        isContainerOwner: role === "owner" && workspaceId === octoContainerId,
+      },
+      asOfClaims,
+    ),
     readOps(config, token, workspaceId, principal.id, octoContainerId),
     isGraphStale(config, token, octoContainerId),
   ]);
@@ -1239,4 +1521,28 @@ export async function patchDoc(
     octoContainerId,
   );
   return next;
+}
+
+/** Bitemporal world projection: people reflect claims as of the given instants. */
+export async function readWorldAsOf(
+  config: OctoClientConfig,
+  token: string,
+  workspaceId: string,
+  principal: { id: string; displayName: string },
+  workspaces: { id: string; name: string }[],
+  asOfRecorded: string,
+  asOfValid?: string,
+  octoContainerId = workspaceId,
+  role = "member",
+): Promise<WorldShape> {
+  return readWorld(
+    config,
+    token,
+    workspaceId,
+    principal,
+    workspaces,
+    octoContainerId,
+    role,
+    { recorded: asOfRecorded, valid: asOfValid },
+  );
 }
