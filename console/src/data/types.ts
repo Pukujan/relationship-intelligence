@@ -166,6 +166,8 @@ export interface MilestoneDesign {
   unverified: string[];
   /** For replan designs: the milestone being adjusted and how. */
   milestoneId?: string;
+  /** Legacy persisted key for the replan target; prefer milestoneId. */
+  missionId?: string;
   adjustment?: "extend" | "replan" | "escalate";
 }
 
@@ -202,6 +204,9 @@ export interface ClaimSource {
   label: string;
   kind: SourceKind;
   date: string;
+  /** Full evidence locator and verbatim excerpt, when the ledger has them. */
+  locator?: string;
+  excerpt?: string;
 }
 
 export interface Claim {
@@ -514,6 +519,8 @@ export interface World {
   mcpServers: McpServer[];
   plugins: Plugin[];
   smartLists: SmartList[];
+  /** Octo reported the graph projection stale or unreachable. */
+  graphStale?: boolean;
   generatedAt: string;
 }
 

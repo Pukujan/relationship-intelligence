@@ -127,6 +127,7 @@ export const useSpeech = () => {
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [interim, setInterim] = useState("");
+  const [level, setLevel] = useState(0);
   const [listenError, setListenError] = useState<ListenError | null>(null);
 
   useEffect(() => {
@@ -201,6 +202,7 @@ export const useSpeech = () => {
     }
     setListening(false);
     setInterim("");
+    setLevel(0);
   }, []);
 
   const listenWithGateway = useCallback(
@@ -237,6 +239,7 @@ export const useSpeech = () => {
           // ignore cleanup errors
         }
         setListening(false);
+        setLevel(0);
         if (!shouldTranscribe || chunks.length === 0) {
           setInterim("");
           return;
@@ -282,17 +285,18 @@ export const useSpeech = () => {
         let sumSq = 0;
         for (let i = 0; i < input.length; i++) sumSq += input[i] * input[i];
         const rms = Math.sqrt(sumSq / input.length);
+        setLevel(Math.min(1, rms * 10));
         const now = Date.now();
-        if (rms > 0.015) {
+        if (rms > 0.012) {
           heardSpeech = true;
           lastSpeechAt = now;
           setInterim("hearing you…");
         }
         const elapsed = now - startedAt;
         const silence = now - lastSpeechAt;
-        if ((heardSpeech && silence > 1300) || elapsed > 12_000) {
+        if ((heardSpeech && silence > 950) || elapsed > 12_000) {
           void finalize(true);
-        } else if (!heardSpeech && elapsed > 6_000) {
+        } else if (!heardSpeech && elapsed > 7_500) {
           void finalize(false);
           setListenError("no-speech");
           handlers.onError?.("no-speech");
@@ -474,6 +478,7 @@ export const useSpeech = () => {
     listening,
     speaking,
     interim,
+    level,
     listenError,
     listen,
     stopListening,

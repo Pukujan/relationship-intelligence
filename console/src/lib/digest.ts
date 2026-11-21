@@ -14,6 +14,8 @@ export interface DigestClaim {
   text: string;
   status: "sourced" | "unverified";
   source: string;
+  locator?: string;
+  excerpt?: string;
 }
 
 export interface WorldDigest {
@@ -105,6 +107,8 @@ const claimView = (world: World, personId: string): DigestClaim[] => {
     text: claim.text,
     status: claim.status,
     source: `${claim.source.label} (${claim.source.kind})`,
+    ...(claim.source.locator ? { locator: claim.source.locator } : {}),
+    ...(claim.source.excerpt ? { excerpt: claim.source.excerpt } : {}),
   }));
 };
 

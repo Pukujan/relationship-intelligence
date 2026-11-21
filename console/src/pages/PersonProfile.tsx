@@ -160,7 +160,7 @@ const PersonProfile = () => {
               variant="outline"
               size="sm"
               className="h-9 gap-1.5 rounded-lg text-[12px]"
-              onClick={() => openCopilot(`Research ${person.name} for me`)}
+              onClick={() => openCopilot(`Research ${person.name} for me`, { kind: "person", id: person.id })}
             >
               <Sparkles className="h-3.5 w-3.5 text-primary" />
               Ask Atlas
@@ -168,7 +168,7 @@ const PersonProfile = () => {
             <Button
               size="sm"
               className="h-9 gap-1.5 rounded-lg text-[12px]"
-              onClick={() => openCopilot(`Draft a note to ${person.name}`)}
+              onClick={() => openCopilot(`Draft a note to ${person.name}`, { kind: "person", id: person.id })}
             >
               <Mail className="h-3.5 w-3.5" />
               Draft follow-up
@@ -339,7 +339,7 @@ const PersonProfile = () => {
                     size="sm"
                     variant="outline"
                     className="rounded-lg"
-                    onClick={() => openCopilot(`Draft a note to ${person.name}`)}
+                    onClick={() => openCopilot(`Draft a note to ${person.name}`, { kind: "person", id: person.id })}
                   >
                     Draft the first note
                   </Button>
@@ -405,7 +405,7 @@ const PersonProfile = () => {
                   size="sm"
                   variant="outline"
                   className="mt-2 h-7 rounded-md px-2 text-[11px]"
-                  onClick={() => openCopilot(`Draft a note to ${person.name}`)}
+                  onClick={() => openCopilot(`Draft a note to ${person.name}`, { kind: "person", id: person.id })}
                 >
                   <Sparkles className="h-3 w-3 text-primary" />
                   Draft the next touch

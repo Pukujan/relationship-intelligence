@@ -18,6 +18,7 @@ import { turnMachine } from "../src/machines/turnMachine.ts";
 import { fillInMachine } from "../src/machines/fillInMachine.ts";
 import { milestoneMachine, approvalMachine } from "../src/machines/workMachines.ts";
 import { isConversationOver, parseVoiceCommand, resolveConfirmation } from "../src/lib/voiceCommands.ts";
+import { resolveThreadEntry } from "../src/lib/threadEntry.ts";
 import { allowed, askWithFailover, authHeaders, parseChain, parseModelJson } from "../server/providers.ts";
 
 let failures = 0;
@@ -406,6 +407,37 @@ await check("voice: a short sign-off ends a conversation, a question does not", 
   for (const heard of ["", "who should I thank this week", "stopwatch", "what stops the Halcyon renewal from closing this month"]) {
     assert.equal(isConversationOver(heard), false, heard);
   }
+});
+
+/* ---------------------------------------------------------------- */
+/* threadEntry                                                       */
+/* ---------------------------------------------------------------- */
+
+await check("thread: a seeded arrival opens a fresh draft, never the active thread", () => {
+  const entry = resolveThreadEntry({ seed: "Draft a note to Ronald Rosales" }, ["t-old", "t-older"]);
+  assert.equal(entry.draft, true);
+  assert.equal(entry.activeId, null);
+  assert.equal(entry.seed, "Draft a note to Ronald Rosales");
+});
+
+await check("thread: a seeded scope pins the new thread", () => {
+  const entry = resolveThreadEntry({ seed: "Research X", scope: { kind: "person", id: "p-1" } }, ["t-old"]);
+  assert.deepEqual(entry.scope, { kind: "person", id: "p-1" });
+  assert.equal(entry.draft, true);
+});
+
+await check("thread: an unseeded arrival resumes the newest open thread", () => {
+  const entry = resolveThreadEntry(null, ["t-new", "t-old"]);
+  assert.equal(entry.draft, false);
+  assert.equal(entry.activeId, "t-new");
+  assert.deepEqual(entry.scope, { kind: "workspace", id: null });
+});
+
+await check("thread: an unseeded arrival with no threads stays blank", () => {
+  const entry = resolveThreadEntry(null, []);
+  assert.equal(entry.activeId, null);
+  assert.equal(entry.draft, false);
+  assert.equal(entry.seed, "");
 });
 
 if (failures > 0) {

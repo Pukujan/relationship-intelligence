@@ -37,9 +37,61 @@ export const companyById = (world: World, id?: string) =>
 export const eventById = (world: World, id?: string) =>
   byId(world.events, id);
 
-export const pendingApprovals = (world: World): Approval[] =>
+/**
+ * The project a decision belongs to, when the world can attribute it:
+ * replan/milestone designs carry a milestone, project, or objective id; otherwise
+ * the referenced event, person, or company ties it to a project roster; last,
+ * an agent whose milestones all live in one project. `null` means the decision
+ * is workspace-level — it shows in the "all" scope, never inside a project.
+ */
+export const approvalProjectId = (
+  world: World,
+  approval: Approval,
+): string | null => {
+  const design = approval.design;
+  const replanTarget = design?.milestoneId ?? design?.missionId;
+  if (replanTarget) {
+    const milestone = milestoneById(world, replanTarget);
+    if (milestone) return milestone.projectId;
+  }
+  if (design?.projectId) return design.projectId;
+  if (design?.objectiveId) {
+    const objective = byId(world.objectives, design.objectiveId);
+    if (objective) return objective.projectId;
+  }
+  const { eventId, personId, companyId } = approval;
+  if (eventId) {
+    const project = world.projects.find((item) => item.eventIds.includes(eventId));
+    if (project) return project.id;
+  }
+  if (personId) {
+    const project = world.projects.find((item) => item.personIds.includes(personId));
+    if (project) return project.id;
+  }
+  if (companyId) {
+    const project = world.projects.find((item) =>
+      item.companyIds.includes(companyId),
+    );
+    if (project) return project.id;
+  }
+  const agentProjects = new Set(
+    world.milestones
+      .filter((milestone) => milestone.agentIds.includes(approval.agentId))
+      .map((milestone) => milestone.projectId),
+  );
+  return agentProjects.size === 1 ? ([...agentProjects][0] ?? null) : null;
+};
+
+/** Pending decisions, optionally narrowed to one project's scope. */
+export const pendingApprovals = (world: World, projectId?: string): Approval[] =>
   world.approvals
     .filter((approval) => approval.status === "pending")
+    .filter(
+      (approval) =>
+        !projectId ||
+        projectId === "all" ||
+        approvalProjectId(world, approval) === projectId,
+    )
     .sort(
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -335,9 +387,13 @@ export const peopleForSmartList = (world: World, list: SmartList) =>
     })
     .sort((a, b) => b.strength - a.strength);
 
-export const goingCold = (world: World) => {
+export const goingCold = (world: World, projectId?: string) => {
   const list = world.smartLists.find((item) => item.id === "sl1");
-  return list ? peopleForSmartList(world, list) : [];
+  const people = list ? peopleForSmartList(world, list) : [];
+  if (!projectId || projectId === "all") return people;
+  const project = byId(world.projects, projectId);
+  if (!project) return people;
+  return people.filter((person) => project.personIds.includes(person.id));
 };
 
 /* ------------------------------------------------------------------ */

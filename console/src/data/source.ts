@@ -283,7 +283,9 @@ export const applyApprovedDesign = (
     };
   }
 
-  const milestone = world.milestones.find((item) => item.id === design.milestoneId);
+  const milestone = world.milestones.find(
+    (item) => item.id === (design.milestoneId ?? design.missionId),
+  );
   if (!milestone) {
     return {
       summary: "The milestone this replan targeted no longer exists; nothing changed.",
