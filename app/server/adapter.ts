@@ -31,7 +31,7 @@ import {
   listUserConnectors,
   saveUserConnector,
 } from "./connectors.js";
-import { proxyCopilot } from "./copilotProxy.js";
+import { handleRagQuery, proxyCopilot } from "./copilotProxy.js";
 import { type Env, readEnv } from "./env.js";
 import { fetchPrincipal, OctoError } from "./octo.js";
 import { handleProfileRoutes } from "./profile.js";
@@ -124,6 +124,15 @@ export async function handleRequest(
 
   if (path === "/app-api/health") {
     sendJson(res, 200, { status: "ok" });
+    return;
+  }
+
+  // RAG stays behind the signed-in adapter. The copilot server holds no Octo
+  // key; it calls this route with the short-lived capability minted for its
+  // request by proxyCopilot (see copilotProxy.ts). Handle it before the /api
+  // proxy so /app-api/rag/query never reaches the loopback copilot server.
+  if (path === "/app-api/rag/query") {
+    await handleRagQuery(req, res, env, url);
     return;
   }
 

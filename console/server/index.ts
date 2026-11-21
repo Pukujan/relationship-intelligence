@@ -14,7 +14,7 @@
 import { createServer } from "node:http";
 import { z } from "zod";
 import { endSpan, recordEvals, startSpan } from "./telemetry.ts";
-import { queryRag, ragPromptBlock } from "./rag.ts";
+import { queryRag, ragPromptBlock, ragTransportStorage } from "./rag.ts";
 import { webSearch, webPromptBlock } from "./web.ts";
 import { PartSchema, sanitizeArtifactHtml } from "../src/data/sessionTypes.ts";
 import {
@@ -817,7 +817,22 @@ const readBody = async (req: import("node:http").IncomingMessage) => {
   return text ? JSON.parse(text) : {};
 };
 
-const server = createServer(async (req, res) => {
+const server = createServer((req, res) => {
+  // RAG transport is per request: the adapter mints a short-lived capability
+  // and forwards it to this loopback server with the proxied /api/* call.
+  // queryRag() reads it through ALS without changing its signature.
+  const capability = req.headers["x-ri-rag-capability-forward"];
+  const transport =
+    typeof capability === "string" && capability
+      ? {
+          adapterBaseUrl:
+            process.env.APP_ADAPTER_URL ??
+            process.env.APP_ORIGIN ??
+            "http://127.0.0.1:8787",
+          capability,
+        }
+      : undefined;
+  const handle = async () => {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const started = Date.now();
   const finish = (status: number, detail: string) => {
@@ -983,6 +998,8 @@ const server = createServer(async (req, res) => {
     json(res, status, { error: "copilot_unavailable", detail: message });
     finish(status, message);
   }
+  };
+  void ragTransportStorage.run(transport ?? null, handle);
 });
 
 server.listen(PORT, "127.0.0.1", () => {

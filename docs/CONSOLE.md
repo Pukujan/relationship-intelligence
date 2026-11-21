@@ -164,9 +164,13 @@ evidence locators) from the canonical ledger into Octo RAG; the copilot's
 and the production entry point passes the Octo credentials to the copilot server.
 Graph health is checked on each world read and staleness is surfaced in the UI.
 
+Raw source bytes can be uploaded to Octo Files with `scripts/seed_files.py`
+(idempotent by content hash) once a connector's raw capture directory exists;
+no source bytes are bundled in the repository.
+
 Next, in order: (1) real voice/phone via Riley; (2) production static serving of
 the console under the app origin and the private→shared promotion flow; (3) the
-identity review and graph-exploration slices from the program; (4) moving the
-RAG query behind the signed-in adapter (today the copilot's RAG call uses the
-workspace key) and adding raw source bytes to Octo Files. Each lands as its own
+identity review and graph-exploration slices from the program; (4) typed claim
+relations and identity resolution in the reader/writer, bitemporal as-of views,
+and moving the RAG query behind the signed-in adapter. Each lands as its own
 accepted slice with real user-flow verification.
