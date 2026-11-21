@@ -442,6 +442,29 @@ Blocked/uncertain:
 Next:
 - Owner links WhatsApp once by QR; then Discord.
 
+### 2026-11-21 20:13:22 UTC — agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/38eb6f3f-eb00-4433-b67c-ac4b43b060d1","blocked":[],"changed":["collector/src/discord.ts and discordMap.ts, discord service and run-discord.sh in deploy/crawler"],"completed":["Discord DMs couldn't reach the app. A Discord reader now runs in the VPS stack behind the home address, completing the four DM sources the owner asked for (LinkedIn, Telegram, WhatsApp, Discord)."],"decisions":["no new decisions"],"evidence":["Collector types and 29 tests pass (4 new for Discord mapping); all wrapper scripts pass a syntax check; app and console tests still pass. None of the four readers has run against a real account yet."],"evidence_class":"observed","next_action":"Owner starts the VPS stack, sets the tokens, links Telegram and WhatsApp, and checks one contact's event log; then close #120.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T20:13:22Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"c853aee3bf4ced7e701ee8d02e86c0a28a03e235d34063b4e829e7636927420b","request_id":"0300264ce60f493782f2311d58b3a032","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- Discord DMs couldn't reach the app. A Discord reader now runs in the VPS stack behind the home address, completing the four DM sources the owner asked for (LinkedIn, Telegram, WhatsApp, Discord).
+
+Evidence:
+- Collector types and 29 tests pass (4 new for Discord mapping); all wrapper scripts pass a syntax check; app and console tests still pass. None of the four readers has run against a real account yet.
+
+Decisions:
+- no new decisions
+
+Changed:
+- collector/src/discord.ts and discordMap.ts, discord service and run-discord.sh in deploy/crawler
+
+Blocked/uncertain:
+- none
+
+Next:
+- Owner starts the VPS stack, sets the tokens, links Telegram and WhatsApp, and checks one contact's event log; then close #120.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.
