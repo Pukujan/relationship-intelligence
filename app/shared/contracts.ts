@@ -73,6 +73,8 @@ export const CollectionPlanSchema = z.object({
 
 export type CollectionPlan = z.infer<typeof CollectionPlanSchema>;
 
+export * from "./connectorContracts.js";
+
 /* ------------------------------------------------------------------ */
 /* Octo epistemic data contracts (PROJECT.md canonical ledger)         */
 /* ------------------------------------------------------------------ */

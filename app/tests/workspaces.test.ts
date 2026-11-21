@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  buildGoogleConnectorAuthUrl,
-  buildZoomConnectorAuthUrl,
-} from "../server/connectors.js";
+import { buildGoogleConnectorAuthUrl } from "../server/connectors.js";
 import type { Env } from "../server/env.js";
+import { buildProviderAuthUrl } from "../server/oauthProviders.js";
 import { matchConnectorRoute, syncUserConnector } from "../server/sync.js";
 import {
   encodeOtlpTraceProtobuf,
@@ -29,6 +27,7 @@ const baseEnv: Env = {
   OCTO_API_KEY: "octo_live_ws_ownerkey",
   OCTO_WORKSPACE_ID: WS_ID,
   SESSION_PASSWORD: "0123456789abcdef0123456789abcdef",
+  RI_RUNNER_ONLINE_WINDOW_MS: 90000,
   GOOGLE_CLIENT_ID: "google-client-id",
   GOOGLE_CLIENT_SECRET: "google-client-secret",
   ZOOM_CLIENT_ID: "zoom-client-id",
@@ -266,7 +265,7 @@ describe("user connectors OAuth URLs & sync workers (RI-0019)", () => {
   });
 
   it("builds Zoom OAuth authorize URL when ZOOM_CLIENT_ID/SECRET are set", () => {
-    const zoomUrl = buildZoomConnectorAuthUrl(baseEnv, "zstate");
+    const zoomUrl = buildProviderAuthUrl(baseEnv, "zoom", "zstate");
     expect(zoomUrl).toContain("https://zoom.us/oauth/authorize");
     expect(zoomUrl).toContain("state=zstate");
   });
@@ -341,6 +340,11 @@ describe("user connectors OAuth URLs & sync workers (RI-0019)", () => {
               { status: 200 },
             );
           }
+          if (sql.includes("FROM ri_console.workspace_member")) {
+            return new Response(JSON.stringify({ rows: [{ ok: 1 }] }), {
+              status: 200,
+            });
+          }
           if (sql.includes("FROM ri_console.connector_route")) {
             return new Response(
               JSON.stringify({
@@ -403,7 +407,7 @@ describe("user connectors OAuth URLs & sync workers (RI-0019)", () => {
       if (res.ok) {
         expect(res.syncedCount).toBe(1);
         expect(res.routedWorkspaces).toEqual(["ws-db"]);
-        expect(res.items[0]?.id).toBe("sync-gmail-msg-101");
+        expect(res.items[0]?.id).toBe(`sync-${NEW_PID}-gmail-msg-101`);
       }
       expect(
         sqlLog.some((q) => q.includes("INSERT INTO ri_console.activity")),

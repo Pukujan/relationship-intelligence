@@ -20,6 +20,7 @@ import {
   OctoError,
 } from "./octo.js";
 import { type AppSession, isIdleExpired, readSession } from "./session.js";
+import { lit } from "./sql.js";
 import { octoSql } from "./world.js";
 
 export type WorkspaceRole = "owner" | "admin" | "operator" | "member";
@@ -30,8 +31,6 @@ const ROLE_RANK: Record<WorkspaceRole, number> = {
   operator: 2,
   member: 1,
 };
-
-const lit = (value: unknown) => `'${String(value).replace(/'/g, "''")}'`;
 
 export function normalizeRole(raw: unknown): WorkspaceRole | null {
   if (typeof raw !== "string") return null;

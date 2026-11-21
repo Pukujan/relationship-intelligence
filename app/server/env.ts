@@ -17,6 +17,20 @@ const EnvSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   ZOOM_CLIENT_ID: z.string().optional(),
   ZOOM_CLIENT_SECRET: z.string().optional(),
+  SLACK_CLIENT_ID: z.string().optional(),
+  SLACK_CLIENT_SECRET: z.string().optional(),
+  CALENDLY_CLIENT_ID: z.string().optional(),
+  CALENDLY_CLIENT_SECRET: z.string().optional(),
+  DISCORD_CLIENT_ID: z.string().optional(),
+  DISCORD_CLIENT_SECRET: z.string().optional(),
+  // Test hooks (RI-0021 R21): honored only outside production.
+  RI_OAUTH_ENDPOINTS_JSON: z.string().optional(),
+  RI_RUNNER_ONLINE_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .min(100)
+    .max(600_000)
+    .default(90_000),
   PHOENIX_COLLECTOR_ENDPOINT: z.string().url().optional(),
   PHOENIX_UI_URL: z.string().url().optional(),
   PHOENIX_PROJECT_NAME: z.string().optional(),

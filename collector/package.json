@@ -1,1 +1,25 @@
-{"dependencies":{"patchright":"^1.64.3","playwright":"^1.56.0"},"devDependencies":{"@types/node":"^24.0.0","tsx":"^4.23.15","typescript":"^5.9.0"},"name":"ri-collector-proof","private":true,"scripts":{"check":"tsx src/proof.ts check","fetch":"tsx src/proof.ts fetch","signin":"tsx src/proof.ts signin","typecheck":"tsc --noEmit"},"type":"module","version":"0.0.0"}
+{
+  "name": "ri-collector-proof",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "daemon": "tsx src/daemon.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "tsx src/proof.ts check",
+    "fetch": "tsx src/proof.ts fetch",
+    "signin": "tsx src/proof.ts signin"
+  },
+  "dependencies": {
+    "patchright": "^1.64.3",
+    "playwright": "^1.56.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.0",
+    "vitest": "^5.1.1"
+  }
+}
