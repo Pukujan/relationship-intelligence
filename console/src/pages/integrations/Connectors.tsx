@@ -37,7 +37,7 @@ import {
   CONNECTOR_CRED_PREFIX,
   deriveConnectorChip,
   type UserConnectorView,
-} from "../../../../app/shared/contracts";
+} from "../../../../app/shared/connectorContracts";
 import { RunnerSetupDialog } from "@/components/integrations/RunnerSetupDialog";
 
 type UserConnectorItem = UserConnectorView;
