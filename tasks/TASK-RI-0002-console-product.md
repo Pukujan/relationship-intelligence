@@ -235,6 +235,29 @@ Blocked/uncertain:
 Next:
 - Open the pull request for #93 and let CI run; after merge, check a contact page on the deployed console.
 
+### 2026-11-21 02:01:59 UTC — agent:claude-code/0c5c33f5-0cd5-4a9f-8fb4-b82c04581d93
+
+<!-- continuity:checkpoint {"agent":"agent:claude-code/0c5c33f5-0cd5-4a9f-8fb4-b82c04581d93","blocked":[],"changed":["console/src/lib/landing.ts (new) picks the first screen; console/src/App.tsx root route and console/src/pages/SignIn.tsx redirect both use it; console/scripts/test-machines.mjs pins both answers"],"completed":["The console opens on the copilot chat after the owner signs in (#96). A signed-in owner who opens the console root or comes back from sign-in lands on /copilot; Today keeps its address and sidebar place, and the demo workspace still opens on Today."],"decisions":["Guests keep Today as their front page, as the brief allowed; only owner sessions land on the chat."],"evidence":["In a local Chromium with the adapter's session answer stubbed as a signed-in owner, /console/ and /console/signin both land on /console/copilot with the chat composer showing, and the sidebar opens Today, Approvals, People, Voice and Copilot with no page errors. Guest sign-in in the browser pane still lands on /console/today. Console typecheck, lint (0 errors), machine tests (2 new landing tests), orphan check and build pass. A real Google sign-in was not run: it needs the owner's own consent."],"next_action":"Open the pull request for #96 and let CI run; after merge, the owner signs in on the deployed console and should land on the chat.","protocol_version":"0.1.0-draft","schema":"project-continuity.checkpoint.v1","task_id":"RI-0002","timestamp":"2026-11-21T02:01:59Z"} -->
+<!-- continuity:checkpoint-operation {"payload_sha256":"6bcfee51b4ba3ef4b560bf636376bdfba10163bdf597202f073794a199ebb741","request_id":"efd2900efbd7446e9e371cbf34da4faa","schema":"project-continuity.checkpoint-operation.v1","task_id":"RI-0002"} -->
+
+Completed:
+- The console opens on the copilot chat after the owner signs in (#96). A signed-in owner who opens the console root or comes back from sign-in lands on /copilot; Today keeps its address and sidebar place, and the demo workspace still opens on Today.
+
+Evidence:
+- In a local Chromium with the adapter's session answer stubbed as a signed-in owner, /console/ and /console/signin both land on /console/copilot with the chat composer showing, and the sidebar opens Today, Approvals, People, Voice and Copilot with no page errors. Guest sign-in in the browser pane still lands on /console/today. Console typecheck, lint (0 errors), machine tests (2 new landing tests), orphan check and build pass. A real Google sign-in was not run: it needs the owner's own consent.
+
+Decisions:
+- Guests keep Today as their front page, as the brief allowed; only owner sessions land on the chat.
+
+Changed:
+- console/src/lib/landing.ts (new) picks the first screen; console/src/App.tsx root route and console/src/pages/SignIn.tsx redirect both use it; console/scripts/test-machines.mjs pins both answers
+
+Blocked/uncertain:
+- none
+
+Next:
+- Open the pull request for #96 and let CI run; after merge, the owner signs in on the deployed console and should land on the chat.
+
 ## Handoff
 
 Read PROJECT → CURRENT → this task → minimum relevant spec. Checkpoint before stopping.

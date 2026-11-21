@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useData } from "@/data/store";
+import { landingPath } from "@/lib/landing";
 import { Button } from "@/components/ui/button";
 
 const GoogleMark = () => (
@@ -62,7 +63,7 @@ const SignIn = () => {
   const [error, setError] = useState<string | null>(null);
 
   if (session) {
-    return <Navigate to="/today" replace />;
+    return <Navigate to={landingPath(session.mode)} replace />;
   }
 
   const enter = async (mode: "google" | "guest") => {
@@ -79,7 +80,7 @@ const SignIn = () => {
               : "Your Octo workspaces loaded.",
         },
       );
-      navigate("/today", { replace: true });
+      navigate(landingPath(next.mode), { replace: true });
     } catch (cause) {
       setError(
         cause instanceof Error
