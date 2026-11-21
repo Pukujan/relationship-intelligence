@@ -389,7 +389,7 @@ const People = () => {
                         : "border-border/60 bg-card/50 hover:border-border hover:bg-surface-2/30",
                     )}
                   >
-                    <PersonAvatar name={person.name} size="md" />
+                    <PersonAvatar name={person.name} imageUrl={person.avatarUrl} size="md" />
                     <div className="min-w-0 flex-1">
                       <p className="flex items-center gap-1.5 truncate text-[13px] font-medium">
                         {person.name}
@@ -579,6 +579,7 @@ const People = () => {
                       >
                         <PersonAvatar
                           name={person.name}
+                          imageUrl={person.avatarUrl}
                           size="sm"
                           className="ring-2 ring-card"
                         />

@@ -290,11 +290,28 @@ const PersonProfile = () => {
               }}
             />
             <div className="px-5 pb-5 sm:px-6 sm:pb-6">
-              <PersonAvatar
-                name={person.name}
-                size="lg"
-                className="-mt-12 h-24 w-24 border-4 border-card text-2xl sm:-mt-16 sm:h-32 sm:w-32 sm:text-3xl"
-              />
+              {person.avatarUrl ? (
+                <a
+                  href={person.avatarUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="focus-ring inline-block"
+                  aria-label={`Open ${person.name}'s profile photo`}
+                >
+                  <PersonAvatar
+                    name={person.name}
+                    imageUrl={person.avatarUrl}
+                    size="lg"
+                    className="-mt-12 h-24 w-24 border-4 border-card text-2xl sm:-mt-16 sm:h-32 sm:w-32 sm:text-3xl"
+                  />
+                </a>
+              ) : (
+                <PersonAvatar
+                  name={person.name}
+                  size="lg"
+                  className="-mt-12 h-24 w-24 border-4 border-card text-2xl sm:-mt-16 sm:h-32 sm:w-32 sm:text-3xl"
+                />
+              )}
               <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <h1 className="text-[22px] font-semibold leading-tight tracking-[-0.01em] sm:text-[26px]">
